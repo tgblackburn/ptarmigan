@@ -12,14 +12,14 @@ mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
-mod hgram;
 mod special_functions;
+mod output;
 
 use constants::*;
 use field::*;
 use geometry::*;
-use hgram::*;
 use particle::*;
+use output::*;
 
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Shower {
     let mut primary = incident;
@@ -65,6 +65,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let gamma = 1000.0;
     let radius = 1.0e-6;
 
+    let ospec = "angle_x:angle_y,p_perp";
+    let ospec: Vec<DistributionFunction> = ospec
+        .split(',')
+        .map(|s| s.parse::<DistributionFunction>().unwrap())
+        .collect();
+
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
 
     let primaries: Vec<Particle> = (0..num).into_iter()
@@ -97,25 +103,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("e.len = {}, ph.len = {}", electrons.len(), photons.len());
 
-    let angle_x = |pt: &Particle| {let p = pt.momentum(); p[1].atan2(-p[3])};
-    let angle_y = |pt: &Particle| {let p = pt.momentum(); p[2].atan2(-p[3])};
-    let unit_weight = |_pt: &Particle| 1.0;
+    for dstr in &ospec {
+        dstr.write(&world, &electrons, "output/electron")?;
+        dstr.write(&world, &photons, "output/photon")?;
+    }
 
-    let angle = Histogram::generate_2d(
-        &world,
-        &electrons,
-        &angle_x,
-        &angle_y,
-        &unit_weight,
-        ["angle_x", "angle_y"],
-        ["rad", "rad"],
-        [BinSpec::Automatic; 2],
-        HeightSpec::Density
-    );
-
-    angle.unwrap().write("!output/angle.fits")?;
-
-    //let sci = 70.69 * (consts::PI / (16.0 * consts::LN_2)).sqrt();
-    //let expected = a0.powi(2) * sci * r0[1] * wavelength * (-2.0 * r0[1].powi(2) / waist.powi(2)).exp() / (2.0 * consts::PI * u0[3].powi(2) * waist.powi(2));
     Ok(())
 }

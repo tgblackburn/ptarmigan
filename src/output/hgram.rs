@@ -406,7 +406,7 @@ impl Histogram {
             data_type: ImageType::Double,
             dimensions: &self.bins[..],
         };
-        let filename = format!("{}.fits", filename);
+        let filename = format!("!{}.fits", filename);
         let mut file = FitsFile::create(filename).with_custom_primary(&desc).open()?;
         let hdu = file.hdu(0)?;
 
