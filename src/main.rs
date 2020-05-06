@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         HeightSpec::Density
     );
 
-    angle.unwrap().write_fits("!output/angle.fits")?;
+    angle.unwrap().write("!output/angle.fits")?;
 
     //let sci = 70.69 * (consts::PI / (16.0 * consts::LN_2)).sqrt();
     //let expected = a0.powi(2) * sci * r0[1] * wavelength * (-2.0 * r0[1].powi(2) / waist.powi(2)).exp() / (2.0 * consts::PI * u0[3].powi(2) * waist.powi(2));
