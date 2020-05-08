@@ -127,6 +127,16 @@ impl FromStr for DistributionFunction {
                 }})
             .collect();
 
+        let names: Vec<Option<&str>> = ss
+            .iter()
+            .map(|&s| {
+                match s {
+                    "p^-" | "p-" => Some("p_minus"),
+                    "p^+" | "p+" => Some("p_plus"),
+                    _ => Some(s),
+            }})
+            .collect();
+
         let weight_function = match weight {
             "energy" => Some(Box::new(energy) as ParticleOutput),
             "weight" | "auto" => Some(Box::new(unit_weight) as ParticleOutput),
@@ -139,7 +149,7 @@ impl FromStr for DistributionFunction {
                 dim: funcs.len(),
                 bspec: bspec,
                 hspec: hspec,
-                names: ss.into_iter().map(|u| u.to_owned()).collect(),
+                names: names.into_iter().map(|u| u.unwrap().to_owned()).collect(),
                 units: units.into_iter().map(|u| u.unwrap().to_owned()).collect(),
                 weight: weight.to_owned(),
                 fweight: weight_function.unwrap(),

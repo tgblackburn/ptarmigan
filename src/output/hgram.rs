@@ -441,8 +441,41 @@ impl Histogram {
     #[cfg(not(feature = "fits-output"))]
     pub fn write(&self, filename: &str) -> std::io::Result<()> {
         use std::fs::File;
+        use std::io::Write;
+
         let filename = format!("{}.dat", filename);
         let mut file = File::create(filename)?;
+
+        let mut axes = self.axis.join("\t");
+        axes.push('\t');
+        axes.push_str(&self.name);
+
+        let mut units = self.unit.join("\t");
+        units.push('\t');
+        units.push_str(&self.bunit);
+
+        writeln!(file, "{}", axes)?;
+        writeln!(file, "{}", units)?;
+
+        let mut index = vec![0usize; self.dim];
+        let mut coord = vec![0.0; self.dim];
+        for ct in self.cts.iter() {
+            for j in 0..(self.dim-1) {
+                if index[j] >= self.bins[j] {
+                    index[j] -= self.bins[j];
+                    index[j+1] += 1;
+                }
+            }
+            for j in 0..self.dim {
+                coord[j] = self.min[j] + (0.5 + (index[j] as f64)) * self.bin_sz[j];
+            }
+            for j in 0..self.dim {
+                write!(file, "{:.9e}\t", coord[j])?;
+            }
+            writeln!(file, "{:.9e}", ct)?;
+            index[0] += 1;
+        }
+        
         Ok(())
     }
 }
