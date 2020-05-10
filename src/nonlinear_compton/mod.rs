@@ -18,7 +18,7 @@ mod total;
 pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
     let a = (q * q - 1.0).sqrt();
     let eta = k * q;
-    let dphi = dt * ELECTRON_MASS_MEV * eta / q[0];
+    let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
     if eta >= 0.25 {
         return None;

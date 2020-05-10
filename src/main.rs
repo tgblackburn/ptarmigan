@@ -27,7 +27,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Show
     let dt = field.max_timestep().unwrap_or(1.0);
 
     while field.contains(primary.position()) {
-        let (r, u) = field.push(
+        let (r, mut u) = field.push(
             primary.position(), 
             primary.normalized_momentum(),
             primary.charge_to_mass_ratio(),
@@ -38,6 +38,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Show
             let photon = Particle::create(Species::Photon, r)
                 .with_normalized_momentum(k);
             secondaries.push(photon);
+            u = u - k;
         }
 
         primary.with_position(r);
@@ -56,17 +57,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let id = world.rank();
     let numtasks = world.size();
 
-    let a0 = 100.0;
+    let a0 = 1.0;
     let wavelength = 0.8e-6;
     let waist = 4.0e-6;
     let duration = 30.0e-15;
     let pol = Polarization::Linear;
-    let num: i32 = 100_000;
-    let gamma = 1000.0;
+    let num: i32 = 2_000_000;
+    let gamma = 10_000.0;
     let sigma = 1.0;
     let radius = 1.0e-6;
 
-    let ospec = "angle_x:angle_y,p^-:p_perp";
+    let ospec = "angle_x:angle_y,p^-:p_perp,p^-";
     let ospec: Vec<DistributionFunction> = ospec
         .split(',')
         .map(|s| s.parse::<DistributionFunction>().unwrap())
@@ -81,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let y = radius * rng.sample::<f64,_>(StandardNormal);
             let r = FourVector::new(-z, x, y, z);
             let u = -(gamma * gamma - 1.0f64).sqrt();
-            let u = u + rng.sample::<f64,_>(StandardNormal);
+            let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
             let u = FourVector::new(0.0, 0.0, 0.0, u).unitize();
             Particle::create(Species::Electron, r)
                 .with_normalized_momentum(u)
