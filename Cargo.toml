@@ -15,4 +15,8 @@ rand_distr = "0.2"
 meval = "0.2.0"
 yaml-rust = "0.4"
 num = "0.2"
-fitsio = "0.15"
+fitsio = {version = "0.15", optional = true}
+
+[features]
+default = []
+fits-output = ["fitsio"]

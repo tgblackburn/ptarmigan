@@ -3,6 +3,8 @@
 use std::fmt;
 use mpi::traits::*;
 use mpi::collective::SystemOperation;
+
+#[cfg(feature = "fits-output")]
 use fitsio::*;
 
 #[derive(Copy,Clone,PartialEq)]
@@ -165,6 +167,7 @@ fn bin_size_and_volume(dim: usize, min: &[f64], max: &[f64], nbins: &[usize], bs
 }
 
 impl Histogram {
+    #[allow(unused)]
     pub fn generate_1d<T>(
         comm: &impl Communicator,
         base: &[T], accessor: &impl Fn(&T) -> f64, weight: &impl Fn(&T) -> f64,
@@ -392,12 +395,18 @@ impl Histogram {
         })
     }
 
-    pub fn write_fits(&self, filename: &str) -> Result<(),errors::Error> {
+    /// Writes the histogram to file.
+    /// The format of that file will be FITS if the "fits-output"
+    /// feature is enabled, otherwise it will be plain-text data.
+    /// The relevant extension is added to `filename`.
+    #[cfg(feature = "fits-output")]
+    pub fn write(&self, filename: &str) -> Result<(),errors::Error> {
         use fitsio::images::{ImageDescription, ImageType};
         let desc = ImageDescription {
             data_type: ImageType::Double,
             dimensions: &self.bins[..],
         };
+        let filename = format!("!{}.fits", filename);
         let mut file = FitsFile::create(filename).with_custom_primary(&desc).open()?;
         let hdu = file.hdu(0)?;
 
@@ -422,6 +431,51 @@ impl Histogram {
         //Write data
         hdu.write_image(&mut file, &self.cts[..])?;
 
+        Ok(())
+    }
+
+    /// Writes the histogram to file.
+    /// The format of that file will be FITS if the "fits-output"
+    /// feature is enabled, otherwise it will be plain-text data.
+    /// The relevant extension is added to `filename`.
+    #[cfg(not(feature = "fits-output"))]
+    pub fn write(&self, filename: &str) -> std::io::Result<()> {
+        use std::fs::File;
+        use std::io::Write;
+
+        let filename = format!("{}.dat", filename);
+        let mut file = File::create(filename)?;
+
+        let mut axes = self.axis.join("\t");
+        axes.push('\t');
+        axes.push_str(&self.name);
+
+        let mut units = self.unit.join("\t");
+        units.push('\t');
+        units.push_str(&self.bunit);
+
+        writeln!(file, "{}", axes)?;
+        writeln!(file, "{}", units)?;
+
+        let mut index = vec![0usize; self.dim];
+        let mut coord = vec![0.0; self.dim];
+        for ct in self.cts.iter() {
+            for j in 0..(self.dim-1) {
+                if index[j] >= self.bins[j] {
+                    index[j] -= self.bins[j];
+                    index[j+1] += 1;
+                }
+            }
+            for j in 0..self.dim {
+                coord[j] = self.min[j] + (0.5 + (index[j] as f64)) * self.bin_sz[j];
+            }
+            for j in 0..self.dim {
+                write!(file, "{:.9e}\t", coord[j])?;
+            }
+            writeln!(file, "{:.9e}", ct)?;
+            index[0] += 1;
+        }
+        
         Ok(())
     }
 }
@@ -454,7 +508,7 @@ mod tests {
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
-        let status = hgram.write_fits("!output/single_point.fits");
+        let status = hgram.write("!output/single_point");
         println!("status = {:?}", status);
         assert!(status.is_ok());
     }
@@ -480,7 +534,7 @@ mod tests {
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
-        let status = hgram.write_fits("!output/single_point_log.fits");
+        let status = hgram.write("!output/single_point_log");
         println!("status = {:?}", status);
         assert!(status.is_ok());
     }
