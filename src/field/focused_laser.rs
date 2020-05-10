@@ -139,7 +139,7 @@ impl Field for FocusedLaser {
         let prob = nonlinear_compton::probability(self.wavevector, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
             let (_n, k) = nonlinear_compton::generate(self.wavevector, u, rng, None);
-            None
+            Some(k)
         } else {
             None
         }
