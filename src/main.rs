@@ -65,6 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let gamma = 1000.0;
     let sigma = 1.0;
     let radius = 1.0e-6;
+    let focusing = true;
 
     let ospec = "angle_x:angle_y,p^-:p_perp";
     let ospec: Vec<DistributionFunction> = ospec
@@ -89,19 +90,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .collect();
 
-    let laser = FocusedLaser::new(a0, wavelength, waist, duration, pol);
+    let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
+        p.push(sh.primary);
+        s.append(&mut sh.secondaries);
+        (p, s)
+    };
 
-    let (electrons, photons) = primaries.iter()
-        .map(|pt: &Particle| -> Shower {
-            collide(&laser, *pt, &mut rng)
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |(mut p, mut s), mut shower| {
-                p.push(shower.primary);
-                s.append(&mut shower.secondaries);
-                (p, s)
-        });
+    let electrons: Vec<Particle> = Vec::new();
+    let photons: Vec<Particle> = Vec::new();
+
+    let (electrons, photons) = if focusing {
+        let laser = FocusedLaser::new(a0, wavelength, waist, duration, pol);
+        primaries
+            .iter()
+            .map(|pt| collide(&laser, *pt, &mut rng))
+            .fold((electrons, photons), merge)
+    } else {
+        let laser = PlaneWave::new(a0, wavelength, 4.0, pol);
+        primaries
+            .iter()
+            .map(|pt| collide(&laser, *pt, &mut rng))
+            .fold((electrons, photons), merge)
+    };
 
     println!("e.len = {}, ph.len = {}", electrons.len(), photons.len());
 
