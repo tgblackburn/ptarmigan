@@ -180,6 +180,7 @@ impl<'a> Config<'a> {
     }
 
     /// Test if the file contains a specific section
+    #[allow(unused)]
     pub fn contains(&self, section: &str) -> bool {
         use std::ops::Not;
         self.input[section].is_badvalue().not()
@@ -205,6 +206,7 @@ impl<'a> Config<'a> {
 
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of a single variable `arg`.
+    #[allow(unused)]
     pub fn func(&'a self, section: &str, field: &str, arg: &str) -> Result<impl Fn(f64) -> f64 + 'a, ConfigError> {
         use ConfigErrorKind::*;
         // Does the section exist?
@@ -232,6 +234,7 @@ impl<'a> Config<'a> {
 
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of two variables.
+    #[allow(unused)]
     pub fn func2(&'a self, section: &str, field: &str, arg: [&str; 2]) -> Result<impl Fn(f64, f64) -> f64 + 'a, ConfigError> {
         use ConfigErrorKind::*;
         // Does the section exist?
@@ -259,6 +262,7 @@ impl<'a> Config<'a> {
 
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of three variables.
+    #[allow(unused)]
     pub fn func3(&'a self, section: &str, field: &str, arg: [&str; 3]) -> Result<impl Fn(f64, f64, f64) -> f64 + 'a, ConfigError> {
         use ConfigErrorKind::*;
         // Does the section exist?

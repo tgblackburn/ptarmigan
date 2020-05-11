@@ -204,9 +204,9 @@ impl DistributionFunction {
             _ => return Err(OutputError::Dimension(self.dim))
         };
 
-        if let Some(hg) = hgram {
+        if world.rank() == 0 && hgram.is_some() {
             let filename = prefix.to_owned() + &suffix;
-            hg.write(&filename).map_err(|_e| OutputError::Write(filename.to_owned()))
+            hgram.unwrap().write(&filename).map_err(|_e| OutputError::Write(filename.to_owned()))
         } else {
             Ok(())
         }

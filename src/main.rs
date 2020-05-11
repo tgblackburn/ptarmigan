@@ -1,6 +1,5 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
-use std::f64::consts;
 
 use mpi::traits::*;
 use mpi::Threading;
@@ -98,6 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
+    let num = num / (ntasks as usize);
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
@@ -124,22 +124,50 @@ fn main() -> Result<(), Box<dyn Error>> {
         (p, s)
     };
 
-    let electrons: Vec<Particle> = Vec::new();
-    let photons: Vec<Particle> = Vec::new();
     let runtime = std::time::Instant::now();
 
     let (electrons, photons) = if focusing {
         let laser = FocusedLaser::new(a0, wavelength, waist, duration, pol);
         primaries
-            .iter()
-            .map(|pt| collide(&laser, *pt, &mut rng))
-            .fold((electrons, photons), merge)
+            .chunks(num / 20)
+            .enumerate()
+            .map(|(i, chk)| {
+                let tmp = chk.iter()
+                    .map(|pt| collide(&laser, *pt, &mut rng))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                if id == 0 {
+                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20)));
+                }
+                tmp
+            })
+            .fold(
+                (Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            )
     } else {
         let laser = PlaneWave::new(a0, wavelength, 4.0, pol);
         primaries
-            .iter()
-            .map(|pt| collide(&laser, *pt, &mut rng))
-            .fold((electrons, photons), merge)
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                (i+1) * chk.len(), num,
+                PrettyDuration::from(runtime.elapsed()),
+                PrettyDuration::from(ettc(runtime, i+1, 20)));
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+        )
     };
 
     for dstr in &eospec {
