@@ -17,6 +17,7 @@ pub struct FastFocusedLaser {
 }
 
 impl FastFocusedLaser {
+    #[allow(unused)]
     pub fn new(a0: f64, wavelength: f64, waist: f64, duration: f64, pol: Polarization) -> Self {
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FastFocusedLaser {

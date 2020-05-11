@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::f64::consts;
+use std::path::{Path, PathBuf};
 
 use mpi::traits::*;
 use mpi::Threading;
@@ -14,12 +14,14 @@ mod particle;
 mod nonlinear_compton;
 mod special_functions;
 mod output;
+mod input;
 
 use constants::*;
 use field::*;
 use geometry::*;
 use particle::*;
 use output::*;
+use input::*;
 
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Shower {
     let mut primary = incident;
@@ -33,7 +35,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Show
             primary.charge_to_mass_ratio(),
             dt
         );
-        
+
         if let Some(k) = field.radiate(r, u, dt, rng) {
             let photon = Particle::create(Species::Photon, r)
                 .with_normalized_momentum(k);
@@ -55,30 +57,70 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (universe, _) = mpi::initialize_with_threading(Threading::Funneled).unwrap();
     let world = universe.world();
     let id = world.rank();
-    let numtasks = world.size();
+    let ntasks = world.size();
 
-    let a0 = 1.0;
-    let wavelength = 0.8e-6;
-    let waist = 4.0e-6;
-    let duration = 30.0e-15;
-    let pol = Polarization::Linear;
-    let num: i32 = 2_000_000;
-    let gamma = 10_000.0;
-    let sigma = 1.0;
-    let radius = 1.0e-6;
-    let focusing = true;
+    let args: Vec<String> = std::env::args().collect();
+    let path = args
+        .get(1)
+        .ok_or(ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+    let path = PathBuf::from(path);
+    let output_dir = path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("");
 
-    let ospec = "angle_x:angle_y,p^-:p_perp,p^-";
-    let ospec: Vec<DistributionFunction> = ospec
-        .split(',')
+    // Read input configuration with default context
+
+    let mut input = Config::from_file(&path)?;
+    input.with_context("constants");
+
+    let a0: f64 = input.read("laser", "a0")?;
+    let wavelength: f64 = input.read("laser", "wavelength")?;
+    let pol = Polarization::Circular;
+
+    let (focusing, waist) = input
+        .read("laser", "waist")
+        .map(|w| (true, w))
+        .unwrap_or((false, std::f64::INFINITY));
+
+    let tau: f64 = if focusing {
+        input.read("laser", "fwhm_duration")?
+    } else {
+        input.read("laser", "n_cycles")?
+    };
+
+    let num: usize = input.read("beam", "ne")?;
+    let gamma: f64 = input.read("beam", "gamma")?;
+    let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
+    let radius: f64 = input.read("beam", "radius")?;
+    let length: f64 = input.read("beam", "length").unwrap_or(0.0);
+
+    let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
+
+    let eospec: Vec<String> = input.read("output", "electron")?;
+    let eospec: Vec<DistributionFunction> = eospec
+        .iter()
+        .map(|s| s.parse::<DistributionFunction>().unwrap())
+        .collect();
+    
+    let pospec: Vec<String> = input.read("output", "photon")?;
+    let pospec: Vec<DistributionFunction> = pospec
+        .iter()
         .map(|s| s.parse::<DistributionFunction>().unwrap())
         .collect();
 
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
+    let num = num / (ntasks as usize);
+
+    if id == 0 {
+        println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+    }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|_i| {
-            let z = 2.0 * SPEED_OF_LIGHT * duration;
+            let z = if focusing {
+                2.0 * SPEED_OF_LIGHT * tau
+            } else {
+                wavelength * tau
+            };
+            let z = z + length * rng.sample::<f64,_>(StandardNormal);
             let x = radius * rng.sample::<f64,_>(StandardNormal);
             let y = radius * rng.sample::<f64,_>(StandardNormal);
             let r = FourVector::new(-z, x, y, z);
@@ -97,28 +139,64 @@ fn main() -> Result<(), Box<dyn Error>> {
         (p, s)
     };
 
-    let electrons: Vec<Particle> = Vec::new();
-    let photons: Vec<Particle> = Vec::new();
+    let runtime = std::time::Instant::now();
 
     let (electrons, photons) = if focusing {
-        let laser = FocusedLaser::new(a0, wavelength, waist, duration, pol);
+        let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         primaries
-            .iter()
-            .map(|pt| collide(&laser, *pt, &mut rng))
-            .fold((electrons, photons), merge)
+            .chunks(num / 20)
+            .enumerate()
+            .map(|(i, chk)| {
+                let tmp = chk.iter()
+                    .map(|pt| collide(&laser, *pt, &mut rng))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                if id == 0 {
+                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20)));
+                }
+                tmp
+            })
+            .fold(
+                (Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            )
     } else {
-        let laser = PlaneWave::new(a0, wavelength, 4.0, pol);
+        let laser = PlaneWave::new(a0, wavelength, tau, pol);
         primaries
-            .iter()
-            .map(|pt| collide(&laser, *pt, &mut rng))
-            .fold((electrons, photons), merge)
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                (i+1) * chk.len(), num,
+                PrettyDuration::from(runtime.elapsed()),
+                PrettyDuration::from(ettc(runtime, i+1, 20)));
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+        )
     };
 
-    println!("e.len = {}, ph.len = {}", electrons.len(), photons.len());
+    for dstr in &eospec {
+        let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+        dstr.write(&world, &electrons, &prefix)?;
+    }
 
-    for dstr in &ospec {
-        dstr.write(&world, &electrons, "output/electron")?;
-        dstr.write(&world, &photons, "output/photon")?;
+    for dstr in &pospec {
+        let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+        dstr.write(&world, &photons, &prefix)?;
+    }
+
+    if id == 0 {
+        println!("Run complete after {}.", PrettyDuration::from(runtime.elapsed()));
     }
 
     Ok(())
