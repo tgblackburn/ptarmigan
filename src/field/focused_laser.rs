@@ -136,10 +136,11 @@ impl Field for FocusedLaser {
     }
 
     fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
-        let prob = nonlinear_compton::probability(self.wavevector, u, dt).unwrap_or(0.0);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
+        let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (_n, k) = nonlinear_compton::generate(self.wavevector, u, rng, None);
-            None
+            let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
+            Some(k)
         } else {
             None
         }

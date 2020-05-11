@@ -131,6 +131,14 @@ fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
     let norm: f64 = values.iter().rev().step_by(2).sum();
     let norm = 2.0 * norm - values.last().unwrap();
 
+    if norm.is_nan() {
+        //eprintln!("j(n = {}, x = {}), nmax = {}, norm = {}", n, x, nmax, norm);
+        //if let Some(failed) = values.iter().enumerate().rev().find(|(i, &x)| x.is_finite()) {
+        //    eprintln!("failed after ({}, {:.3e}) => {:.3e} {:.3e}", failed.0, failed.1, values[failed.0], values[failed.0 + 1]);
+        //}
+        return (0.0, 0.0, 0.0);
+    }
+
     //eprintln!("values = {:.3e} {:.3e} {:.3e} {:.3e} {:.3e}", values[0], values[1], values[2], values[3], values[4]);
     //eprintln!("nmax = {}, norm = {:e}", nmax, norm);
     let index: usize = nmax - (n as usize);
