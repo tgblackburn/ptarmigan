@@ -35,7 +35,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Show
             primary.charge_to_mass_ratio(),
             dt
         );
-        
+
         if let Some(k) = field.radiate(r, u, dt, rng) {
             let photon = Particle::create(Species::Photon, r)
                 .with_normalized_momentum(k);
@@ -73,16 +73,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input.read("laser", "wavelength")?;
-    let waist: f64 = input.read("laser", "waist")?;
-    let duration: f64 = input.read("laser", "duration")?;
     let pol = Polarization::Circular;
-    let focusing = true;
+
+    let (focusing, waist) = input
+        .read("laser", "waist")
+        .map(|w| (true, w))
+        .unwrap_or((false, std::f64::INFINITY));
+
+    let tau: f64 = if focusing {
+        input.read("laser", "fwhm_duration")?
+    } else {
+        input.read("laser", "n_cycles")?
+    };
 
     let num: usize = input.read("beam", "ne")?;
     let gamma: f64 = input.read("beam", "gamma")?;
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let radius: f64 = input.read("beam", "radius")?;
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
+
+    let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
 
     let eospec: Vec<String> = input.read("output", "electron")?;
     let eospec: Vec<DistributionFunction> = eospec
@@ -105,7 +115,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|_i| {
-            let z = 2.0 * SPEED_OF_LIGHT * duration + length * rng.sample::<f64,_>(StandardNormal);
+            let z = if focusing {
+                2.0 * SPEED_OF_LIGHT * tau
+            } else {
+                wavelength * tau
+            };
+            let z = z + length * rng.sample::<f64,_>(StandardNormal);
             let x = radius * rng.sample::<f64,_>(StandardNormal);
             let y = radius * rng.sample::<f64,_>(StandardNormal);
             let r = FourVector::new(-z, x, y, z);
@@ -127,7 +142,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let runtime = std::time::Instant::now();
 
     let (electrons, photons) = if focusing {
-        let laser = FocusedLaser::new(a0, wavelength, waist, duration, pol);
+        let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         primaries
             .chunks(num / 20)
             .enumerate()
@@ -148,7 +163,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
             )
     } else {
-        let laser = PlaneWave::new(a0, wavelength, 4.0, pol);
+        let laser = PlaneWave::new(a0, wavelength, tau, pol);
         primaries
         .chunks(num / 20)
         .enumerate()
@@ -171,12 +186,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     for dstr in &eospec {
-        let prefix = format!("{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"});
+        let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &electrons, &prefix)?;
     }
 
     for dstr in &pospec {
-        let prefix = format!("{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"});
+        let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &photons, &prefix)?;
     }
 
