@@ -6,6 +6,8 @@ use crate::constants::*;
 use crate::geometry::*;
 use crate::special_functions::*;
 
+mod total;
+
 /// The total probability that a photon is emitted
 /// by an electron with normalized quasimomentum `q`
 /// in a plane EM wave with (local) wavector `k`
@@ -16,11 +18,28 @@ use crate::special_functions::*;
 pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
     let a = (q * q - 1.0).sqrt();
     let eta = k * q;
-    if a <= 2.0 && eta <= 0.25 {
-        Some(0.0 * dt)
-    } else {
-        None
+    let dphi = dt * eta / (COMPTON_TIME * q[0]);
+
+    if eta >= 0.25 {
+        return None;
     }
+
+    let f = if a < total::LOW_A_LIMIT && eta < total::LOW_ETA_LIMIT {
+        // linear Thomson
+        2.0 * a  * a * eta / 3.0
+    } else if a < total::LOW_A_LIMIT {
+        // linear Compton rate for arbitrary eta
+        a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
+            - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta)
+    } else if eta < total::LOW_ETA_LIMIT {
+       eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap()
+    } else if a < 2.0 {
+        total::RATE_TABLE.at(a, eta).unwrap()
+    } else {
+        0.0
+    };
+
+    Some(ALPHA_FINE * f * dphi / eta)
 }
 
 /// Evaluates the important part of the nonlinear Compton
@@ -53,6 +72,23 @@ fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     )
 }
 
+/// Integrates the important part of the nonlinear Compton
+/// differential rate, f, which gives either
+///   `dP/(dv dϕ) = ⍺ f(n, a, η, v) / η`
+/// or
+///   `dP/(dv dt) = ⍺ m f(n, a, η, v) / γ`
+/// over the domain `0 < v < 1`
+fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
+    let integral: f64 = GAUSS_32_NODES.iter()
+        .map(|x| 0.5 * (x + 1.0))
+        .zip(GAUSS_32_WEIGHTS.iter())
+        .map(|(v, w)| {
+            0.5 * w * spectrum(n, a, eta, v)
+        })
+        .sum();
+    integral
+}
+
 /// Assuming that emission takes place, pseudorandomly
 /// generate the momentum of the photon emitted
 /// by an electron with normalized quasimomentum `q`
@@ -64,9 +100,23 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, rng: &mut R, fixed_n: Opti
     let a = (q * q - 1.0).sqrt();
     let eta = k * q;
 
-    // From the tabulated partial rates, pick a harmonic number
+    // From the partial rates, pick a harmonic number
     // or use one specified
-    let n = fixed_n.unwrap_or(1);
+    let n = fixed_n.unwrap_or_else(|| {
+        let nmax = (10.0 * (1.0 + a * a * a)) as i32;
+        let mut cumsum: f64 = 0.0;
+        let mut rates: Vec<f64> = Vec::with_capacity(nmax as usize);
+        for k in 1..=nmax {
+            cumsum += integrated_spectrum(k, a, eta);
+            rates.push(cumsum);
+        }
+        let total = rates.last().unwrap();
+        let target = total * rng.gen::<f64>();
+        let (index, _) = rates.iter().enumerate().find(|(_i, &cs)| cs > target).unwrap();
+        (index + 1) as i32
+    });
+
+    assert!(n >= 1);
 
     // Approximate maximum value of the probability density:
     let max: f64 = GAUSS_32_NODES.iter()
@@ -131,22 +181,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn differential_rate() {
-        let pts: Vec<(f64, f64, f64, f64)> = GAUSS_32_NODES.iter()
-            .map(|x| {
-                let v = 0.5 * (x + 1.0);
-                (v, spectrum(10, 1.0, 0.2, v), spectrum(80, 2.0, 0.2, v), spectrum(80, 10.0, 0.2, v))
-            })
-            .collect();
-
-        let mut file = File::create("output/differential_rate.dat").unwrap();
-        for pt in pts {
-            writeln!(file, "{:.6e} {:6e} {:6e} {:6e}", pt.0, pt.1, pt.2, pt.3).unwrap();
-        }
-    }
-
-    #[test]
-    fn sample_spectrum() {
+    fn partial_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let n = 100;
         let a = 1.0;
@@ -163,45 +198,85 @@ mod tests {
             .collect();
 
         println!("a = {:.3e}, eta = {:.3e}", (q * q - 1.0).sqrt(), k * q);
-        let mut file = File::create("output/sample_spectrum.dat").unwrap();
+        let mut file = File::create("output/partial_spectrum.dat").unwrap();
         for v in vs {
             writeln!(file, "{:.6e} {:.6e} {:.6e}", v.0, v.1, v.2).unwrap();
         }
     }
 
     #[test]
-    fn partial_rate_10() {
-        let n = 10;
+    #[ignore]
+    fn spectrum() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let a = 1.0;
-        let eta = 0.2;
-        let rate: f64 = GAUSS_32_NODES.iter()
-            .map(|x| 0.5 * (x + 1.0))
-            .zip(GAUSS_32_WEIGHTS.iter())
-            .map(|(v, w)| {
-                0.5 * w * spectrum(n, a, eta, v)
+        let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
+        let u = 10.0 * 1000.0 / 0.511;
+        let u = FourVector::new(0.0, 0.0, 0.0, -u).unitize();
+        let q = u + a * a * k / (2.0 * k * u);
+
+        let vs: Vec<(f64,f64,f64,i32)> = (0..100_000)
+            .map(|_i| {
+                let (n, k_prime) = generate(k, q, &mut rng, None);
+                (k * k_prime / (k * q), k_prime[1], k_prime[2], n)
             })
-            .sum();
+            .collect();
+
+        println!("a = {:.3e}, eta = {:.3e}", (q * q - 1.0).sqrt(), k * q);
+        let mut file = File::create("output/spectrum.dat").unwrap();
+        for v in vs {
+            writeln!(file, "{:.6e} {:.6e} {:.6e} {}", v.0, v.1, v.2, v.3).unwrap();
+        }
+    }
+
+    #[test]
+    fn partial_rate() {
+        let (n, a, eta) = (2, 0.5, 0.15);
+        let rate = integrated_spectrum(n, a, eta);
+        let target = 2.7484865392e-3;
+        let error = ((rate - target) / target).abs();
+        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
+        assert!(error < 1.0e-9);
+
+        let (n, a, eta) = (10, 1.0, 0.2);
+        let rate = integrated_spectrum(n, a, eta);
         let target = 1.984654425e-4;
         let error = ((rate - target) / target).abs();
         println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
         assert!(error < 1.0e-9);
-    }
 
-    #[test]
-    fn partial_rate_80() {
-        let n = 80;
-        let a = 2.0;
-        let eta = 0.2;
-        let rate: f64 = GAUSS_32_NODES.iter()
-            .map(|x| 0.5 * (x + 1.0))
-            .zip(GAUSS_32_WEIGHTS.iter())
-            .map(|(v, w)| {
-                0.5 * w * spectrum(n, a, eta, v)
-            })
-            .sum();
+        let (n, a, eta) = (80, 2.0, 0.2);
+        let rate = integrated_spectrum(n, a, eta);
         let target = 3.751480198e-6;
         let error = ((rate - target) / target).abs();
         println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
+        assert!(error < 1.0e-4);
+    }
+
+    #[test]
+    fn total_rate() {
+        // nmax = 10 (1 + a^3)
+        let (nmax, a, eta) = (10, 0.5, 0.2);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
+        let total: f64 = rates.iter().sum();
+        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+        assert!(error < 1.0e-3);
+
+        let (nmax, a, eta) = (20, 1.0, 0.2);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
+        let total: f64 = rates.iter().sum();
+        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+        assert!(error < 1.0e-3);
+
+        let (nmax, a, eta) = (280, 3.0, 0.15);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
+        let total: f64 = rates.iter().sum();
+        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
     }
 }

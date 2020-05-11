@@ -6,104 +6,78 @@ use crate::constants::*;
 use crate::geometry::FourVector;
 use crate::nonlinear_compton;
 
-/// Represents the envelope of a focusing laser pulse, i.e.
+/// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
-pub struct FocusedLaser {
+pub struct PlaneWave {
     a0: f64,
-    waist: f64,
-    duration: f64,
+    n_cycles: f64,
     wavevector: FourVector,
     pol: Polarization,
 }
 
-impl FocusedLaser {
-    pub fn new(a0: f64, wavelength: f64, waist: f64, duration: f64, pol: Polarization) -> Self {
+impl PlaneWave {
+    #[allow(unused)]
+    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization) -> Self {
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
-        FocusedLaser {
+        PlaneWave {
             a0,
-            waist,
-            duration,
+            n_cycles,
             wavevector,
             pol
         }
     }
-
-    fn omega(&self) -> f64 {
-        SPEED_OF_LIGHT * self.wavevector[0]
-    }
-
-    fn rayleigh_range(&self) -> f64 {
-        0.5 * self.wavevector[0] * self.waist.powi(2)
+    
+    #[allow(unused)]
+    pub fn k(&self) -> FourVector {
+        self.wavevector
     }
 
     pub fn a_sqd(&self, r: FourVector) -> f64 {
-        // Gaussian beam
-        let z_r = self.rayleigh_range();
-        let width_sqd = 1.0 + (r[3] / z_r).powi(2);
-        let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / self.waist.powi(2);
         let norm = match self.pol {
             Polarization::Linear => 0.5,
             Polarization::Circular => 1.0,
         };
-        let beam = norm * self.a0.powi(2) * (-2.0 * rho_sqd / width_sqd).exp() / width_sqd;
-
-        // Pulse envelope
-        let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
-
-        beam * envelope
+        let phase = self.wavevector * r;
+        if phase.abs() < consts::PI * self.n_cycles {
+            // a = a0 {sin(phi), cos(phi)} cos[phi/(2n)]^2
+            norm * self.a0.powi(2) * (phase / (2.0 * self.n_cycles)).cos().powi(4)
+        } else {
+            0.0
+        }
     }
 
     pub fn grad_a_sqd(&self, r: FourVector) -> FourVector {
-        // Gaussian beam
-        let z_r = self.rayleigh_range();
-        let width_sqd = 1.0 + (r[3] / z_r).powi(2);
-        let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / self.waist.powi(2);
         let norm = match self.pol {
             Polarization::Linear => 0.5,
             Polarization::Circular => 1.0,
         };
-        let beam = norm * self.a0.powi(2) * (-2.0 * rho_sqd / width_sqd).exp() / width_sqd;
-
-        let grad_beam = [
-            -4.0 * beam * r[1] / (self.waist.powi(2) * width_sqd),
-            -4.0 * beam * r[2] / (self.waist.powi(2) * width_sqd),
-            (2.0 * beam * r[3] / (z_r.powi(2) * width_sqd)) * (2.0 * rho_sqd / width_sqd - 1.0)
-        ];
-
-        // Pulse envelope
-        let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
-
-        let grad_envelope = [
-            0.0,
-            0.0,
-            8.0 * consts::LN_2 * self.wavevector[0] * phase * envelope / tau.powi(2)
-        ];
-
+        let phase = self.wavevector * r;
+        let grad = if phase.abs() < consts::PI * self.n_cycles {
+            norm * self.wavevector[0] * self.a0.powi(2) * (phase/self.n_cycles).sin() * (phase/(2.0 * self.n_cycles)).cos().powi(2) / self.n_cycles
+        } else {
+            0.0
+        };
         FourVector::new(
             0.0,
-            grad_beam[0] * envelope,
-            grad_beam[1] * envelope,
-            beam * grad_envelope[2] + grad_beam[2] * envelope
+            0.0,
+            0.0,
+            grad,
         )
     }
 }
 
-impl Field for FocusedLaser {
+impl Field for PlaneWave {
     fn total_energy(&self) -> f64 {
         0.0
     }
 
     fn max_timestep(&self) -> Option<f64> {
-        Some(1.0 / self.omega())
+        Some( 1.0 / (SPEED_OF_LIGHT * self.wavevector[0]) )
     }
 
     fn contains(&self, r: FourVector) -> bool {
-        let phase: f64 = self.wavevector * r;
-        phase < 3.0 * self.omega() * self.duration
+        let phase = self.wavevector * r;
+        phase < consts::PI * self.n_cycles
     }
 
     fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
@@ -152,21 +126,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn on_axis() {
-        let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
+    fn plane_wave_cp() {
+        let n_cycles = 8.0;
+        let wavelength = 0.8e-6;
+        let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
         let dt = 0.25 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, 30.0e-15, Polarization::Circular);
+        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular);
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
-
-        for _i in 0..(20*2*5) {
-            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
-            r = new.0;
-            u = new.1;
+        
+        for _k in 0..2 {
+            for _i in 0..16 {
+                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                r = new.0;
+                u = new.1;
+            }
+            println!("phase = 2 pi {:.3}, u_perp = ({:.3e}, {:.3e}), uz = {:.6e}, u^2 = 1 + {:.6e}", laser.k() * r / (2.0 * consts::PI), u[1], u[2], u[3], u * u - 1.0);
         }
 
-        println!("final u_perp = ({:.3e}, {:.3e}), u^2 = {:.3e}", u[1], u[2], u * u);
         assert!(u[1] < 1.0e-3);
         assert!(u[2] < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
