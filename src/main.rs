@@ -23,10 +23,11 @@ use particle::*;
 use output::*;
 use input::*;
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64) -> Shower {
     let mut primary = incident;
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
+    let dt = dt * dt_multiplier;
 
     while field.contains(primary.position()) {
         let (r, mut u) = field.push(
@@ -70,6 +71,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut input = Config::from_file(&path)?;
     input.with_context("constants");
+
+    let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input.read("laser", "wavelength")?;
@@ -118,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let z = if focusing {
                 2.0 * SPEED_OF_LIGHT * tau
             } else {
-                wavelength * tau
+                0.5 * wavelength * tau
             };
             let z = z + length * rng.sample::<f64,_>(StandardNormal);
             let x = radius * rng.sample::<f64,_>(StandardNormal);
@@ -148,7 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -169,7 +172,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
