@@ -73,6 +73,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     input.with_context("constants");
 
     let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
+    let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input.read("laser", "wavelength")?;
@@ -137,8 +138,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-        p.push(sh.primary);
-        s.append(&mut sh.secondaries);
+        if let Some(m) = multiplicity {
+            if m == sh.multiplicity() {
+                p.push(sh.primary);
+                s.append(&mut sh.secondaries);
+            }
+        }
         (p, s)
     };
 

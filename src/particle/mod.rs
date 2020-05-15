@@ -99,3 +99,9 @@ impl Particle {
         self.r[1]
     }
 }
+
+impl Shower {
+    pub fn multiplicity(&self) -> usize {
+        self.secondaries.len()
+    }
+}
