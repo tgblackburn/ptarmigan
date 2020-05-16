@@ -143,6 +143,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 p.push(sh.primary);
                 s.append(&mut sh.secondaries);
             }
+        } else {
+            p.push(sh.primary);
+            s.append(&mut sh.secondaries);
         }
         (p, s)
     };
