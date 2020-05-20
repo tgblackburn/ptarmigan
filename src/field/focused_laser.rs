@@ -3,7 +3,7 @@ use rand::prelude::*;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
-use crate::geometry::FourVector;
+use crate::geometry::{ThreeVector, FourVector};
 use crate::nonlinear_compton;
 
 /// Represents the envelope of a focusing laser pulse, i.e.
@@ -34,6 +34,22 @@ impl FocusedLaser {
 
     fn rayleigh_range(&self) -> f64 {
         0.5 * self.wavevector[0] * self.waist.powi(2)
+    }
+
+    /// Returns the local wavevector scaled by the electron mass,
+    /// hbar k / (me c^2)
+    fn k_at(&self, r: FourVector) -> FourVector {
+        let zeta = r[3] / self.rayleigh_range();
+        let rho = r[1].hypot(r[2]) / self.waist;
+        let n_perp = if rho > 0.0 {
+            let n_perp = 2.0 * zeta * rho / (self.wavevector[0] * self.waist * (1.0 + zeta * zeta));
+            n_perp * ThreeVector::new(r[1], r[2], 0.0).normalize()
+        } else {
+            ThreeVector::new(0.0, 0.0, 0.0)
+        };
+        let n_long = ThreeVector::new(0.0, 0.0, 1.0);
+        let n = (n_perp + n_long).normalize();
+        SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector[0] * FourVector::lightlike(n[0], n[1], n[2])
     }
 
     pub fn a_sqd(&self, r: FourVector) -> f64 {
@@ -135,11 +151,11 @@ impl Field for FocusedLaser {
         (r_new, u_new)
     }
 
-    fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
-        let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+        let k = self.k_at(r);
+        let prob = nonlinear_compton::probability(k, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
+            let (_n, k) = nonlinear_compton::generate(k, u, rng, None);
             Some(k)
         } else {
             None
@@ -170,5 +186,15 @@ mod tests {
         assert!(u[1] < 1.0e-3);
         assert!(u[2] < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn wavefront_curvature() {
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 2.0e-6, 30.0e-15, Polarization::Circular);
+        let r = FourVector::new(0.0, 1.0e-6, 1.0e-6, 10.0e-6);
+        let k = laser.k_at(r);
+        let omega = 1.55e-6 / 0.511;
+        println!("r = ({:.3e} {:.3e} {:.3e} {:.3e}), k^0 = {:.6e} [expected {:.6e}], k/k^0 = ({:.3e} {:.3e} {:.3e} {:.3e})", r[0], r[1], r[2], r[3], k[0], omega, 1.0, k[1]/k[0], k[2]/k[0], k[3]/k[0]);
+        assert_eq!(k * k, 0.0);
     }
 }
