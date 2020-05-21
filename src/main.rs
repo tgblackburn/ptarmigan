@@ -12,6 +12,7 @@ mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
+mod lcfa;
 mod special_functions;
 mod output;
 mod input;
