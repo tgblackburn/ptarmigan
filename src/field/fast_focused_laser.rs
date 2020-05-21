@@ -5,6 +5,7 @@ use num::complex::Complex;
 use crate::field::{Field, Polarization};
 use crate::constants::*;
 use crate::geometry::{FourVector, ThreeVector};
+use crate::lcfa;
 
 /// Represents a focusing laser pulse, including
 /// the fast oscillating carrier wave
@@ -143,7 +144,8 @@ impl Field for FastFocusedLaser {
         
         // velocity in SI units
         let u = ThreeVector::from(ui);
-        let v = SPEED_OF_LIGHT * u / ui[0];
+        let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
+        let v = SPEED_OF_LIGHT * u / gamma;
 
         // u_i = u_{i-1/2} + (q dt/2 m c) (E + v_{i-1/2} x B)
         let alpha = rqm * dt / (2.0 * SPEED_OF_LIGHT);
@@ -176,8 +178,27 @@ impl Field for FastFocusedLaser {
         (r_new, u_new)
     }
 
-    fn radiate<R: Rng>(&self, _r: FourVector, _u: FourVector, _dt: f64, _rng: &mut R) -> Option<FourVector> {
-        None
+    #[allow(non_snake_case)]
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+        let (E, B) = self.fields(r);
+        let beta = ThreeVector::from(u) / u[0];
+        let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
+        let chi = if E_rf_sqd > 0.0 {
+            u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
+        } else {
+            0.0
+        };
+        let prob = dt * lcfa::photon_emission::rate(chi, u[0]);
+        if rng.gen::<f64>() < prob {
+            let (omega_mc2, theta, cphi) = lcfa::photon_emission::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen());
+            let long: ThreeVector = beta.normalize();
+            let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
+            let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
+            let k = FourVector::lightlike(k[0], k[1], k[2]);
+            Some(k)
+        } else {
+            None
+        }
     }
 }
 
