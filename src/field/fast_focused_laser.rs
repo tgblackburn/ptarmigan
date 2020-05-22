@@ -190,12 +190,18 @@ impl Field for FastFocusedLaser {
         };
         let prob = dt * lcfa::photon_emission::rate(chi, u[0]);
         if rng.gen::<f64>() < prob {
-            let (omega_mc2, theta, cphi) = lcfa::photon_emission::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen());
-            let long: ThreeVector = beta.normalize();
-            let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
-            let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
-            let k = FourVector::lightlike(k[0], k[1], k[2]);
-            Some(k)
+            let (omega_mc2, theta, cphi) = lcfa::photon_emission::sample(
+                chi, u[0], rng.gen(), rng.gen(), rng.gen()
+            );
+            if let Some(theta) = theta {
+                let long: ThreeVector = beta.normalize();
+                let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
+                let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
+                let k = FourVector::lightlike(k[0], k[1], k[2]);
+                Some(k)
+            } else {
+                None
+            }
         } else {
             None
         }

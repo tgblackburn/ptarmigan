@@ -78,7 +78,10 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
 /// Returns a triple of the photon energy, in units of mc^2,
 /// and the polar and azimuthal angles of emission, in the range
 /// [0,pi] and [0,2pi] respectively.
-pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, f64, f64) {
+///
+/// If the polar angle would be larger than pi (which is possible
+/// at very low energy), then None is returned instead.
+pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, Option<f64>, f64) {
     use tables::{LN_CHI_MIN, LN_CHI_STEP, QUANTUM_CDF};
     use tables::{LN_DELTA_MIN, LN_DELTA_STEP, Y_CDF, Y_INFINITE_DELTA_CDF};
 
@@ -148,61 +151,18 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         //assert!(y >= beta);
         //assert!(z >= 1.0);
         let cos_theta = (gamma - z.powf(2.0/3.0) / (2.0 * gamma)) / (gamma.powi(2) - 1.0).sqrt();
-        let theta = cos_theta.min(1.0f64).max(-1.0f64).acos(); // if cos_theta is NaN, it's replaced with 1.0 by the first min
+        let theta = if cos_theta >= 1.0 {
+            Some(0.0)
+        } else if cos_theta >= -1.0 {
+            Some(cos_theta.acos())
+        } else {
+            None
+        };
+        //let theta = cos_theta.min(1.0f64).max(-1.0f64).acos(); // if cos_theta is NaN, it's replaced with 1.0 by the first min
 
         (gamma * u / (1.0 + u), theta, 2.0 * consts::PI * rand3)
     }
 }
-
-/// Table used for calculating the total classical emission rate.
-/// Columns of log(x), log(cdf(u|z)) for 0.02 <= x <= 20.
-static CLASSICAL_SPECTRUM_TABLE: [[f64; 2]; 41] = [
-    [-3.91202301e+0, -6.60517238e+0],
-    [-3.73932912e+0, -6.32380043e+0],
-    [-3.56663524e+0, -6.04325741e+0],
-    [-3.39394136e+0, -5.76365479e+0],
-    [-3.22124748e+0, -5.48512019e+0],
-    [-3.04855360e+0, -5.20779983e+0],
-    [-2.87585971e+0, -4.93186151e+0],
-    [-2.70316583e+0, -4.65749813e+0],
-    [-2.53047195e+0, -4.38493162e+0],
-    [-2.35777807e+0, -4.11441770e+0],
-    [-2.18508419e+0, -3.84625132e+0],
-    [-2.01239030e+0, -3.58077293e+0],
-    [-1.83969642e+0, -3.31837570e+0],
-    [-1.66700254e+0, -3.05951374e+0],
-    [-1.49430866e+0, -2.80471134e+0],
-    [-1.32161478e+0, -2.55457314e+0],
-    [-1.14892089e+0, -2.30979520e+0],
-    [-9.76227012e-1, -2.07117645e+0],
-    [-8.03533130e-1, -1.83963003e+0],
-    [-6.30839248e-1, -1.61619332e+0],
-    [-4.58145366e-1, -1.40203511e+0],
-    [-2.85451484e-1, -1.19845722e+0],
-    [-1.12757602e-1, -1.00688674e+0],
-    [5.99362800e-2, -8.28853548e-1],
-    [2.32630162e-1, -6.65945768e-1],
-    [4.05324044e-1, -5.19734006e-1],
-    [5.78017926e-1, -3.91654410e-1],
-    [7.50711808e-1, -2.82842583e-1],
-    [9.23405690e-1, -1.93918722e-1],
-    [1.09609957e+0, -1.24743702e-1],
-    [1.26879345e+0, -7.41989867e-2],
-    [1.44148734e+0, -4.00839889e-2],
-    [1.61418122e+0, -1.92451749e-2],
-    [1.78687510e+0, -8.00296501e-3],
-    [1.95956898e+0, -2.79652691e-3],
-    [2.13226286e+0, -7.92727241e-4],
-    [2.30495675e+0, -1.74957252e-4],
-    [2.47765063e+0, -2.86508630e-5],
-    [2.65034451e+0, -3.28906586e-6],
-    [2.82303839e+0, -2.47459791e-7],
-    [2.99573227e+0, -1.12649296e-8],
-];
-
-//fn max_z_at(gamma: f64) -> f64 {
-//    (2.0 * gamma.powi(2) * (1.0 + (1.0 - gamma.powi(-2)).sqrt())).powf(1.5)
-//}
 
 /// Samples the classical synchrotron spectrum of an electron with
 /// quantum parameter `chi` and Lorentz factor `gamma`.
@@ -213,7 +173,7 @@ static CLASSICAL_SPECTRUM_TABLE: [[f64; 2]; 41] = [
 /// 
 /// As there is no hbar-dependent cutoff, the energy of the photon
 /// can exceed that of the electron.
-pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, f64, f64) {
+pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, Option<f64>, f64) {
     // First determine z:
     // z^(1/3) = (2 + 4 cos(delta/3)) / (5 (1-r)) where 0 <= r < 1
     // and cos(delta) = (-9 + 50r - 25r^2) / 16
@@ -225,12 +185,12 @@ pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64
     // for x < 0.01, cdf(u|z) =
 
     let ln_rand = rand1.ln();
-    let x = if ln_rand < CLASSICAL_SPECTRUM_TABLE[0][1] {
+    let x = if ln_rand < tables::CLASSICAL_SPECTRUM_TABLE[0][1] {
         1.020377255 * rand1.powf(0.6)
     } else {
         //println!("Inverting ln(rand = {}) = {}", rand1, ln_rand);
-        let (ln_x, _) = pwmci::invert(ln_rand, &CLASSICAL_SPECTRUM_TABLE)
-            .unwrap_or( (CLASSICAL_SPECTRUM_TABLE.last().unwrap()[0],1) );
+        let (ln_x, _) = pwmci::invert(ln_rand, &tables::CLASSICAL_SPECTRUM_TABLE)
+            .unwrap_or( (tables::CLASSICAL_SPECTRUM_TABLE.last().unwrap()[0],1) );
         ln_x.exp()
     };
 
@@ -238,7 +198,13 @@ pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64
     let omega_mc2 = u * gamma;
 
     let cos_theta = (gamma - z.powf(2.0/3.0) / (2.0 * gamma)) / (gamma.powi(2) - 1.0).sqrt();
-    let theta = cos_theta.min(1.0f64).max(-1.0f64).acos();
+    let theta = if cos_theta >= 1.0 {
+        Some(0.0)
+    } else if cos_theta >= -1.0 {
+        Some(cos_theta.acos())
+    } else {
+        None
+    };
 
     (omega_mc2, theta, 2.0 * consts::PI * rand3)
 }
