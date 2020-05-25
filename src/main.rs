@@ -115,6 +115,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+        #[cfg(feature = "with-mpi")] {
+            println!("\t* with MPI support enabled");
+        }
+        #[cfg(feature = "fits-output")] {
+            println!("\t* writing FITS output");
+        }
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
