@@ -18,6 +18,6 @@ num = "0.2"
 fitsio = {version = "0.15", optional = true}
 
 [features]
-default = ["with-mpi"]
+default = []
 fits-output = ["fitsio"]
 with-mpi = ["mpi"]

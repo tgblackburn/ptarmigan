@@ -5,7 +5,11 @@ use std::fmt;
 use std::error::Error;
 use std::str::FromStr;
 
+#[cfg(feature = "with-mpi")]
 use mpi::traits::*;
+#[cfg(not(feature = "with-mpi"))]
+use crate::no_mpi::*;
+
 use crate::constants::*;
 use crate::particle::*;
 
