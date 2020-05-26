@@ -12,6 +12,7 @@ mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
+mod lcfa;
 mod special_functions;
 mod output;
 mod input;
@@ -74,6 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
     let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
+    let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input.read("laser", "wavelength")?;
@@ -152,8 +154,29 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (electrons, photons) = if focusing {
+    let (electrons, photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
+        primaries
+            .chunks(num / 20)
+            .enumerate()
+            .map(|(i, chk)| {
+                let tmp = chk.iter()
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                if id == 0 {
+                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20)));
+                }
+                tmp
+            })
+            .fold(
+                (Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            )
+    } else if focusing { // and using LCFA rates
+        let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
         primaries
             .chunks(num / 20)
             .enumerate()

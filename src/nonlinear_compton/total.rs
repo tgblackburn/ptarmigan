@@ -35,7 +35,7 @@ impl Table2D {
         let ix = ((x - self.min[0]) / self.step[0]) as usize;
         let iy = ((y - self.min[1]) / self.step[1]) as usize;
 
-        if ix < N_COLS && iy < N_ROWS {
+        if ix < N_COLS - 1 && iy < N_ROWS - 1 {
             let dx = (x - self.min[0]) / self.step[0] - (ix as f64);
             let dy = (y - self.min[1]) / self.step[1] - (iy as f64);
             let f = (
