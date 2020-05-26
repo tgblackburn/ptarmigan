@@ -8,7 +8,7 @@ readme = "README.md"
 license = "Apache-2.0"
 
 [dependencies]
-mpi = "0.5"
+mpi = {version = "0.5", optional = true}
 rand = "0.7"
 rand_xoshiro = "0.4"
 rand_distr = "0.2"
@@ -20,3 +20,4 @@ fitsio = {version = "0.15", optional = true}
 [features]
 default = []
 fits-output = ["fitsio"]
+with-mpi = ["mpi"]

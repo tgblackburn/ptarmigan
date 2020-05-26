@@ -1,8 +1,15 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
+#[cfg(feature = "with-mpi")]
 use mpi::traits::*;
-use mpi::Threading;
+#[cfg(not(feature = "with-mpi"))]
+mod no_mpi;
+#[cfg(not(feature = "with-mpi"))]
+use no_mpi::*;
+#[cfg(not(feature = "with-mpi"))]
+use no_mpi as mpi;
+
 use rand::prelude::*;
 use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
@@ -56,7 +63,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (universe, _) = mpi::initialize_with_threading(Threading::Funneled).unwrap();
+    let universe = mpi::initialize().unwrap();
     let world = universe.world();
     let id = world.rank();
     let ntasks = world.size();
@@ -117,6 +124,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+        #[cfg(feature = "with-mpi")] {
+            println!("\t* with MPI support enabled");
+        }
+        #[cfg(feature = "fits-output")] {
+            println!("\t* writing FITS output");
+        }
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
