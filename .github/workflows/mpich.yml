@@ -14,9 +14,9 @@ jobs:
         sudo apt-get update
         sudo apt-get install libcfitsio-dev mpich texinfo
     - name: Build
-      run: cargo build --release --verbose --features fits-output
+      run: cargo build --release --verbose --features fits-output,with-mpi
     - name: Run tests
-      run: cargo test --release --verbose --features fits-output -- --test-threads=1
+      run: cargo test --release --verbose --features fits-output,with-mpi -- --test-threads=1
 
   no-fits-output:
 
@@ -29,6 +29,6 @@ jobs:
         sudo apt-get update
         sudo apt-get install mpich texinfo
     - name: Build
-      run: cargo build --release --verbose
+      run: cargo build --release --verbose --features with-mpi
     - name: Run tests
-      run: cargo test --release --verbose -- --test-threads=1
+      run: cargo test --release --verbose --features with-mpi -- --test-threads=1

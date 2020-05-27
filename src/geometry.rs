@@ -18,10 +18,6 @@ impl FourVector {
         }
     }
 
-    pub fn sqr(&self) -> f64 {
-        self * self
-    }
-
     /// Returns a new four vector `s` that has unit length, i.e. `s * s == 1`,
     /// but unchanged spatial components
     pub fn unitize(&self) -> Self {
@@ -345,14 +341,14 @@ mod tests {
     fn norm() {
         let a = FourVector::new(5.0, 3.0, 4.0, 0.0);
         let b = FourVector::new(15.0, 14.0, 5.0, 2.0);
-        assert!(a.sqr().abs() < 1.0e-10);
-        assert!(b.sqr().abs() < 1.0e-10);
+        assert!(a.norm_sqr().abs() < 1.0e-10);
+        assert!(b.norm_sqr().abs() < 1.0e-10);
     }
 
     #[test]
     fn lightlike_is_null() {
         let a = FourVector::lightlike(1.0, -17.0, 2.6);
-        assert!(a.sqr().abs() < 1.0e-10);
+        assert!(a.norm_sqr().abs() < 1.0e-10);
     }
 
     #[test]

@@ -1,8 +1,16 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::f64::consts;
 
+#[cfg(feature = "with-mpi")]
 use mpi::traits::*;
-use mpi::Threading;
+#[cfg(not(feature = "with-mpi"))]
+mod no_mpi;
+#[cfg(not(feature = "with-mpi"))]
+use no_mpi::*;
+#[cfg(not(feature = "with-mpi"))]
+use no_mpi as mpi;
+
 use rand::prelude::*;
 use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
@@ -12,6 +20,7 @@ mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
+mod lcfa;
 mod special_functions;
 mod output;
 mod input;
@@ -23,10 +32,11 @@ use particle::*;
 use output::*;
 use input::*;
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64) -> Shower {
     let mut primary = incident;
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
+    let dt = dt * dt_multiplier;
 
     while field.contains(primary.position()) {
         let (r, mut u) = field.push(
@@ -54,7 +64,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R) -> Show
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let (universe, _) = mpi::initialize_with_threading(Threading::Funneled).unwrap();
+    let universe = mpi::initialize().unwrap();
     let world = universe.world();
     let id = world.rank();
     let ntasks = world.size();
@@ -71,8 +81,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut input = Config::from_file(&path)?;
     input.with_context("constants");
 
+    let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
+    let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
+    let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
+
     let a0: f64 = input.read("laser", "a0")?;
-    let wavelength: f64 = input.read("laser", "wavelength")?;
+    let wavelength: f64 = input
+        .read("laser", "wavelength")
+        .or_else(|_e|
+            // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
+            input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+        )?;
+
     let pol = Polarization::Circular;
 
     let (focusing, waist) = input
@@ -111,6 +131,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+        #[cfg(feature = "with-mpi")] {
+            println!("\t* with MPI support enabled");
+        }
+        #[cfg(feature = "fits-output")] {
+            println!("\t* writing FITS output");
+        }
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
@@ -118,7 +144,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let z = if focusing {
                 2.0 * SPEED_OF_LIGHT * tau
             } else {
-                wavelength * tau
+                0.5 * wavelength * tau
             };
             let z = z + length * rng.sample::<f64,_>(StandardNormal);
             let x = radius * rng.sample::<f64,_>(StandardNormal);
@@ -134,21 +160,49 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-        p.push(sh.primary);
-        s.append(&mut sh.secondaries);
+        if let Some(m) = multiplicity {
+            if m == sh.multiplicity() {
+                p.push(sh.primary);
+                s.append(&mut sh.secondaries);
+            }
+        } else {
+            p.push(sh.primary);
+            s.append(&mut sh.secondaries);
+        }
         (p, s)
     };
 
     let runtime = std::time::Instant::now();
 
-    let (electrons, photons) = if focusing {
+    let (electrons, photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         primaries
             .chunks(num / 20)
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                if id == 0 {
+                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20)));
+                }
+                tmp
+            })
+            .fold(
+                (Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            )
+    } else if focusing { // and using LCFA rates
+        let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
+        primaries
+            .chunks(num / 20)
+            .enumerate()
+            .map(|(i, chk)| {
+                let tmp = chk.iter()
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -169,7 +223,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",

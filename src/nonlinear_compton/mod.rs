@@ -16,7 +16,12 @@ mod total;
 /// Both `k` and `q` are expected to be normalized
 /// to the electron mass.
 pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
-    let a = (q * q - 1.0).sqrt();
+    let a_sqd = q * q - 1.0;
+    let a = if a_sqd >= 0.0 {
+        a_sqd.sqrt()
+    } else {
+        0.0
+    };
     let eta = k * q;
     let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
@@ -32,11 +37,13 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
         a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
             - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta)
     } else if eta < total::LOW_ETA_LIMIT {
-       eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap()
-    } else if a < 2.0 {
-        total::RATE_TABLE.at(a, eta).unwrap()
+        eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap_or_else(|| {
+            panic!("NLC rate lookup out of bounds (low eta table): a = {:.3e}, eta = {:.3e}", a, eta);
+        })
     } else {
-        0.0
+        total::RATE_TABLE.at(a, eta).unwrap_or_else(|| {
+            panic!("NLC rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+        })
     };
 
     Some(ALPHA_FINE * f * dphi / eta)

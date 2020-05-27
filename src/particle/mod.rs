@@ -89,6 +89,7 @@ impl Particle {
 
     /// Returns the four-position at which the
     /// particle was created, in units of metres
+    #[allow(unused)]
     pub fn was_created_at(&self) -> FourVector {
         self.r[0]
     }
@@ -97,5 +98,11 @@ impl Particle {
     /// particle, in units of metres
     pub fn position(&self) -> FourVector {
         self.r[1]
+    }
+}
+
+impl Shower {
+    pub fn multiplicity(&self) -> usize {
+        self.secondaries.len()
     }
 }
