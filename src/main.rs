@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
+use std::f64::consts;
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
@@ -85,7 +86,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
 
     let a0: f64 = input.read("laser", "a0")?;
-    let wavelength: f64 = input.read("laser", "wavelength")?;
+    let wavelength: f64 = input
+        .read("laser", "wavelength")
+        .or_else(|_e|
+            // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
+            input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+        )?;
+
     let pol = Polarization::Circular;
 
     let (focusing, waist) = input
