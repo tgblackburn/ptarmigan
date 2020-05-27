@@ -89,6 +89,7 @@ impl Particle {
 
     /// Returns the four-position at which the
     /// particle was created, in units of metres
+    #[allow(unused)]
     pub fn was_created_at(&self) -> FourVector {
         self.r[0]
     }

@@ -1,8 +1,11 @@
 //! MPI-aware data binning and histogram generation
 
 use std::fmt;
-use mpi::traits::*;
-use mpi::collective::SystemOperation;
+
+#[cfg(feature = "with-mpi")]
+use mpi::{traits::*, collective::SystemOperation};
+#[cfg(not(feature = "with-mpi"))]
+use crate::no_mpi::*;
 
 #[cfg(feature = "fits-output")]
 use fitsio::*;
@@ -485,7 +488,13 @@ mod tests {
     use super::*;
     use std::sync::Once;
     static INIT: Once = Once::new();
-    static mut UNIVERSE: Option<mpi::environment::Universe> = None;
+
+    #[cfg(feature = "with-mpi")]
+    use mpi::environment::Universe;
+    #[cfg(not(feature = "with-mpi"))]
+    use crate::no_mpi as mpi;
+
+    static mut UNIVERSE: Option<Universe> = None;
 
     #[test]
     #[ignore]

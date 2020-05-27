@@ -11,3 +11,4 @@
 # Ignore output from examples
 /examples/*
 !/examples/*.yaml
+!/examples/*.yml
