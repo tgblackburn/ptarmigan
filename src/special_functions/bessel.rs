@@ -17,12 +17,12 @@ impl BesselJ for f64 {
         match n {
             0 => j0(*self),
             1 => j1(*self),
-            _ => triple_j(n, *self).1
+            _ => triple_j_no_alloc(n, *self).1
         }
     }
 
     fn j_pm(&self, n: i32) -> (Self, Self, Self) {
-        triple_j(n, *self)
+        triple_j_no_alloc(n, *self)
     }
 }
 
@@ -143,6 +143,55 @@ fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
     //eprintln!("nmax = {}, norm = {:e}", nmax, norm);
     let index: usize = nmax - (n as usize);
     (values[index+1] / norm, values[index] / norm, values[index-1] / norm)
+}
+
+fn triple_j_no_alloc(n: i32, x: f64) -> (f64, f64, f64) {
+    if x == 0.0 {
+        return (0.0, 0.0, 0.0);
+    }
+
+    let v: f64 = x / (n as f64);
+    let nmax: i32 = 1 + (n as i32) + ((5.0 / (1.0 - 0.9 * v)) as i32);
+    // ensure nmax is even
+    let nmax = if nmax.rem_euclid(2) == 0 {nmax} else {nmax + 1};
+
+    let mut quad: [f64; 4] = [0.0, 0.0, 1.0, 0.0];
+    let mut total = 0.0;
+
+    // this will hold J_{n-1}(x), J_n(x) and J_{n+1}(x)
+    let mut triple = (0.0, 0.0, 0.0);
+
+    for k in (0..=nmax).rev().step_by(2) {
+        // at start of loop
+        // order:  k  k+1  k+2  k+3
+        // quad:   0   1    2    3
+        // k starts at nmax and is always even
+        quad[1] = ((2 * (k + 2)) as f64) * quad[2] / x - quad[3];
+        quad[0] = ((2 * (k + 1)) as f64) * quad[1] / x - quad[2];
+
+        // now we have all four values from k up to k+3
+        // check to see if we overlap with the target triple
+        if n > k {
+            if k == n-1 {
+                triple = (quad[0], quad[1], quad[2]);
+            } else if k+1 == n-1 {
+                triple = (quad[1], quad[2], quad[3]);
+            }
+        }
+
+        total += quad[0];
+        quad[2] = quad[0];
+        quad[3] = quad[1];
+    }
+
+    // quad[0] is now equal to J(0, x) * a constant
+    let norm = 2.0 * total - quad[0];
+
+    if norm.is_nan() {
+        (0.0, 0.0, 0.0)
+    } else {
+        (triple.0 / norm, triple.1 / norm, triple.2 / norm)
+    }
 }
 
 #[cfg(test)]
