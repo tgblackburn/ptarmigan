@@ -190,21 +190,23 @@ mod tests {
     #[ignore]
     fn partial_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let n = 100;
+        let n = 250;
         let a = 1.0;
         let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         let u = 10.0 * 1000.0 / 0.511;
         let u = FourVector::new(0.0, 0.0, 0.0, -u).unitize();
         let q = u + a * a * k / (2.0 * k * u);
 
+        let rt = std::time::Instant::now();
         let vs: Vec<(f64,f64,f64)> = (0..10000)
             .map(|_n| {
                 let (_, k_prime) = generate(k, q, &mut rng, Some(n));
                 (k * k_prime / (k * q), k_prime[1], k_prime[2])
             })
             .collect();
+        let rt = rt.elapsed();
 
-        println!("a = {:.3e}, eta = {:.3e}", (q * q - 1.0).sqrt(), k * q);
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", (q * q - 1.0).sqrt(), k * q, vs.len(), rt);
         let mut file = File::create("output/partial_spectrum.dat").unwrap();
         for v in vs {
             writeln!(file, "{:.6e} {:.6e} {:.6e}", v.0, v.1, v.2).unwrap();
