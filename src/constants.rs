@@ -3,7 +3,6 @@
 /// Speed of light in vacuum, units of m/s
 pub const SPEED_OF_LIGHT: f64 = 2.997925e8;
 /// Speed of light in vacuum, squared, units of m^2/s^2
-#[allow(unused)]
 pub const SPEED_OF_LIGHT_SQD: f64 = 89875517873681764.0;
 /// epsilon_0
 pub const VACUUM_PERMITTIVITY: f64 = 8.854188e-12;

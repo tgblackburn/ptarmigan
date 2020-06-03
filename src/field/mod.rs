@@ -6,10 +6,12 @@ use crate::geometry::FourVector;
 mod focused_laser;
 mod fast_focused_laser;
 mod plane_wave;
+mod fast_plane_wave;
 
 pub use self::focused_laser::*;
 pub use self::fast_focused_laser::*;
 pub use self::plane_wave::*;
+pub use self::fast_plane_wave::*;
 
 /// The polarization of an electromagnetic wave
 #[allow(unused)]
