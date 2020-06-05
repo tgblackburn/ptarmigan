@@ -4,9 +4,9 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 ## control
 
-* `dt_multiplier` (optional): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
+* `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
-* `lcfa` (optional): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
+* `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 
 ## laser
 
@@ -21,15 +21,16 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 * `ne`: number of primary electrons.
 * `gamma`: the mean Lorentz factor.
-* `sigma` (optional): the standard deviation of the electron Lorentz factors, set to zero if not specified.
+* `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
 * `radius`: the beam has a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres)...
-* `length` (optional): and length (metres)
+* `length` (optional, default = `0.0`): and length (metres)
 
 ## output
 
 All output is written to the directory where the input file is found.
 
-* `ident` (optional): prepends a identifier string to the filenames of all produced output.
+* `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output.
+* `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions. 
 * `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
 * `photon`: as above.
 
