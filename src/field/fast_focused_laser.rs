@@ -122,26 +122,13 @@ impl FastFocusedLaser {
 
         (envelope * E, envelope * B)
     }
-}
 
-impl Field for FastFocusedLaser {
-    fn total_energy(&self) -> f64 {
-        0.0
-    }
-
-    fn max_timestep(&self) -> Option<f64> {
-        Some(0.1 / self.omega())
-    }
-
-    fn contains(&self, r: FourVector) -> bool {
-        let phase: f64 = self.wavevector * r;
-        phase < 3.0 * self.omega() * self.duration
-    }
-
+    /// Returns the position and momentum of a particle with charge-to-mass ratio `rqm`,
+    /// which has been accelerated in an electric field `E` and magnetic field `B`
+    /// over a time interval `dt`.
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
-        let (E, B) = self.fields(r);
-        
+    #[inline]
+    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
         // velocity in SI units
         let u = ThreeVector::from(ui);
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
@@ -178,9 +165,12 @@ impl Field for FastFocusedLaser {
         (r_new, u_new)
     }
 
+    /// Pseudorandomly emit a photon from an electron with normalized
+    /// momentum `u`, which is accelerated by an electric field `E` and
+    /// magnetic field `B`.
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
-        let (E, B) = self.fields(r);
+    #[inline]
+    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<FourVector> {
         let beta = ThreeVector::from(u) / u[0];
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
@@ -205,6 +195,33 @@ impl Field for FastFocusedLaser {
         } else {
             None
         }
+    }
+}
+
+impl Field for FastFocusedLaser {
+    fn total_energy(&self) -> f64 {
+        0.0
+    }
+
+    fn max_timestep(&self) -> Option<f64> {
+        Some(0.1 / self.omega())
+    }
+
+    fn contains(&self, r: FourVector) -> bool {
+        let phase: f64 = self.wavevector * r;
+        phase < 3.0 * self.omega() * self.duration
+    }
+
+    #[allow(non_snake_case)]
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+        let (E, B) = self.fields(r);
+        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
+    }
+
+    #[allow(non_snake_case)]
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+        let (E, B) = self.fields(r);
+        FastFocusedLaser::emit_photon(u, E, B, dt, rng)
     }
 }
 
