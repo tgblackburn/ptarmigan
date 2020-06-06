@@ -154,34 +154,37 @@ fn triple_j_no_alloc(n: i32, x: f64) -> (f64, f64, f64) {
     let nmax: i32 = 1 + (n as i32) + ((5.0 / (1.0 - 0.9 * v)) as i32);
     // ensure nmax is even
     let nmax = if nmax.rem_euclid(2) == 0 {nmax} else {nmax + 1};
+    let n_even = (n.rem_euclid(2) == 0) as i32;
+    // when to stop first loop?
+    let k_stop = n - 1 - n_even;
 
-    let mut quad: [f64; 4] = [0.0, 0.0, 1.0, 0.0];
+    let mut quad: [f64; 4] = [1.0, 0.0, 0.0, 0.0];
     let mut total = 0.0;
 
-    // this will hold J_{n-1}(x), J_n(x) and J_{n+1}(x)
-    let mut triple = (0.0, 0.0, 0.0);
-
-    for k in (0..=nmax).rev().step_by(2) {
-        // at start of loop
-        // order:  k  k+1  k+2  k+3
-        // quad:   0   1    2    3
-        // k starts at nmax and is always even
+    for k in (k_stop..=nmax).rev().step_by(2) {
+        quad[3] = quad[1];
+        quad[2] = quad[0];
         quad[1] = ((2 * (k + 2)) as f64) * quad[2] / x - quad[3];
         quad[0] = ((2 * (k + 1)) as f64) * quad[1] / x - quad[2];
-
-        // now we have all four values from k up to k+3
-        // check to see if we overlap with the target triple
-        if n > k {
-            if k == n-1 {
-                triple = (quad[0], quad[1], quad[2]);
-            } else if k+1 == n-1 {
-                triple = (quad[1], quad[2], quad[3]);
-            }
-        }
-
         total += quad[0];
-        quad[2] = quad[0];
+    }
+
+    // at this point, quad holds either
+    //    [n-1, n, n+1, n+2] if n is odd
+    // or [n-2, n-1, n, n+1] if n is even
+
+    let triple = {
+        let index = n_even as usize;
+        (quad[index], quad[index+1], quad[index+2])
+    };
+
+    // now finish the loop
+    for k in (0..=k_stop).rev().step_by(2).skip(1) {
         quad[3] = quad[1];
+        quad[2] = quad[0];
+        quad[1] = ((2 * (k + 2)) as f64) * quad[2] / x - quad[3];
+        quad[0] = ((2 * (k + 1)) as f64) * quad[1] / x - quad[2];
+        total += quad[0];
     }
 
     // quad[0] is now equal to J(0, x) * a constant
