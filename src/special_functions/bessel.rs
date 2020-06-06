@@ -17,12 +17,12 @@ impl BesselJ for f64 {
         match n {
             0 => j0(*self),
             1 => j1(*self),
-            _ => triple_j_no_alloc(n, *self).1
+            _ => triple_j(n, *self).1
         }
     }
 
     fn j_pm(&self, n: i32) -> (Self, Self, Self) {
-        triple_j_no_alloc(n, *self)
+        triple_j(n, *self)
     }
 }
 
@@ -110,42 +110,6 @@ fn j1(x: f64) -> f64 {
 /// (J_{n-1}(x), J_n(x), J_{n+1}(x)),
 /// designed for accuracy on the interval 0 < x < n.
 fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
-    if x == 0.0 {
-        return (0.0, 0.0, 0.0);
-    }
-    
-    let v: f64 = x / (n as f64);
-    let nmax: usize = 1 + (n as usize) + ((5.0 / (1.0 - 0.9 * v)) as usize);
-    let mut values = Vec::with_capacity(nmax + 1);
-
-    values.push(0.0f64);
-    values.push(1.0f64);
-    for k in (0..=nmax-2).rev() {
-        let len = values.len();
-        let val = ((2 * (k + 1)) as f64) * values[len-1] / x - values[len-2];
-        values.push(val);
-    }
-
-    // Bessel functions obey the summation identity
-    // J_0 + 2 Sum_{i=n}^\infty J_{2i} = 1
-    let norm: f64 = values.iter().rev().step_by(2).sum();
-    let norm = 2.0 * norm - values.last().unwrap();
-
-    if norm.is_nan() {
-        //eprintln!("j(n = {}, x = {}), nmax = {}, norm = {}", n, x, nmax, norm);
-        //if let Some(failed) = values.iter().enumerate().rev().find(|(i, &x)| x.is_finite()) {
-        //    eprintln!("failed after ({}, {:.3e}) => {:.3e} {:.3e}", failed.0, failed.1, values[failed.0], values[failed.0 + 1]);
-        //}
-        return (0.0, 0.0, 0.0);
-    }
-
-    //eprintln!("values = {:.3e} {:.3e} {:.3e} {:.3e} {:.3e}", values[0], values[1], values[2], values[3], values[4]);
-    //eprintln!("nmax = {}, norm = {:e}", nmax, norm);
-    let index: usize = nmax - (n as usize);
-    (values[index+1] / norm, values[index] / norm, values[index-1] / norm)
-}
-
-fn triple_j_no_alloc(n: i32, x: f64) -> (f64, f64, f64) {
     if x == 0.0 {
         return (0.0, 0.0, 0.0);
     }
