@@ -24,14 +24,19 @@ impl Series<i32> {
     /// Returns the value of series expansion at `x`
     #[allow(unused)]
     fn evaluate_at(&self, x: f64) -> f64 {
-        self.evaluate_up_to(x, SERIES_MAX_LENGTH)
-    }
-
-    fn evaluate_up_to(&self, x: f64, max: usize) -> f64 {
         self.a.iter()
             .zip(self.n.iter())
-            .take(max)
             .map(|(a, p)| a * x.powi(*p))
+            .sum::<f64>()
+    }
+
+    /// Evaluates a series expansion at `x`, including terms up to,
+    /// but not including, `x^max`.
+    fn evaluate_up_to(&self, x: f64, max: i32) -> f64 {
+        self.n.iter()
+            .take_while(|&&p| p < max)
+            .zip(self.a.iter())
+            .map(|(p, a)| a * x.powi(*p))
             .sum::<f64>()
     }
 }

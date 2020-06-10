@@ -2,6 +2,7 @@
 
 use std::f64::consts;
 //use super::factorial::Factorial;
+use super::airy::Airy;
 
 pub trait BesselJ {
     /// Evaluates the Bessel J function for integer order
@@ -161,6 +162,30 @@ fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
     }
 }
 
+fn zeta_at(z: f64) -> f64 {
+    if z < 1.0 {
+        let tmp = ((1.0 + (1.0 - z * z).sqrt()) / z).ln() - (1.0 - z * z).sqrt();
+        (3.0 * tmp / 2.0).powf(2.0 / 3.0)
+    } else { // if z >= 1.0 {
+        let tmp = (z * z - 1.0).sqrt() - (1.0 / z).acos();
+        -(3.0 * tmp / 2.0).powf(2.0 / 3.0)
+    }
+}
+
+#[allow(unused)]
+fn j_asymptotic(n: i32, x: f64) -> f64 {
+    let m = n as f64;
+    let z = x / m;
+    let zeta = zeta_at(z);
+    let ai = (m.powf(2.0/3.0) * zeta).ai().unwrap_or(0.0);
+    let aip = (m.powf(2.0/3.0) * zeta).ai_prime().unwrap_or(0.0);
+    let prefactor = 4.0 * zeta / (1.0 - z * z);
+    //let prefactor = if prefactor.is_nan() {4.0 * 2.0f64.cbrt() / (1.0 + z)} else {prefactor};
+    let ak = 1.0;
+    let bk = 5.0 / (48.0 * zeta * zeta) - (2.0 + 3.0 * z * z) / (24.0 * zeta.sqrt() * (1.0 - z * z).powf(1.5));
+    prefactor.powf(0.25) * (ai * ak / m.powf(1.0/3.0) - aip * bk / m.powf(5.0/3.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +285,36 @@ mod tests {
         let error = (target - value).abs() / target;
         println!("J(0, {}) = {:.6e}, expected {:.6e}, error {:.3e}", 120.0, value, target, error);
         assert!(error < MAX_ERROR);
+    }
+
+    #[test]
+    fn j400_350() {
+        let target = 5.912510654628083e-10;
+        let value = [triple_j(400, 350.0).1, j_asymptotic(400, 350.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(400, 350) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(400, 350) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
+    }
+
+    #[test]
+    fn j400_400() {
+        let target = 0.06070867128509718;
+        let value = [triple_j(400, 400.0).1, j_asymptotic(400, 400.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(400, 400) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(400, 400) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
+    }
+
+    #[test]
+    fn j1000_990() {
+        let target = 0.012361942456230178547;
+        let value = [triple_j(1000, 990.0).1, j_asymptotic(1000, 990.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(1000, 990) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(1000, 990) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
     }
 }
 

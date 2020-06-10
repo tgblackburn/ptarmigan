@@ -11,6 +11,8 @@
 //!   "Computing Complex Airy Functions by Numerical Quadrature",
 //!   Numerical Algorithms 30, 11--23 (2002)
 
+#![allow(non_upper_case_globals)]
+
 use super::Series;
 
 pub trait Airy {
@@ -27,60 +29,82 @@ pub trait Airy {
 
 impl Airy for f64 {
     fn ai(&self) -> Option<Self> {
+        // Numerically integrate the integal representation
+        // the Airy function using 40-point Gauss-Laguerre
+        // quadrature.
+        //
+        // That representation is
+        //   Ai(x) = a(x) \int_0^\infty f(t) w(t) dt
+        // where the integrand
+        //   f(t) = (2 + t/s)^(-1/6),
+        // the weight function
+        //   w(t) = t^(-1/6) exp(-t),
+        // the scale factor
+        //   a(x) = s^(-1/6) exp(-s) / (sqrt(pi) (48)^(1/6) Gamma(5/6))
+        // and
+        //   s = 2 x^(3/2) / 3.
         let x = *self;
         if x < 0.0 {
             None
         } else if x < 1.0 {
             // Use Taylor series expansion
-            Some(SMALL_X_EXPANSION.evaluate_up_to(x, 14))
-        } else if x < 2.0 {
-            // Numerically integrate the integal representation
-            // the Airy function using 40-point Gauss-Laguerre
-            // quadrature.
-            //
-            // That representation is
-            //   Ai(x) = a(x) \int_0^\infty f(t) w(t) dt
-            // where the integrand
-            //   f(t) = (2 + t/s)^(-1/6),
-            // the weight function
-            //   w(t) = t^(-1/6) exp(-t),
-            // the scale factor
-            //   a(x) = s^(-1/6) exp(-s) / (sqrt(pi) (48)^(1/6) Gamma(5/6))
-            // and
-            //   s = 2 x^(3/2) / 3.
-            let s = 2.0 * x.powf(1.5) / 3.0;
-            let a = 0.262183997088323 * s.powf(-1.0/6.0) * (-s).exp();
-            let integral: f64 = GAUSS_LAGUERRE_40_NODES.iter()
-                .zip(GAUSS_LAGUERRE_40_WEIGHTS.iter())
-                .map(|(x, w)| w * (2.0 + x / s).powf(-1.0/6.0))
-                .sum();
-            Some(a * integral)
-        } else if x < 10.0 {
-            // As above, but using fewer nodes
-            let s = 2.0 * x.powf(1.5) / 3.0;
-            let a = 0.262183997088323 * s.powf(-1.0/6.0) * (-s).exp();
-            let integral: f64 = GAUSS_LAGUERRE_16_NODES.iter()
-                .zip(GAUSS_LAGUERRE_16_WEIGHTS.iter())
-                .map(|(x, w)| w * (2.0 + x / s).powf(-1.0/6.0))
-                .sum();
-            Some(a * integral)
-        } else if x < 50.0 {
-            // As above, but using fewer nodes
-            let s = 2.0 * x.powf(1.5) / 3.0;
-            let a = 0.262183997088323 * s.powf(-1.0/6.0) * (-s).exp();
-            let integral: f64 = GAUSS_LAGUERRE_4_NODES.iter()
-                .zip(GAUSS_LAGUERRE_4_WEIGHTS.iter())
-                .map(|(x, w)| w * (2.0 + x / s).powf(-1.0/6.0))
-                .sum();
-            Some(a * integral)
+            Some(AIRY_SMALL_X.evaluate_up_to(x, 20))
         } else {
-            // Ai(50) < 4.5e-104
-            None
+            let s = 2.0 * x.powf(1.5) / 3.0;
+            let a = 0.262183997088323 * s.powf(-1.0/6.0) * (-s).exp();
+            let (nodes, weights): (&[f64], &[f64]) = if x < 2.0 {
+                (&GL_m1_6_NODES_40, &GL_m1_6_WEIGHTS_40)
+            } else if x < 10.0 {
+                (&GL_m1_6_NODES_16, &GL_m1_6_WEIGHTS_16)
+            } else {
+                (&GL_m1_6_NODES_4, &GL_m1_6_WEIGHTS_4)
+            };
+            let integral: f64 = nodes.iter()
+                .zip(weights.iter())
+                .map(|(x, w)| w * (2.0 + x / s).powf(-1.0/6.0))
+                .sum();
+            Some(a * integral)
         }
     }
 
     fn ai_prime(&self) -> Option<Self> {
-        unimplemented!()
+        // Numerically integrate the integal representation
+        // the Airy prime function using Gauss-Laguerre quadrature.
+        //
+        // That representation is
+        //   Ai'(x) = b(x) \int_0^\infty f(t) w(t) dt
+        // where the integrand
+        //   f(t) = (2 + t/s)^(1/6),
+        // the weight function
+        //   w(t) = t^(1/6) exp(-t),
+        // the scale factor
+        //   b(x) = -(3s)^(1/6) exp(-s) / (2^(4/3) sqrt(pi) Gamma(7/6))
+        // and
+        //   s = 2 x^(3/2) / 3.
+        let x = *self;
+        if x < 0.0 {
+            None
+        } else if x < 1.0 {
+            // Use Taylor series expansion
+            Some(AIRY_PRIME_SMALL_X.evaluate_up_to(x, 20))
+        } else {
+            let s = 2.0 * x.powf(1.5) / 3.0;
+            let b = -0.2898380090915846 * s.powf(1.0/6.0) * (-s).exp();
+            let (nodes, weights): (&[f64], &[f64]) = if x < 2.0 {
+                (&GL_p1_6_NODES_32, &GL_p1_6_WEIGHTS_32)
+            } else if x < 4.0 {
+                (&GL_p1_6_NODES_16, &GL_p1_6_WEIGHTS_16)
+            } else if x < 11.0 {
+                (&GL_p1_6_NODES_8, &GL_p1_6_WEIGHTS_8)
+            } else {
+                (&GL_p1_6_NODES_4, &GL_p1_6_WEIGHTS_4)
+            };
+            let integral: f64 = nodes.iter()
+                .zip(weights.iter())
+                .map(|(x, w)| w * (2.0 + x / s).powf(1.0/6.0))
+                .sum();
+            Some(b * integral)
+        }
     }
 }
 
@@ -124,11 +148,63 @@ mod tests {
     #[test]
     #[should_panic]
     fn airy_200() {
-        let _val = Airy::ai(&200.0).unwrap();
+        let val = Airy::ai(&200.0).unwrap();
+        let target = 9.1536243084526844166e-821;
+        println!("Ai(200) = {:e}, calculated = {:e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn airy_prime_0_5() {
+        let val = Airy::ai_prime(&0.5).unwrap();
+        let target = -0.2249105326646839;
+        println!("Ai'(0) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn airy_prime_1_2() {
+        let val = Airy::ai_prime(&1.2).unwrap();
+        let target = -0.1327853785572262;
+        println!("Ai'(1.2) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn airy_prime_3() {
+        let val = Airy::ai_prime(&3.0).unwrap();
+        let target = -0.01191297670595132;
+        println!("Ai'(3) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn airy_prime_5() {
+        let val = Airy::ai_prime(&5.0).unwrap();
+        let target = -0.0002474138908684625;
+        println!("Ai'(5) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn airy_prime_100() {
+        let val = Airy::ai_prime(&100.0).unwrap();
+        let target = -2.635140361604410e-290;
+        println!("Ai'(100) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    #[should_panic]
+    fn airy_prime_200() {
+        let val = Airy::ai_prime(&200.0).unwrap();
+        let target = -1.294632359221882e-819; // too small to represent
+        println!("Ai'(200) = {:.15e}, calculated = {:.15e}", target, val);
+        assert!( ((val - target)/target).abs() < MAX_REL_ERR );
     }
 }
 
-static SMALL_X_EXPANSION: Series<i32> = Series {
+static AIRY_SMALL_X: Series<i32> = Series {
     a: [
 		3.550280538878172e-1,
 		-2.588194037928068e-1,
@@ -156,7 +232,7 @@ static SMALL_X_EXPANSION: Series<i32> = Series {
     ],
 };
  
-static GAUSS_LAGUERRE_40_NODES: [f64; 40] = [
+static GL_m1_6_NODES_40: [f64; 40] = [
     2.838914179945677e-2,
     1.709853788600349e-1,
     4.358716783417705e-1,
@@ -199,7 +275,7 @@ static GAUSS_LAGUERRE_40_NODES: [f64; 40] = [
     1.419607885990635e+2,
 ];
 
-static GAUSS_LAGUERRE_40_WEIGHTS: [f64; 40] = [
+static GL_m1_6_WEIGHTS_40: [f64; 40] = [
     1.437204088033139e-1,
     2.304075592418809e-1,
     2.422530455213276e-1,
@@ -242,7 +318,7 @@ static GAUSS_LAGUERRE_40_WEIGHTS: [f64; 40] = [
     1.625726581852354e-61,
 ];
 
-static GAUSS_LAGUERRE_16_NODES: [f64; 16] = [
+static GL_m1_6_NODES_16: [f64; 16] = [
     6.990398696320011e-2,
     4.216550531234919e-1,
     1.077886957549787e+0,
@@ -261,7 +337,7 @@ static GAUSS_LAGUERRE_16_NODES: [f64; 16] = [
     5.139394535360512e+1,
 ];
 
-static GAUSS_LAGUERRE_16_WEIGHTS: [f64; 16] = [
+static GL_m1_6_WEIGHTS_16: [f64; 16] = [
     2.922417179018809e-1,
     3.811335382664116e-1,
     2.723536895279418e-1,
@@ -280,16 +356,188 @@ static GAUSS_LAGUERRE_16_WEIGHTS: [f64; 16] = [
     2.928371092535847e-22,
 ];
 
-static GAUSS_LAGUERRE_4_NODES: [f64; 4] = [
+static GL_m1_6_NODES_4: [f64; 4] = [
     2.605163387076808e-1,
     1.609745468990262e+0,
     4.334508323683735e+0,
     9.128563201951656e+0,
 ];
 
-static GAUSS_LAGUERRE_4_WEIGHTS: [f64; 4] = [
+static GL_m1_6_WEIGHTS_4: [f64; 4] = [
     7.261979421222567e-1,
     3.654875045103909e-1,
     3.661964191912544e-2,
     4.819413563529568e-4,
+];
+
+static AIRY_PRIME_SMALL_X: Series<i32> = Series {
+    a: [
+        -2.588194037928068e-1,
+        1.775140269439086e-1,
+        -8.627313459760227e-2,
+        1.183426846292724e-2,
+        -3.594713941566761e-3,
+        2.465472596443175e-4,
+        -5.705895145344065e-5,
+        2.490376360043611e-6,
+        -4.754912621120054e-7,
+        1.482366880978340e-8,
+        -2.438416728779515e-9,
+        5.813203454817020e-11,
+        -8.466724752706649e-12,
+        1.614778737449172e-13,
+        -2.121986153560564e-14,
+        3.343227199687727e-16,
+        -4.018913169622280e-17,
+        5.357735896935460e-19,
+        -5.953945436477452e-20,
+        6.842574581015913e-22,
+    ],
+    n: [
+        0, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 23, 24, 26, 27, 29
+    ],
+};
+
+static GL_p1_6_NODES_32: [f64; 32] = [
+    5.419216335178797e-2,
+    2.563592519394501e-1,
+    6.105337846619220e-1,
+    1.117601250499268e+0,
+    1.778772012187290e+0,
+    2.595638278983496e+0,
+    3.570199899661993e+0,
+    4.704893160223047e+0,
+    6.002626347905401e+0,
+    7.466823827262402e+0,
+    9.101480444265405e+0,
+    1.091122854489481e+1,
+    1.290142060175126e+1,
+    1.507823142543966e+1,
+    1.744878530615157e+1,
+    2.002131536333526e+1,
+    2.280536515887909e+1,
+    2.581204670185127e+1,
+    2.905437507794347e+1,
+    3.254770931734353e+1,
+    3.631034393434832e+1,
+    4.036431973636326e+1,
+    4.473656336085551e+1,
+    4.946053708147523e+1,
+    5.457871410534143e+1,
+    6.014645784733515e+1,
+    6.623844176939932e+1,
+    7.296004468269724e+1,
+    8.046956683977571e+1,
+    8.902770553058033e+1,
+    9.913306653084352e+1,
+    1.120679739957869e+2,
+];
+
+static GL_p1_6_WEIGHTS_32: [f64; 32] = [
+    7.367724323641389e-2,
+    1.714949262919796e-1,
+    2.153058701016087e-1,
+    1.945396597062869e-1,
+    1.372953180154878e-1,
+    7.829966135819920e-2,
+    3.668710726033288e-2,
+    1.424309297649275e-2,
+    4.600499408929096e-3,
+    1.237919864444931e-3,
+    2.773347849650942e-4,
+    5.162030773770084e-5,
+    7.955256663254091e-6,
+    1.010381613093466e-6,
+    1.051377364457356e-7,
+    8.899151696883182e-9,
+    6.074337175352181e-10,
+    3.309246110261001e-11,
+    1.421363931034547e-12,
+    4.743105898350198e-14,
+    1.208266778686291e-15,
+    2.300146249450871e-17,
+    3.187891977157999e-19,
+    3.113810948822685e-21,
+    2.056799463698863e-23,
+    8.706362674815503e-26,
+    2.196575768354253e-28,
+    2.982555239475078e-31,
+    1.870639634978154e-34,
+    4.218964065274585e-38,
+    2.128144435698866e-42,
+    7.223360574564270e-48,
+];
+
+static GL_p1_6_NODES_16: [f64; 16] = [
+    1.065086833791228e-1,
+    5.045951155037972e-1,
+    1.204887493317772e+0,
+    2.214046599347790e+0,
+    3.541916988814612e+0,
+    5.202171768085574e+0,
+    7.213182107425566e+0,
+    9.599322961711244e+0,
+    1.239297800449880e+1,
+    1.563772034253402e+1,
+    1.939360520131596e+1,
+    2.374657817383913e+1,
+    2.882679983703437e+1,
+    3.484935526158435e+1,
+    4.222537043072563e+1,
+    5.200762769754892e+1,
+];
+
+static GL_p1_6_WEIGHTS_16: [f64; 16] = [
+    1.538656081051387e-1,
+    2.953754551696966e-1,
+    2.638474205248174e-1,
+    1.455113440029979e-1,
+    5.332203916022353e-2,
+    1.327529826855286e-2,
+    2.246975117999703e-3,
+    2.552794884543879e-4,
+    1.899652442772008e-5,
+    8.918653910312376e-7,
+    2.501268133009190e-8,
+    3.867337606990208e-10,
+    2.915656187795174e-12,
+    8.748503423240594e-15,
+    7.104981102043080e-18,
+    5.929862290898086e-22,
+];
+
+static GL_p1_6_NODES_8: [f64; 8] = [
+    2.059975989105105e-1,
+    9.813842157761038e-1,
+    2.367409551874067e+0,
+    4.419136826604687e+0,
+    7.232706381634387e+0,
+    1.097875723010299e+1,
+    1.599457655964550e+1,
+    2.315336496878509e+1,
+];
+
+static GL_p1_6_WEIGHTS_8: [f64; 8] = [
+    3.011583649037287e-1,
+    4.012843245437889e-1,
+    1.846919290002817e-1,
+    3.721629829536716e-2,
+    3.257951078451206e-3,
+    1.094133825516171e-4,
+    1.051096399731320e-6,
+    1.329470132838947e-9,
+];
+
+static GL_p1_6_NODES_4: [f64; 4] = [
+    3.871921360861267e-1,
+    1.882252071875780e+0,
+    4.737752987864212e+0,
+    9.659469470840548e+0,
+];
+
+static GL_p1_6_WEIGHTS_4: [f64; 4] = [
+    5.272915276171070e-1,
+    3.578901722679283e-1,
+    4.192732430657323e-2,
+    6.103094384307378e-4,
 ];
