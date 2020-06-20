@@ -2,6 +2,7 @@
 
 use std::f64::consts;
 //use super::factorial::Factorial;
+use super::airy::Airy;
 
 pub trait BesselJ {
     /// Evaluates the Bessel J function for integer order
@@ -113,36 +114,76 @@ fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
     if x == 0.0 {
         return (0.0, 0.0, 0.0);
     }
-    
-    let v: f64 = x / (n as f64);
-    let nmax: usize = 1 + (n as usize) + ((5.0 / (1.0 - 0.9 * v)) as usize);
-    let mut values = Vec::with_capacity(nmax + 1);
 
-    values.push(0.0f64);
-    values.push(1.0f64);
-    for k in (0..=nmax-2).rev() {
-        let len = values.len();
-        let val = ((2 * (k + 1)) as f64) * values[len-1] / x - values[len-2];
-        values.push(val);
+    let v: f64 = x / (n as f64);
+    let nmax: i32 = 1 + (n as i32) + ((5.0 / (1.0 - 0.9 * v)) as i32);
+    // ensure nmax is even
+    let nmax = if nmax.rem_euclid(2) == 0 {nmax} else {nmax + 1};
+    let n_even = (n.rem_euclid(2) == 0) as i32;
+    // when to stop first loop?
+    let k_stop = n - 1 - n_even;
+
+    let mut quad: [f64; 4] = [1.0, 0.0, 0.0, 0.0];
+    let mut total = 0.0;
+
+    for k in (k_stop..=nmax).rev().step_by(2) {
+        quad[3] = quad[1];
+        quad[2] = quad[0];
+        quad[1] = ((2 * (k + 2)) as f64) * quad[2] / x - quad[3];
+        quad[0] = ((2 * (k + 1)) as f64) * quad[1] / x - quad[2];
+        total += quad[0];
     }
 
-    // Bessel functions obey the summation identity
-    // J_0 + 2 Sum_{i=n}^\infty J_{2i} = 1
-    let norm: f64 = values.iter().rev().step_by(2).sum();
-    let norm = 2.0 * norm - values.last().unwrap();
+    // at this point, quad holds either
+    //    [n-1, n, n+1, n+2] if n is odd
+    // or [n-2, n-1, n, n+1] if n is even
+
+    let triple = {
+        let index = n_even as usize;
+        (quad[index], quad[index+1], quad[index+2])
+    };
+
+    // now finish the loop
+    for k in (0..=k_stop).rev().step_by(2).skip(1) {
+        quad[3] = quad[1];
+        quad[2] = quad[0];
+        quad[1] = ((2 * (k + 2)) as f64) * quad[2] / x - quad[3];
+        quad[0] = ((2 * (k + 1)) as f64) * quad[1] / x - quad[2];
+        total += quad[0];
+    }
+
+    // quad[0] is now equal to J(0, x) * a constant
+    let norm = 2.0 * total - quad[0];
 
     if norm.is_nan() {
-        //eprintln!("j(n = {}, x = {}), nmax = {}, norm = {}", n, x, nmax, norm);
-        //if let Some(failed) = values.iter().enumerate().rev().find(|(i, &x)| x.is_finite()) {
-        //    eprintln!("failed after ({}, {:.3e}) => {:.3e} {:.3e}", failed.0, failed.1, values[failed.0], values[failed.0 + 1]);
-        //}
-        return (0.0, 0.0, 0.0);
+        (0.0, 0.0, 0.0)
+    } else {
+        (triple.0 / norm, triple.1 / norm, triple.2 / norm)
     }
+}
 
-    //eprintln!("values = {:.3e} {:.3e} {:.3e} {:.3e} {:.3e}", values[0], values[1], values[2], values[3], values[4]);
-    //eprintln!("nmax = {}, norm = {:e}", nmax, norm);
-    let index: usize = nmax - (n as usize);
-    (values[index+1] / norm, values[index] / norm, values[index-1] / norm)
+fn zeta_at(z: f64) -> f64 {
+    if z < 1.0 {
+        let tmp = ((1.0 + (1.0 - z * z).sqrt()) / z).ln() - (1.0 - z * z).sqrt();
+        (3.0 * tmp / 2.0).powf(2.0 / 3.0)
+    } else { // if z >= 1.0 {
+        let tmp = (z * z - 1.0).sqrt() - (1.0 / z).acos();
+        -(3.0 * tmp / 2.0).powf(2.0 / 3.0)
+    }
+}
+
+#[allow(unused)]
+fn j_asymptotic(n: i32, x: f64) -> f64 {
+    let m = n as f64;
+    let z = x / m;
+    let zeta = zeta_at(z);
+    let ai = (m.powf(2.0/3.0) * zeta).ai().unwrap_or(0.0);
+    let aip = (m.powf(2.0/3.0) * zeta).ai_prime().unwrap_or(0.0);
+    let prefactor = 4.0 * zeta / (1.0 - z * z);
+    //let prefactor = if prefactor.is_nan() {4.0 * 2.0f64.cbrt() / (1.0 + z)} else {prefactor};
+    let ak = 1.0;
+    let bk = 5.0 / (48.0 * zeta * zeta) - (2.0 + 3.0 * z * z) / (24.0 * zeta.sqrt() * (1.0 - z * z).powf(1.5));
+    prefactor.powf(0.25) * (ai * ak / m.powf(1.0/3.0) - aip * bk / m.powf(5.0/3.0))
 }
 
 #[cfg(test)]
@@ -244,6 +285,36 @@ mod tests {
         let error = (target - value).abs() / target;
         println!("J(0, {}) = {:.6e}, expected {:.6e}, error {:.3e}", 120.0, value, target, error);
         assert!(error < MAX_ERROR);
+    }
+
+    #[test]
+    fn j400_350() {
+        let target = 5.912510654628083e-10;
+        let value = [triple_j(400, 350.0).1, j_asymptotic(400, 350.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(400, 350) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(400, 350) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
+    }
+
+    #[test]
+    fn j400_400() {
+        let target = 0.06070867128509718;
+        let value = [triple_j(400, 400.0).1, j_asymptotic(400, 400.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(400, 400) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(400, 400) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
+    }
+
+    #[test]
+    fn j1000_990() {
+        let target = 0.012361942456230178547;
+        let value = [triple_j(1000, 990.0).1, j_asymptotic(1000, 990.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(1000, 990) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(1000, 990) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[0] < MAX_ERROR);
     }
 }
 
