@@ -86,13 +86,39 @@ fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
 ///   `dP/(dv dt) = ⍺ m f(n, a, η, v) / γ`
 /// over the domain `0 < v < 1`
 fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
-    let integral: f64 = GAUSS_32_NODES.iter()
-        .map(|x| 0.5 * (x + 1.0))
-        .zip(GAUSS_32_WEIGHTS.iter())
-        .map(|(v, w)| {
-            0.5 * w * spectrum(n, a, eta, v)
-        })
-        .sum();
+    let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
+    // approx harmonic index when sigma / mu < 0.2
+    let n_switch = (32.3 * (1.0 + 0.476 * a.powf(1.56))) as i32;
+    let integral: f64 = if sn < 2.0 || n < n_switch {
+        GAUSS_32_NODES.iter()
+            .map(|x| 0.5 * (x + 1.0))
+            .zip(GAUSS_32_WEIGHTS.iter())
+            .map(|(v, w)| {
+                0.5 * w * spectrum(n, a, eta, v)
+            })
+            .sum()
+        } else {
+            // If peak of spectrum v >= 3/4 and peak is sufficiently narrow,
+            // switch to integrating over u = v / (1 - v) instead.
+            // Partition the range into 0 < u < 1 + sn, and
+            // 1 + sn < u < 3(1 + sn) and integrate each separately,
+            // to ensure we capture the peak.
+            let lower: f64 = GAUSS_16_NODES.iter()
+                .map(|x| 0.5 * (1.0 + sn) * (x + 1.0))
+                .zip(GAUSS_16_WEIGHTS.iter())
+                .map(|(u, w)|
+                    0.5 * (1.0 + sn) * w * spectrum(n, a, eta, u / (1.0 + u)) / (1.0 + u).powi(2)
+                )
+                .sum();
+            let upper: f64 = GAUSS_16_NODES.iter()
+                .map(|x| (1.0 + sn) + 0.5 * 2.0 * (1.0 + sn) * (x + 1.0))
+                .zip(GAUSS_16_WEIGHTS.iter())
+                .map(|(u, w)|
+                    0.5 * 2.0 * (1.0 + sn) * w * spectrum(n, a, eta, u / (1.0 + u)) / (1.0 + u).powi(2)
+                )
+                .sum();
+            lower + upper
+        };
     integral
 }
 
@@ -260,7 +286,28 @@ mod tests {
         let target = 3.751480198e-6;
         let error = ((rate - target) / target).abs();
         println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-4);
+        assert!(error < 1.0e-6);
+
+        let (n, a, eta) = (160, 2.0, 0.2);
+        let rate = integrated_spectrum(n, a, eta);
+        let target = 6.842944878e-9;
+        let error = ((rate - target) / target).abs();
+        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
+        assert!(error < 1.0e-6);
+
+        let (n, a, eta) = (50, 3.0, 0.1);
+        let rate = integrated_spectrum(n, a, eta);
+        let target = 5.090018978e-4;
+        let error = ((rate - target) / target).abs();
+        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
+        assert!(error < 1.0e-6);
+
+        let (n, a, eta) = (200, 3.0, 0.1);
+        let rate = integrated_spectrum(n, a, eta);
+        let target = 3.504645316e-6;
+        let error = ((rate - target) / target).abs();
+        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
+        assert!(error < 1.0e-6);
     }
 
     #[test]
@@ -360,4 +407,42 @@ static GAUSS_32_WEIGHTS: [f64; 32] = [
     2.539206500000000e-2,
     1.627439500000000e-2,
     7.018610000000000e-3,
+];
+
+static GAUSS_16_NODES: [f64; 16] = [
+    -9.894009349916499e-1,
+    -9.445750230732326e-1,
+    -8.656312023878317e-1,
+    -7.554044083550030e-1,
+    -6.178762444026437e-1,
+    -4.580167776572274e-1,
+    -2.816035507792589e-1,
+    -9.501250983763744e-2,
+    9.501250983763744e-2,
+    2.816035507792589e-1,
+    4.580167776572274e-1,
+    6.178762444026437e-1,
+    7.554044083550030e-1,
+    8.656312023878317e-1,
+    9.445750230732326e-1,
+    9.894009349916499e-1,
+];
+
+static GAUSS_16_WEIGHTS: [f64; 16] = [
+    2.715245941175400e-2,
+    6.225352393864800e-2,
+    9.515851168249300e-2,
+    1.246289712555340e-1,
+    1.495959888165770e-1,
+    1.691565193950025e-1,
+    1.826034150449236e-1,
+    1.894506104550685e-1,
+    1.894506104550685e-1,
+    1.826034150449236e-1,
+    1.691565193950025e-1,
+    1.495959888165770e-1,
+    1.246289712555340e-1,
+    9.515851168249300e-2,
+    6.225352393864800e-2,
+    2.715245941175400e-2,
 ];
