@@ -278,6 +278,25 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn create_rate_table() {
+        const N_COLS: usize = 47;
+        const N_ROWS: usize = 50;
+        let mut table = [[0.0; N_COLS]; N_ROWS];
+        for i in 0..N_ROWS {
+            // eta = eta_min * 10^(i/20)
+            let eta = total::LOW_ETA_LIMIT * 10.0f64.powf((i as f64) / 20.0);
+            for j in 0..N_COLS {
+                // a = a_min * 10^(j/20)
+                let a = total::LOW_A_LIMIT * 10.0f64.powf((j as f64) / 20.0);
+                let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
+                table[i][j] = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum();
+                println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+            }
+        }
+    }
+
+    #[test]
     fn partial_rate() {
         let (n, a, eta) = (2, 0.5, 0.15);
         let rate = integrated_spectrum(n, a, eta);
