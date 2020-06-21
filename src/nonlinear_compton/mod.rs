@@ -29,22 +29,7 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
         return None;
     }
 
-    let f = if a < total::LOW_A_LIMIT && eta < total::LOW_ETA_LIMIT {
-        // linear Thomson
-        2.0 * a  * a * eta / 3.0
-    } else if a < total::LOW_A_LIMIT {
-        // linear Compton rate for arbitrary eta
-        a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
-            - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta)
-    } else if eta < total::LOW_ETA_LIMIT {
-        eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap_or_else(|| {
-            panic!("NLC rate lookup out of bounds (low eta table): a = {:.3e}, eta = {:.3e}", a, eta);
-        })
-    } else {
-        total::RATE_TABLE.at(a, eta).unwrap_or_else(|| {
-            panic!("NLC rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
-        })
-    };
+    let f = sum_integrated_spectra(a, eta);
 
     Some(ALPHA_FINE * f * dphi / eta)
 }
@@ -120,6 +105,33 @@ fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
             lower + upper
         };
     integral
+}
+
+/// Returns the sum, over harmonic index, of the partial nonlinear
+/// Compton rates. Equivalent to calling
+/// ```
+/// let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
+/// let rate = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum::<f64>();
+/// ```
+/// but implemented as a table lookup.
+fn sum_integrated_spectra(a: f64, eta: f64) -> f64 {
+    let f = if a < total::LOW_A_LIMIT && eta < total::LOW_ETA_LIMIT {
+        // linear Thomson
+        2.0 * a  * a * eta / 3.0
+    } else if a < total::LOW_A_LIMIT {
+        // linear Compton rate for arbitrary eta
+        a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
+            - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta)
+    } else if eta < total::LOW_ETA_LIMIT {
+        eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap_or_else(|| {
+            panic!("NLC rate lookup out of bounds (low eta table): a = {:.3e}, eta = {:.3e}", a, eta);
+        })
+    } else {
+        total::RATE_TABLE.at(a, eta).unwrap_or_else(|| {
+            panic!("NLC rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+        })
+    };
+    f
 }
 
 /// Assuming that emission takes place, pseudorandomly
@@ -316,7 +328,7 @@ mod tests {
         let (nmax, a, eta) = (10, 0.5, 0.2);
         let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
         let total: f64 = rates.iter().sum();
-        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let target = sum_integrated_spectra(a, eta);
         let error = ((total - target) / target).abs();
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
@@ -324,7 +336,7 @@ mod tests {
         let (nmax, a, eta) = (20, 1.0, 0.2);
         let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
         let total: f64 = rates.iter().sum();
-        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let target = sum_integrated_spectra(a, eta);
         let error = ((total - target) / target).abs();
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
@@ -332,7 +344,7 @@ mod tests {
         let (nmax, a, eta) = (280, 3.0, 0.15);
         let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
         let total: f64 = rates.iter().sum();
-        let target = total::RATE_TABLE.at(a, eta).unwrap();
+        let target = sum_integrated_spectra(a, eta);
         let error = ((total - target) / target).abs();
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
