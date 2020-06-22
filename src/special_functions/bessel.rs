@@ -23,7 +23,13 @@ impl BesselJ for f64 {
     }
 
     fn j_pm(&self, n: i32) -> (Self, Self, Self) {
-        triple_j(n, *self)
+        if n < 1000 {
+            triple_j(n, *self)
+        } else {
+            let jn = j_asymptotic(n, *self);
+            let jp = j_asymptotic(n+1, *self);
+            (((2 * n) as f64) * jn / *self - jp, jn, jp)
+        }
     }
 }
 
@@ -112,7 +118,13 @@ fn j1(x: f64) -> f64 {
 /// designed for accuracy on the interval 0 < x < n.
 fn triple_j(n: i32, x: f64) -> (f64, f64, f64) {
     if x == 0.0 {
-        return (0.0, 0.0, 0.0);
+        let triple = match n {
+            -1 => (0.0, 0.0, 1.0),
+             0 => (0.0, 1.0, 0.0),
+             1 => (1.0, 0.0, 0.0),
+             _ => (0.0, 0.0, 0.0),
+        };
+        return triple;
     }
 
     let v: f64 = x / (n as f64);
@@ -172,7 +184,6 @@ fn zeta_at(z: f64) -> f64 {
     }
 }
 
-#[allow(unused)]
 fn j_asymptotic(n: i32, x: f64) -> f64 {
     let m = n as f64;
     let z = x / m;
@@ -314,7 +325,17 @@ mod tests {
         let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
         println!("recurrence: J(1000, 990) = {:.6e} with error {:.6e}", value[0], error[0]);
         println!("asymptotic: J(1000, 990) = {:.6e} with error {:.6e}", value[1], error[1]);
-        assert!(error[0] < MAX_ERROR);
+        assert!(error[1] < MAX_ERROR);
+    }
+
+    #[test]
+    fn j1000_900() {
+        let target = 5.0841100850412997894e-16;
+        let value = [triple_j(1000, 900.0).1, j_asymptotic(1000, 900.0)];
+        let error = [(target - value[0]).abs() / target, (target - value[1]).abs() / target];
+        println!("recurrence: J(1000, 900) = {:.6e} with error {:.6e}", value[0], error[0]);
+        println!("asymptotic: J(1000, 900) = {:.6e} with error {:.6e}", value[1], error[1]);
+        assert!(error[1] < MAX_ERROR);
     }
 }
 
