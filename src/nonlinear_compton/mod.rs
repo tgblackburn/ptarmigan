@@ -280,6 +280,8 @@ mod tests {
     #[test]
     #[ignore]
     fn create_rate_table() {
+        use std::f64::consts;
+
         const N_COLS: usize = 47;
         const N_ROWS: usize = 50;
         let mut table = [[0.0; N_COLS]; N_ROWS];
@@ -291,9 +293,28 @@ mod tests {
                 let a = total::LOW_A_LIMIT * 10.0f64.powf((j as f64) / 20.0);
                 let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
                 table[i][j] = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum();
-                println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+                //println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
             }
         }
+
+        let mut file = File::create("output/nlc_rate_table.txt").unwrap();
+        writeln!(file, "pub const RATE_TABLE: Table2D = Table2D {{").unwrap();
+        writeln!(file, "\tlog_scaled: true,").unwrap();
+        writeln!(file, "\tmin: [{:.12e}, {:.12e}],", total::LOW_A_LIMIT.ln(), total::LOW_ETA_LIMIT.ln()).unwrap();
+        writeln!(file, "\tstep: [{:.12e}, {:.12e}],", consts::LN_10 / 20.0, consts::LN_10 / 20.0).unwrap();
+        writeln!(file, "\tdata: [").unwrap();
+
+        for row in table.iter() {
+            write!(file, "\t\t[{:>+18.12e}", row.first().unwrap().ln()).unwrap();
+            for val in row.iter().skip(1) {
+                write!(file, ", {:>+18.12e}", val.ln()).unwrap();
+            }
+            writeln!(file, "],").unwrap();
+        }
+
+        writeln!(file, "\t],").unwrap();
+        writeln!(file, "}};").unwrap();
+
     }
 
     #[test]
