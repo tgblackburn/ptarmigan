@@ -64,6 +64,18 @@ fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     )
 }
 
+/// Equivalent to `spectrum(n, a, eta, v) / eta` for eta -> 0.
+#[allow(unused)]
+fn spectrum_low_eta(n: i32, a: f64, v: f64) -> f64 {
+    if v < 0.0 || v >= 1.0 {
+        return 0.0;
+    }
+
+    let z = (4.0 * a * a * ((n * n) as f64) * v * (1.0-v) / (1.0 + a * a)).sqrt();
+    let (j_nm1, j_n, j_np1) = z.j_pm(n);
+    (n as f64) * (a * a * j_nm1.powi(2) - 2.0 * (1.0 + a * a) * j_n.powi(2) + a * a * j_np1.powi(2)) / (1.0 + a * a)
+}
+
 /// Integrates the important part of the nonlinear Compton
 /// differential rate, f, which gives either
 ///   `dP/(dv dϕ) = ⍺ f(n, a, η, v) / η`
@@ -107,6 +119,26 @@ fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
     integral
 }
 
+/// Equivalent to `integrated_spectrum(n, a, eta, v) / eta` for eta -> 0.
+#[allow(unused)]
+fn integrated_spectrum_low_eta(n: i32, a: f64) -> f64 {
+    // integrate from v = 0 to v = 1/2
+    let lower: f64 = GAUSS_32_NODES.iter()
+        .map(|x| 0.25 * (x + 1.0))
+        .zip(GAUSS_32_WEIGHTS.iter())
+        .map(|(v, w)| 0.25 * w * spectrum_low_eta(n, a, v))
+        .sum();
+
+    // integrate from v = 1/2 to v = 1
+    let upper: f64 = GAUSS_32_NODES.iter()
+        .map(|x| 0.25 * (x + 3.0))
+        .zip(GAUSS_32_WEIGHTS.iter())
+        .map(|(v, w)| 0.25 * w * spectrum_low_eta(n, a, v))
+        .sum();
+
+    lower + upper
+}
+
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Compton rates. Equivalent to calling
 /// ```
@@ -147,18 +179,32 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, rng: &mut R, fixed_n: Opti
 
     // From the partial rates, pick a harmonic number
     // or use one specified
+    // let n = fixed_n.unwrap_or_else(|| {
+    //     let nmax = (10.0 * (1.0 + a * a * a)) as i32;
+    //     let mut cumsum: f64 = 0.0;
+    //     let mut rates: Vec<f64> = Vec::with_capacity(nmax as usize);
+    //     for k in 1..=nmax {
+    //         cumsum += integrated_spectrum(k, a, eta);
+    //         rates.push(cumsum);
+    //     }
+    //     let total = rates.last().unwrap();
+    //     let target = total * rng.gen::<f64>();
+    //     let (index, _) = rates.iter().enumerate().find(|(_i, &cs)| cs > target).unwrap();
+    //     (index + 1) as i32
+    // });
     let n = fixed_n.unwrap_or_else(|| {
         let nmax = (10.0 * (1.0 + a * a * a)) as i32;
+        let target = sum_integrated_spectra(a, eta) * rng.gen::<f64>();
         let mut cumsum: f64 = 0.0;
-        let mut rates: Vec<f64> = Vec::with_capacity(nmax as usize);
+        let mut index: i32 = 1;
         for k in 1..=nmax {
             cumsum += integrated_spectrum(k, a, eta);
-            rates.push(cumsum);
-        }
-        let total = rates.last().unwrap();
-        let target = total * rng.gen::<f64>();
-        let (index, _) = rates.iter().enumerate().find(|(_i, &cs)| cs > target).unwrap();
-        (index + 1) as i32
+            if cumsum > target {
+                index = k;
+                break;
+            }
+        };
+        index
     });
 
     assert!(n >= 1);
@@ -305,9 +351,9 @@ mod tests {
         writeln!(file, "\tdata: [").unwrap();
 
         for row in table.iter() {
-            write!(file, "\t\t[{:>+18.12e}", row.first().unwrap().ln()).unwrap();
+            write!(file, "\t\t[{:>18.12e}", row.first().unwrap().ln()).unwrap();
             for val in row.iter().skip(1) {
-                write!(file, ", {:>+18.12e}", val.ln()).unwrap();
+                write!(file, ", {:>18.12e}", val.ln()).unwrap();
             }
             writeln!(file, "],").unwrap();
         }
@@ -315,6 +361,28 @@ mod tests {
         writeln!(file, "\t],").unwrap();
         writeln!(file, "}};").unwrap();
 
+        let mut table = [0.0; N_COLS];
+        for j in 0..N_COLS {
+            let a = total::LOW_A_LIMIT * 10.0f64.powf((j as f64) / 20.0);
+            let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
+            table[j] = (1..=nmax).map(|n| integrated_spectrum_low_eta(n, a)).sum();
+            //println!("eta -> 0, a = {:.3e}, ln(rate) = {:.6e}", a, table[j].ln());
+        }
+
+        let mut file = File::create("output/nlc_low_eta_rate_table.txt").unwrap();
+        writeln!(file, "pub const LOW_ETA_RATE_TABLE: Table1D = Table1D {{").unwrap();
+        writeln!(file, "\tlog_scaled: true,").unwrap();
+        writeln!(file, "\tmin: {:.12e},", total::LOW_A_LIMIT.ln()).unwrap();
+        writeln!(file, "\tstep: {:.12e},", consts::LN_10 / 20.0).unwrap();
+        writeln!(file, "\tdata: [").unwrap();
+
+        write!(file, "\t\t{:>18.12e}", table.first().unwrap().ln()).unwrap();
+        for val in table.iter().skip(1) {
+            write!(file, ", {:>18.12e}", val.ln()).unwrap();
+        }
+
+        writeln!(file, "\n\t],").unwrap();
+        writeln!(file, "}};").unwrap();
     }
 
     #[test]
@@ -381,9 +449,20 @@ mod tests {
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
 
-        let (nmax, a, eta) = (280, 3.0, 0.15);
+        let (nmax, a, eta) = (280, 3.0, 0.12);
         let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
         let total: f64 = rates.iter().sum();
+        let target = sum_integrated_spectra(a, eta);
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+        assert!(error < 1.0e-3);
+    }
+
+    #[test]
+    fn total_rate_low_eta() {
+        let (nmax, a, eta) = (280, 3.0, 0.0005);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum_low_eta(n, a)).collect();
+        let total = eta * rates.iter().sum::<f64>();
         let target = sum_integrated_spectra(a, eta);
         let error = ((total - target) / target).abs();
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
