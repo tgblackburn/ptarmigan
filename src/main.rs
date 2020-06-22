@@ -113,6 +113,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
+    let min_energy: f64 = input
+        .read("output", "min_energy")
+        .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
+        .unwrap_or(0.0);
 
     let eospec: Vec<String> = input.read("output", "electron")?;
     let eospec: Vec<DistributionFunction> = eospec
@@ -160,6 +164,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .collect();
 
     let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
+        sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
         if let Some(m) = multiplicity {
             if m == sh.multiplicity() {
                 p.push(sh.primary);
@@ -216,8 +221,29 @@ fn main() -> Result<(), Box<dyn Error>> {
                 (Vec::<Particle>::new(), Vec::<Particle>::new()),
                 |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
             )
-    } else {
+    } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol);
+        primaries
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                (i+1) * chk.len(), num,
+                PrettyDuration::from(runtime.elapsed()),
+                PrettyDuration::from(ettc(runtime, i+1, 20)));
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+        )
+    } else { // plane wave and lcfa
+        let laser = FastPlaneWave::new(a0, wavelength, tau, pol);
         primaries
         .chunks(num / 20)
         .enumerate()

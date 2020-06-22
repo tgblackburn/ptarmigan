@@ -78,7 +78,7 @@ impl Particle {
         self.u
     }
 
-    /// The particle momentum, in units of MeV/c
+    /// The particle momentum, in units of MeV
     pub fn momentum(&self) -> FourVector {
         match self.species {
             Species::Electron | Species::Positron | Species::Photon => {
