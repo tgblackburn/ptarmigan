@@ -24,6 +24,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
 * `radius`: the beam has a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres)...
 * `length` (optional, default = `0.0`): and length (metres)
+* `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
 
 ## output
 
