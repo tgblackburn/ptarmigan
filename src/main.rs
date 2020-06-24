@@ -155,7 +155,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let x = radius * rng.sample::<f64,_>(StandardNormal);
             let y = radius * rng.sample::<f64,_>(StandardNormal);
             let r = ThreeVector::new(x, y, z);
-            let r = r.rotate_around(ThreeVector::new(0.0, 1.0, 0.0), angle);
+            let r = r.rotate_around_y(angle);
             let r = FourVector::new(-z, r[0], r[1], r[2]);
             let u = -(gamma * gamma - 1.0f64).sqrt();
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
