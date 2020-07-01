@@ -111,6 +111,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let radius: f64 = input.read("beam", "radius")?;
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
+    let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
     let min_energy: f64 = input
@@ -150,13 +151,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             } else {
                 0.5 * wavelength * tau
             };
-            let z = z + length * rng.sample::<f64,_>(StandardNormal);
+            let z = z + length * (3.0 + rng.sample::<f64,_>(StandardNormal));
             let x = radius * rng.sample::<f64,_>(StandardNormal);
             let y = radius * rng.sample::<f64,_>(StandardNormal);
-            let r = FourVector::new(-z, x, y, z);
+            let r = ThreeVector::new(x, y, z);
+            let r = r.rotate_around_y(angle);
+            let r = FourVector::new(-z, r[0], r[1], r[2]);
             let u = -(gamma * gamma - 1.0f64).sqrt();
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
-            let u = FourVector::new(0.0, 0.0, 0.0, u).unitize();
+            let u = FourVector::new(0.0, u * angle.sin(), 0.0, u * angle.cos()).unitize();
             Particle::create(Species::Electron, r)
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))
