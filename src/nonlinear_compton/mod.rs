@@ -6,6 +6,7 @@ use crate::constants::*;
 use crate::geometry::*;
 use crate::special_functions::*;
 
+mod lp;
 mod total;
 
 /// The total probability that a photon is emitted
