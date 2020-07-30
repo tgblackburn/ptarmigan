@@ -13,17 +13,19 @@ pub struct PlaneWave {
     n_cycles: f64,
     wavevector: FourVector,
     pol: Polarization,
+    chirp_b: f64,
 }
 
 impl PlaneWave {
     #[allow(unused)]
-    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization, chirp_b: f64) -> Self {
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         PlaneWave {
             a0,
             n_cycles,
             wavevector,
-            pol
+            pol,
+            chirp_b,
         }
     }
     
@@ -109,9 +111,15 @@ impl Field for PlaneWave {
         (r_new, u_new)
     }
 
-    fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
-        let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+        let phase = self.wavevector * r;
+        let chirp = 1.0 + 2.0 * self.chirp_b * phase;
+        //let chirp = 1.0 + self.chirp_b * self.a_sqd(r);
+        if phase.abs() < consts::PI * self.n_cycles {
+            assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency at r = {} [phase = {:.3}] to fall below zero!", self.chirp_b, r, self.wavevector * r);
+        }
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
+        let prob = nonlinear_compton::probability(kappa, u, dt / chirp).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
             let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
             Some(k)
@@ -131,7 +139,7 @@ mod tests {
         let wavelength = 0.8e-6;
         let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
         let dt = 0.25 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular);
+        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0);
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
