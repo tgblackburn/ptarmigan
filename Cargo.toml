@@ -21,3 +21,4 @@ fitsio = {version = "0.15", optional = true}
 default = []
 fits-output = ["fitsio"]
 with-mpi = ["mpi"]
+no-radiation-reaction = []
