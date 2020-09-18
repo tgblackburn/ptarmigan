@@ -113,9 +113,12 @@ impl Field for PlaneWave {
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
         let phase = self.wavevector * r;
-        let chirp = 1.0 + 2.0 * self.chirp_b * phase;
-        //let chirp = 1.0 + 2.0 * self.chirp_b * (phase + consts::PI * self.n_cycles); // BK convention
-        //let chirp = 1.0 + self.chirp_b * self.a_sqd(r);
+        let chirp = if cfg!(features = "compensating-chirp") {
+            1.0 + self.chirp_b * self.a_sqd(r)
+        } else {
+            //1.0 + 2.0 * self.chirp_b * (phase + consts::PI * self.n_cycles) // alt convention
+            1.0 + 2.0 * self.chirp_b * phase
+        };
         if phase.abs() < consts::PI * self.n_cycles {
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency at r = {} [phase = {:.3}] to fall below zero!", self.chirp_b, r, self.wavevector * r);
         }
