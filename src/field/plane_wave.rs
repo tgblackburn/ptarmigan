@@ -113,14 +113,14 @@ impl Field for PlaneWave {
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
         let phase = self.wavevector * r;
-        let chirp = if cfg!(features = "compensating-chirp") {
+        let chirp = if cfg!(feature = "compensating-chirp") {
             1.0 + self.chirp_b * self.a_sqd(r)
         } else {
             //1.0 + 2.0 * self.chirp_b * (phase + consts::PI * self.n_cycles) // alt convention
             1.0 + 2.0 * self.chirp_b * phase
         };
         if chirp < 0.0 {
-            assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency at r = {} [phase = {:.3}] to fall below zero!", self.chirp_b, r, self.wavevector * r);
+            assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
