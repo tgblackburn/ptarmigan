@@ -50,7 +50,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
             let photon = Particle::create(Species::Photon, r)
                 .with_normalized_momentum(k);
             secondaries.push(photon);
-            u = u - k;
+
+            #[cfg(not(feature = "no-radiation-reaction"))] {
+                u = u - k;
+            }
         }
 
         primary.with_position(r);
@@ -143,6 +146,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         #[cfg(feature = "fits-output")] {
             println!("\t* writing FITS output");
+        }
+        #[cfg(feature = "no-radiation-reaction")] {
+            println!("\t* with radiation reaction disabled");
         }
     }
 

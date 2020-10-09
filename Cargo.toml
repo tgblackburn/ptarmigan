@@ -21,4 +21,8 @@ fitsio = {version = "0.15", optional = true}
 default = []
 fits-output = ["fitsio"]
 with-mpi = ["mpi"]
+<<<<<<< HEAD
 compensating-chirp = []
+=======
+no-radiation-reaction = []
+>>>>>>> devel
