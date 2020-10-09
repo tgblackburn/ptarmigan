@@ -25,10 +25,6 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64) -> Option<f64> {
     let eta = k * q;
     let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
-    if eta >= 0.25 {
-        return None;
-    }
-
     let f = sum_integrated_spectra(a, eta);
 
     Some(ALPHA_FINE * f * dphi / eta)
@@ -334,7 +330,7 @@ mod tests {
         use std::f64::consts;
 
         const N_COLS: usize = 50;
-        const N_ROWS: usize = 50;
+        const N_ROWS: usize = 60;
         let mut table = [[0.0; N_COLS]; N_ROWS];
         for i in 0..N_ROWS {
             // eta = eta_min * 10^(i/20)
@@ -506,6 +502,22 @@ mod tests {
         assert!(error < 1.0e-3);
 
         let (nmax, a, eta) = (1260, 5.0, 0.12);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
+        let total: f64 = rates.iter().sum();
+        let target = sum_integrated_spectra(a, eta);
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+        assert!(error < 1.0e-3);
+
+        let (nmax, a, eta) = (20, 1.0, 0.75);
+        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
+        let total: f64 = rates.iter().sum();
+        let target = sum_integrated_spectra(a, eta);
+        let error = ((total - target) / target).abs();
+        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+        assert!(error < 1.0e-3);
+
+        let (nmax, a, eta) = (280, 3.0, 0.75);
         let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
         let total: f64 = rates.iter().sum();
         let target = sum_integrated_spectra(a, eta);
