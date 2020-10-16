@@ -10,11 +10,13 @@ use mpi::traits::*;
 #[cfg(not(feature = "with-mpi"))]
 use crate::no_mpi::*;
 
-use crate::constants::*;
 use crate::particle::*;
 
 mod hgram;
 use hgram::*;
+
+mod functions;
+use functions::*;
 
 pub enum OutputError {
     Conversion(String),
@@ -87,53 +89,18 @@ impl FromStr for DistributionFunction {
             (BinSpec::Automatic, HeightSpec::Density, "weight")
         };
 
-        // Possible particle outputs
-        let angle_x = |pt: &Particle| {let p = pt.momentum(); p[1].atan2(-p[3])};
-        let angle_y = |pt: &Particle| {let p = pt.momentum(); p[2].atan2(-p[3])};
-        let theta = |pt: &Particle| {let p = pt.momentum(); p[1].hypot(p[2]).atan2(-p[3])};
-        let px = |pt: &Particle| {let p = pt.momentum(); p[1]};
-        let py = |pt: &Particle| {let p = pt.momentum(); p[2]};
-        let pz = |pt: &Particle| {let p = pt.momentum(); p[3]};
-        let p_perp = |pt: &Particle| {let p = pt.momentum(); p[1].hypot(p[2])};
-        let p_minus = |pt: &Particle| {let p = pt.momentum(); p[0] - p[3]};
-        let p_plus = |pt: &Particle| {let p = pt.momentum(); p[0] + p[3]};
-        let r_perp = |pt: &Particle| {let p = pt.momentum(); p[1].hypot(p[2]) / (p[0] - p[3])};
-        let gamma = |pt: &Particle| {let p = pt.normalized_momentum(); p[0]};
-        let energy = |pt: &Particle| {let p = pt.normalized_momentum(); ELECTRON_MASS_MEV * p[0]};
-        let unit_weight = |_pt: &Particle| 1.0;
+        // Convert strings to closures, associated units and names.
 
-        // convert strings to closures
-        let funcs: Vec<Option<ParticleOutput>> = ss
+        let (funcs, units): (Vec<Option<ParticleOutput>>, Vec<Option<&str>>) = ss
             .iter()
-            .map(|&s| {
-                match s {
-                    "angle_x" => Some(Box::new(angle_x) as ParticleOutput),
-                    "angle_y" => Some(Box::new(angle_y) as ParticleOutput),
-                    "theta" => Some(Box::new(theta) as ParticleOutput),
-                    "px" => Some(Box::new(px) as ParticleOutput),
-                    "py" => Some(Box::new(py) as ParticleOutput),
-                    "pz" => Some(Box::new(pz) as ParticleOutput),
-                    "p_perp" => Some(Box::new(p_perp) as ParticleOutput),
-                    "r_perp" => Some(Box::new(r_perp) as ParticleOutput),
-                    "p^-" | "p-" => Some(Box::new(p_minus) as ParticleOutput),
-                    "p^+" | "p+" => Some(Box::new(p_plus) as ParticleOutput),
-                    "gamma" => Some(Box::new(gamma) as ParticleOutput),
-                    "energy" => Some(Box::new(energy) as ParticleOutput),
-                    _ => None,
-                }})
-            .collect();
-
-        let units: Vec<Option<&str>> = ss
-            .iter()
-            .map(|&s| {
-                match s {
-                    "gamma" | "r_perp" => Some("1"),
-                    "energy" => Some("MeV"),
-                    "p^-" | "p-" | "p^+" | "p+" | "px" | "py" | "pz" | "p_perp" => Some("MeV/c"),
-                    "angle_x" | "angle_y" | "theta" => Some("rad"),
-                    _ => None,
-                }})
-            .collect();
+            .map(|&name| {
+                if let Some(v) = identify(name) {
+                    (Some(v.0), Some(v.1))
+                } else {
+                    (None, None)
+                }
+            })
+            .unzip();
 
         let names: Vec<Option<&str>> = ss
             .iter()
@@ -147,7 +114,7 @@ impl FromStr for DistributionFunction {
 
         let weight_function = match weight {
             "energy" => Some(Box::new(energy) as ParticleOutput),
-            "weight" | "auto" => Some(Box::new(unit_weight) as ParticleOutput),
+            "weight" | "auto" => Some(Box::new(unit) as ParticleOutput),
             _ => None,
         };
 
