@@ -134,6 +134,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|s| s.parse::<DistributionFunction>().unwrap())
         .collect();
 
+    let estats: Vec<String> = input.read("stats", "electron").unwrap_or_else(|_| vec!["".to_owned()]);
+    let mut estats: Vec<SummaryStatistic> = estats
+        .iter()
+        .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
+        .collect();
+
+    let pstats: Vec<String> = input.read("stats", "photon").unwrap_or_else(|_| vec!["".to_owned()]);
+    let mut pstats: Vec<SummaryStatistic> = pstats
+        .iter()
+        .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
+        .collect();
+
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
     let num = num / (ntasks as usize);
 
@@ -282,6 +294,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &photons, &prefix)?;
+    }
+
+    for stat in estats.iter_mut() {
+        stat.evaluate(&world, &electrons, "electron");
+    }
+
+    for stat in pstats.iter_mut() {
+        stat.evaluate(&world, &photons, "photon");
+    }
+
+    if id == 0 {
+        if !estats.is_empty() || !pstats.is_empty() {
+            use std::fs::File;
+            use std::io::Write;
+            let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let mut file = File::create(filename)?;
+            for stat in &estats {
+                writeln!(file, "{}", stat)?;
+            }
+            for stat in &pstats {
+                writeln!(file, "{}", stat)?;
+            }
+        }
     }
 
     if id == 0 {

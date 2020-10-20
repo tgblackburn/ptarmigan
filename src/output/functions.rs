@@ -8,40 +8,43 @@ use super::ParticleOutput;
 pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
     match name {
         "angle_x" => Some(
-            (Box::new(angle_x) as ParticleOutput, "rad")
+            (angle_x as ParticleOutput, "rad")
         ),
         "angle_y" => Some(
-            (Box::new(angle_y) as ParticleOutput, "rad")
+            (angle_y as ParticleOutput, "rad")
         ),
         "theta" => Some(
-            (Box::new(theta) as ParticleOutput, "rad")
+            (theta as ParticleOutput, "rad")
         ),
         "px" => Some(
-            (Box::new(px) as ParticleOutput, "MeV/c")
+            (px as ParticleOutput, "MeV/c")
         ),
         "py" => Some(
-            (Box::new(py) as ParticleOutput, "MeV/c")
+            (py as ParticleOutput, "MeV/c")
         ),
         "pz" => Some(
-            (Box::new(pz) as ParticleOutput, "MeV/c")
+            (pz as ParticleOutput, "MeV/c")
         ),
         "p_perp" => Some(
-            (Box::new(p_perp) as ParticleOutput, "MeV/c")
+            (p_perp as ParticleOutput, "MeV/c")
         ),
         "r_perp" => Some(
-            (Box::new(r_perp) as ParticleOutput, "1")
+            (r_perp as ParticleOutput, "1")
         ),
         "p^-" | "p-" => Some(
-            (Box::new(p_minus) as ParticleOutput, "MeV/c")
+            (p_minus as ParticleOutput, "MeV/c")
         ),
         "p^+" | "p+" => Some(
-            (Box::new(p_plus) as ParticleOutput, "MeV/c")
+            (p_plus as ParticleOutput, "MeV/c")
         ),
         "gamma" => Some(
-            (Box::new(gamma) as ParticleOutput, "1")
+            (gamma as ParticleOutput, "1")
         ),
         "energy" => Some(
-            (Box::new(energy) as ParticleOutput, "MeV")
+            (energy as ParticleOutput, "MeV")
+        ),
+        "unit" | "number" => Some(
+            (unit as ParticleOutput, "1")
         ),
         _ => None,
     }

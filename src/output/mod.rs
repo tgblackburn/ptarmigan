@@ -16,10 +16,12 @@ mod hgram;
 use hgram::*;
 
 mod functions;
-use functions::*;
+
+mod stats;
+pub use stats::*;
 
 pub enum OutputError {
-    Conversion(String),
+    Conversion(String, String),
     Dimension(usize),
     Write(String),
 }
@@ -27,7 +29,7 @@ pub enum OutputError {
 impl fmt::Display for OutputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            OutputError::Conversion(s) => write!(f, "'{}' does not specify a valid distribution function", s),
+            OutputError::Conversion(s, t) => write!(f, "'{}' does not specify a valid {}", s, t),
             OutputError::Dimension(d) => write!(f, "requested dimension was {}, only 1 and 2 are supported", d),
             OutputError::Write(s) => writeln!(f, "failed to write histogram to '{}'", s),
         }
@@ -42,7 +44,8 @@ impl fmt::Debug for OutputError {
 
 impl Error for OutputError {}
 
-type ParticleOutput = Box<dyn Fn(&Particle) -> f64>;
+//type ParticleOutput = Box<dyn Fn(&Particle) -> f64>;
+type ParticleOutput = fn(&Particle) -> f64;
 
 pub struct DistributionFunction {
     dim: usize,
@@ -94,7 +97,7 @@ impl FromStr for DistributionFunction {
         let (funcs, units): (Vec<Option<ParticleOutput>>, Vec<Option<&str>>) = ss
             .iter()
             .map(|&name| {
-                if let Some(v) = identify(name) {
+                if let Some(v) = functions::identify(name) {
                     (Some(v.0), Some(v.1))
                 } else {
                     (None, None)
@@ -113,8 +116,8 @@ impl FromStr for DistributionFunction {
             .collect();
 
         let weight_function = match weight {
-            "energy" => Some(Box::new(energy) as ParticleOutput),
-            "weight" | "auto" => Some(Box::new(unit) as ParticleOutput),
+            "energy" => Some(functions::energy as ParticleOutput),
+            "weight" | "auto" => Some(functions::unit as ParticleOutput),
             _ => None,
         };
 
@@ -131,7 +134,7 @@ impl FromStr for DistributionFunction {
                 funcs: funcs.into_iter().flatten().collect(),
             })
         } else {
-            Err(OutputError::Conversion(spec.to_owned()))
+            Err(OutputError::Conversion(spec.to_owned(), "distribution function".to_owned()))
         }
     }
 }
