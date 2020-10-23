@@ -134,17 +134,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|s| s.parse::<DistributionFunction>().unwrap())
         .collect();
 
-    let estats: Vec<String> = input.read("stats", "electron").unwrap_or_else(|_| vec!["".to_owned()]);
-    let mut estats: Vec<SummaryStatistic> = estats
-        .iter()
-        .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
-        .collect();
+    let mut estats = input.read("stats", "electron")
+        .map(|strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
+                .collect()
+        })
+        .unwrap_or_else(|_| vec![]);
 
-    let pstats: Vec<String> = input.read("stats", "photon").unwrap_or_else(|_| vec!["".to_owned()]);
-    let mut pstats: Vec<SummaryStatistic> = pstats
-        .iter()
-        .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
-        .collect();
+    let mut pstats = input.read("stats", "photon")
+        .map(|strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
+                .collect()
+        })
+        .unwrap_or_else(|_| vec![]);
 
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
     let num = num / (ntasks as usize);
