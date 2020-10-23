@@ -35,6 +35,23 @@ All output is written to the directory where the input file is found.
 * `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
 * `photon`: as above.
 
+## stats
+
+If specified, writes aggregated statistical information about the particle final state distributions to a file called 'stats.txt' (with the appropriate identifier prefix, if specified in [output](#output)) in the same directory as the input file.
+
+* `electron` (optional): list of specifiers
+* `photon` (optional): list of specifiers
+
+Each specifier must be one of:
+
+* ``op var[`weight]``
+* ``op var[`weight] in (min; max)``
+* ``op var[`weight] for var2 in (min; max)``
+
+where `op` is one of `total`, `fraction`, `mean`, `variance`, `minimum` and `maximum` and `var` is a desired output (`px`, the x-component of momentum, for example). The range of values to be used can be specified by `var`, or another output entirely, `var2`. Both `min` and `max` can be arbitrary mathematical expressions, using values given in the [constants](#constants) block, or `auto`, in which case the range is detected automatically. The contribution of each particle to the statistic is either its weight (i.e. number) or may given in terms of another variable.
+
+For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds.
+
 ## constants
 
 Everywhere an integer or floating-point number is requested in the input file, a named value may be given instead, provided that its value is specified in this section.

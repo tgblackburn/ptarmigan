@@ -63,7 +63,6 @@ impl SummaryStatistic {
     ///   [op] [var][`weight]
     ///   [op] [var][`weight] in ([min]; [max])
     ///   [op] [var][`weight] for [var2] in ([min]; [max])
-    ///   [op] [var][`weight] for [var2] in ([min]; [max])
     /// `
     /// where min and/or max can be 'auto' or a constant value.
     pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
