@@ -288,6 +288,22 @@ impl<'a> Config<'a> {
             _ => Err(ConfigError::raise(ConversionFailure, section, field))
         }
     }
+
+    /// Parses a string argument and evaluates it using the default context. Extends
+    /// ```
+    /// let arg = "2.0";
+    /// let val = arg.parse::<f64>().unwrap();
+    /// ```
+    /// to handle mathematical expressions, e.g.
+    /// ```
+    /// let arg = "2.0 / (1.0 + density)";
+    /// let val = input.evaluate(arg).unwrap();
+    /// ```
+    /// where 'density' is specified in the input file.
+    #[allow(unused)]
+    pub fn evaluate(&'a self, arg: &str) -> Option<f64> {
+        arg.parse::<meval::Expr>().and_then(|expr| expr.eval_with_context(&self.ctx)).ok()
+    }
 }
 
 impl<'a,'b> TryFrom<Key<'a,'b>> for f64 {
