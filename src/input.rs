@@ -147,6 +147,7 @@ impl<'a> Config<'a> {
             .var("nano", 1.0e-9)
             .var("micro", 1.0e-6)
             .var("milli", 1.0e-3)
+            .var("degree", std::f64::consts::PI / 180.0)
             .func3("step", |x, min, max| if x >= min && x < max {1.0} else {0.0})
             .func3("gauss", |x, mu, sigma| (-(x - mu).powi(2) / (2.0 * sigma.powi(2))).exp())
             .func("critical", |omega| VACUUM_PERMITTIVITY * ELECTRON_MASS * omega.powi(2) / ELEMENTARY_CHARGE.powi(2))
@@ -287,6 +288,22 @@ impl<'a> Config<'a> {
             _ => Err(ConfigError::raise(ConversionFailure, section, field))
         }
     }
+
+    /// Parses a string argument and evaluates it using the default context. Extends
+    /// ```
+    /// let arg = "2.0";
+    /// let val = arg.parse::<f64>().unwrap();
+    /// ```
+    /// to handle mathematical expressions, e.g.
+    /// ```
+    /// let arg = "2.0 / (1.0 + density)";
+    /// let val = input.evaluate(arg).unwrap();
+    /// ```
+    /// where 'density' is specified in the input file.
+    #[allow(unused)]
+    pub fn evaluate(&'a self, arg: &str) -> Option<f64> {
+        arg.parse::<meval::Expr>().and_then(|expr| expr.eval_with_context(&self.ctx)).ok()
+    }
 }
 
 impl<'a,'b> TryFrom<Key<'a,'b>> for f64 {
@@ -369,6 +386,8 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for String {
     fn try_from(key: Key<'a,'b>) -> Result<Self, Self::Error> {
         match &key.config.input[key.section][key.field] {
             Yaml::String(s) => Ok(s.clone()),
+            Yaml::Integer(i) => Ok(i.to_string()),
+            Yaml::Real(s) => Ok(s.clone()),
             _ => Err(())
         }
     }

@@ -12,17 +12,19 @@ pub struct FastPlaneWave {
     n_cycles: f64,
     wavevector: FourVector,
     pol: Polarization,
+    chirp_b: f64,
 }
 
 impl FastPlaneWave {
     #[allow(unused)]
-    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization, chirp_b: f64) -> Self {
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FastPlaneWave {
             a0,
             n_cycles,
             wavevector,
-            pol
+            pol,
+            chirp_b,
         }
     }
 
@@ -40,26 +42,36 @@ impl FastPlaneWave {
         // E = -d_t A => E = -omega d_phi (A_x, A_y, 0)
         // B = curl A = (-d_z A_y, d_z A_x, 0) => (omega/c) d_phi (A_y, -A_x, 0)
         let delta = match self.pol {
-            Polarization::Linear => 0.0,
-            Polarization::Circular => 1.0,
+            Polarization::Linear => 0.0f64,
+            Polarization::Circular => 1.0f64,
         };
-        let phi = self.wavevector * r;
+        let phi: f64 = self.wavevector * r;
         let envelope = if phi.abs() < self.n_cycles * consts::PI {
             (phi / (2.0 * self.n_cycles)).cos().powi(2)
         } else {
             0.0
         };
+
+        let (phase, dphase_dphi) = if cfg!(feature = "compensating-chirp") {
+            let beta = self.chirp_b * 0.5 * (1.0 + delta.powi(2)) * self.a0.powi(2);
+            (
+                phi + (beta / 16.0) * (6.0 * phi + 8.0 * self.n_cycles * (phi / self.n_cycles).sin() + self.n_cycles * (2.0 * phi / self.n_cycles).sin()),
+                1.0 + beta * envelope.powi(2),
+            )
+        } else {
+            (
+                phi * (1.0 + self.chirp_b * phi),
+                1.0 + 2.0 * self.chirp_b * phi,
+            )
+        };
+
+        // a = A / (m c a0 / e):
+        let dax_dphi = envelope * (dphase_dphi * phase.cos() - phase.sin() * (phi / (2.0 * self.n_cycles)).tan() / self.n_cycles);
+        let day_dphi = delta * envelope * (-dphase_dphi * phase.sin() - phase.cos() * (phi / (2.0 * self.n_cycles)).tan() / self.n_cycles);
+
         let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT_SQD * self.wavevector[0] * self.a0) / ELEMENTARY_CHARGE;
-        let E = -amplitude * envelope * ThreeVector::new(
-            phi.cos() - phi.sin() * (phi / (2.0 * self.n_cycles)).tan() / (self.n_cycles as f64),
-            -delta * (phi.sin() + phi.cos() * (phi / (2.0 * self.n_cycles)).tan() / self.n_cycles),
-            0.0,
-        );
-        let B = -(amplitude * envelope / SPEED_OF_LIGHT) * ThreeVector::new(
-            delta * (phi.sin() + phi.cos() * (phi / (2.0 * self.n_cycles)).tan() / (self.n_cycles as f64)),
-            phi.cos() - phi.sin() * (phi / (2.0 * self.n_cycles)).tan() / self.n_cycles,
-            0.0,
-        );
+        let E = -amplitude * ThreeVector::new(dax_dphi, day_dphi, 0.0);
+        let B = (amplitude / SPEED_OF_LIGHT) * ThreeVector::new(day_dphi, -dax_dphi, 0.0);
 
         (E, B)
     }
@@ -71,7 +83,12 @@ impl Field for FastPlaneWave {
     }
 
     fn max_timestep(&self) -> Option<f64> {
-        Some( 0.1 / (SPEED_OF_LIGHT * self.wavevector[0]) )
+        let chirp = if cfg!(feature = "compensating-chirp") {
+            1.0 + self.a0.powi(2)
+        } else {
+            1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
+        };
+        Some( 0.1 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp) )
     }
 
     fn contains(&self, r: FourVector) -> bool {
@@ -106,7 +123,7 @@ mod tests {
         let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
         let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
         let a0 = 100.0;
-        let laser = FastPlaneWave::new(a0, wavelength, n_cycles, Polarization::Circular);
+        let laser = FastPlaneWave::new(a0, wavelength, n_cycles, Polarization::Circular, 0.0);
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -100.0).unitize();
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];

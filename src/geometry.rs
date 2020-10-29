@@ -5,10 +5,12 @@
 pub struct FourVector(f64, f64, f64, f64);
 
 impl FourVector {
+    /// Creates a new four-vector with the specified components.
     pub fn new(t: f64, x: f64, y: f64, z: f64) -> Self {
         FourVector {0: t, 1: x, 2: y, 3: z}
     }
-        
+
+    // Creates a new null four-vector with the specified spatial components.
     pub fn lightlike(x: f64, y: f64, z: f64) -> Self {
         FourVector {
             0: (x.powi(2) + y.powi(2) + z.powi(2)).sqrt(),
@@ -186,14 +188,17 @@ pub struct ThreeVector {
 }
 
 impl ThreeVector {
+    /// Creates a new three-vector with the specified components.
     pub fn new(x: f64, y: f64, z: f64) -> ThreeVector {
         ThreeVector{x: x, y: y, z: z}
     }
 
+    /// Creates a new three-vector with the specified components.
     pub fn new_from_slice(a: &[f64; 3]) -> ThreeVector {
         ThreeVector{x: a[0], y: a[1], z: a[2]}
     }
 
+    /// Returns the cross product of two three-vectors.
     pub fn cross(self, other: ThreeVector) -> ThreeVector {
         ThreeVector {
             x: self.y * other.z - self.z * other.y,
@@ -202,16 +207,29 @@ impl ThreeVector {
         }
     }
 
+    /// Returns the squared magnitude of the three-vector.
     pub fn norm_sqr(self) -> f64 {
         self * self
     }
 
+    /// Returns a new four-vector which has the same direction,
+    /// but unit magnitude.
+    ///
+    /// # Panics
+    /// If `self` does not have positive definite norm.
     pub fn normalize(self) -> Self {
         let mag = self.norm_sqr().sqrt();
         assert!(mag > 0.0);
         self / mag
     }
 
+    /// Returns a unit vector that is orthogonal to `self`.
+    /// The choice is arbitrary, but fixed for a given input.
+    /// ```
+    /// let a = ThreeVector::new(0.0, 1.0, 2.0);
+    /// let b = a.orthogonal();
+    /// assert!(a * b < 1.0e-10);
+    /// ```
     pub fn orthogonal(self) -> Self {
         let perp = if self.x.abs() > self.z.abs() {
             ThreeVector::new(-self.y, self.x, 0.0)
@@ -221,6 +239,10 @@ impl ThreeVector {
         perp.normalize()
     }
 
+    /// Rotates `self` around the given `axis` by an angle `theta`,
+    /// with positive angles corresponding to a right-handed rotation,
+    /// and returns the result. The axis must be correctly normalized.
+    /// `rotate_around_{x,y,z}` are provided for convenience.
     pub fn rotate_around(self, axis: ThreeVector, theta: f64) -> Self {
         let (s, c) = theta.sin_cos();
         let out = ThreeVector::new(
@@ -235,6 +257,24 @@ impl ThreeVector {
 	        + (c + axis.z * axis.z * (1.0-c)) * self.z
         );
         out
+    }
+
+    /// Rotates `self` around the x-axis by angle `theta` and returns
+    /// the result.
+    pub fn rotate_around_x(self, theta: f64) -> Self {
+        self.rotate_around(ThreeVector::new(1.0, 0.0, 0.0), theta)
+    }
+
+    /// Rotates `self` around the y-axis by angle `theta` and returns
+    /// the result.
+    pub fn rotate_around_y(self, theta: f64) -> Self {
+        self.rotate_around(ThreeVector::new(0.0, 1.0, 0.0), theta)
+    }
+
+    /// Rotates `self` around the z-axis by angle `theta` and returns
+    /// the result.
+    pub fn rotate_around_z(self, theta: f64) -> Self {
+        self.rotate_around(ThreeVector::new(0.0, 0.0, 1.0), theta)
     }
 }
 

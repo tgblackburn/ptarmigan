@@ -450,7 +450,7 @@ checksum = "74490b50b9fbe561ac330df47c08f3f33073d2d00c150f719147d7c54522fa1b"
 
 [[package]]
 name = "ptarmigan"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fitsio",
  "meval",
