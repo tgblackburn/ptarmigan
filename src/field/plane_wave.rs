@@ -119,7 +119,7 @@ impl Field for PlaneWave {
             //1.0 + 2.0 * self.chirp_b * (phase + consts::PI * self.n_cycles) // alt convention
             1.0 + 2.0 * self.chirp_b * phase
         };
-        if chirp < 0.0 {
+        if chirp < 0.0 && u * u > 1.0 { // frequency must be positive if local a > 0
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
