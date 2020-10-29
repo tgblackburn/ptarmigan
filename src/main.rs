@@ -109,6 +109,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         input.read("laser", "n_cycles")?
     };
 
+    let chirp_b = if !focusing {
+        input.read("laser", "chirp_coeff").unwrap_or(0.0)
+    } else {
+        eprintln!("Chirp parameter ignored for focusing laser pulses.");
+        0.0
+    };
+
     let num: usize = input.read("beam", "ne")?;
     let gamma: f64 = input.read("beam", "gamma")?;
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
@@ -247,7 +254,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
             )
     } else if !using_lcfa {
-        let laser = PlaneWave::new(a0, wavelength, tau, pol);
+        let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
         primaries
         .chunks(num / 20)
         .enumerate()
@@ -268,7 +275,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
         )
     } else { // plane wave and lcfa
-        let laser = FastPlaneWave::new(a0, wavelength, tau, pol);
+        let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
         primaries
         .chunks(num / 20)
         .enumerate()
