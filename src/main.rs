@@ -132,30 +132,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     let eospec: Vec<String> = input.read("output", "electron")?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
-        .map(|s| s.parse::<DistributionFunction>().unwrap())
-        .collect();
+        .map(|s| s.parse())
+        .collect::<Result<Vec<_>,_>>()?;
     
     let pospec: Vec<String> = input.read("output", "photon")?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
-        .map(|s| s.parse::<DistributionFunction>().unwrap())
-        .collect();
+        .map(|s| s.parse())
+        .collect::<Result<Vec<_>,_>>()?;
 
     let mut estats = input.read("stats", "electron")
-        .map(|strs: Vec<String>| {
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
-                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
-                .collect()
-        })
-        .unwrap_or_else(|_| vec![]);
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
 
     let mut pstats = input.read("stats", "photon")
-        .map(|strs: Vec<String>| {
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
-                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)).unwrap())
-                .collect()
-        })
-        .unwrap_or_else(|_| vec![]);
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
 
     let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
     let num = num / (ntasks as usize);
