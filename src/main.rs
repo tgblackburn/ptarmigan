@@ -112,8 +112,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     let chirp_b = if !focusing {
         input.read("laser", "chirp_coeff").unwrap_or(0.0)
     } else {
-        eprintln!("Chirp parameter ignored for focusing laser pulses.");
-        0.0
+        input.read("laser", "chirp_b")
+            .map(|_: f64| {
+                eprintln!("Chirp parameter ignored for focusing laser pulses.");
+                0.0
+            })
+            .unwrap_or(0.0)
     };
 
     let num: usize = input.read("beam", "ne")?;
