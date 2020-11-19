@@ -46,6 +46,12 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "unit" | "number" => Some(
             (unit as ParticleOutput, "1")
         ),
+        "x" => Some(
+            (x as ParticleOutput, "m")
+        ),
+        "y" => Some(
+            (y as ParticleOutput, "m")
+        ),
         _ => None,
     }
 }
@@ -112,4 +118,14 @@ pub fn energy(pt: &Particle) -> f64 {
 
 pub fn unit(_pt: &Particle) -> f64 {
     1.0
+}
+
+pub fn x(pt: &Particle) -> f64 {
+    let r = pt.position();
+    r[1]
+}
+
+pub fn y(pt: &Particle) -> f64 {
+    let r = pt.position();
+    r[2]
 }

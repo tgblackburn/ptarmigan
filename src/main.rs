@@ -174,16 +174,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|_i| {
             let z = if focusing {
-                2.0 * SPEED_OF_LIGHT * tau
+                2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
             } else {
                 0.5 * wavelength * tau
             };
-            let z = z + length * (3.0 + rng.sample::<f64,_>(StandardNormal));
+            let t = -z;
+            let z = z + length * rng.sample::<f64,_>(StandardNormal);
             let x = radius * rng.sample::<f64,_>(StandardNormal);
             let y = radius * rng.sample::<f64,_>(StandardNormal);
             let r = ThreeVector::new(x, y, z);
             let r = r.rotate_around_y(angle);
-            let r = FourVector::new(-z, r[0], r[1], r[2]);
+            let r = FourVector::new(t, r[0], r[1], r[2]);
             let u = -(gamma * gamma - 1.0f64).sqrt();
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
             let u = FourVector::new(0.0, u * angle.sin(), 0.0, u * angle.cos()).unitize();
