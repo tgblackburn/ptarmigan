@@ -49,8 +49,11 @@ impl FocusedLaser {
 
         // Pulse envelope
         let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
+        let envelope = if phase.abs() < consts::PI * self.duration {
+            (phase / (2.0 * self.duration)).cos().powi(4)
+        } else {
+            0.0
+        };
 
         beam * envelope
     }
@@ -74,13 +77,16 @@ impl FocusedLaser {
 
         // Pulse envelope
         let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
+        let envelope = if phase.abs() < consts::PI * self.duration {
+            (phase / (2.0 * self.duration)).cos().powi(4)
+        } else {
+            0.0
+        };
 
         let grad_envelope = [
             0.0,
             0.0,
-            8.0 * consts::LN_2 * self.wavevector[0] * phase * envelope / tau.powi(2)
+            2.0 * self.wavevector[0] * (phase / (2.0 * self.duration)).tan() * envelope / self.duration
         ];
 
         FourVector::new(

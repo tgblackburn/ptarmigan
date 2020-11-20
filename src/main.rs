@@ -126,11 +126,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
-    let tau: f64 = if focusing {
-        input.read("laser", "fwhm_duration")?
-    } else {
-        input.read("laser", "n_cycles")?
-    };
+    let tau: f64 = input.read("laser", "n_cycles")?;
 
     let chirp_b = if !focusing {
         input.read("laser", "chirp_coeff").unwrap_or(0.0)
