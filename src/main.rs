@@ -48,6 +48,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 
         if let Some(k) = field.radiate(r, u, dt, rng) {
             let photon = Particle::create(Species::Photon, r)
+                .with_payload((u * u - 1.0).max(0.0).sqrt())
                 .with_normalized_momentum(k);
             secondaries.push(photon);
 

@@ -52,6 +52,12 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "y" => Some(
             (y as ParticleOutput, "m")
         ),
+        "z" => Some(
+            (z as ParticleOutput, "m")
+        ),
+        "birth_a" => Some(
+            (payload as ParticleOutput, "1")
+        ),
         _ => None,
     }
 }
@@ -128,4 +134,13 @@ pub fn x(pt: &Particle) -> f64 {
 pub fn y(pt: &Particle) -> f64 {
     let r = pt.position();
     r[2]
+}
+
+pub fn z(pt: &Particle) -> f64 {
+    let r = pt.position();
+    r[3]
+}
+
+pub fn payload(pt: &Particle) -> f64 {
+    pt.payload()
 }

@@ -18,6 +18,7 @@ pub struct Particle {
     r: [FourVector; 2],
     u: FourVector,
     optical_depth: f64,
+    payload: f64,
 }
 
 /// A shower, or cascade, consists of the primary
@@ -42,6 +43,7 @@ impl Particle {
             r: [r; 2],
             u,
             optical_depth: std::f64::INFINITY,
+            payload: 0.0,
         }
     }
 
@@ -98,6 +100,18 @@ impl Particle {
     /// particle, in units of metres
     pub fn position(&self) -> FourVector {
         self.r[1]
+    }
+
+    /// Loads something that will be tracked with the particle
+    /// and may be read by the output routines.
+    /// Overwrites whatever has already been written.
+    pub fn with_payload(&mut self, value: f64) -> Self {
+        self.payload = value;
+        *self
+    }
+
+    pub fn payload(&self) -> f64 {
+        self.payload
     }
 }
 
