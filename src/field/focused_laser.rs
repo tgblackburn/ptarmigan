@@ -118,7 +118,7 @@ impl Field for FocusedLaser {
 
     fn contains(&self, r: FourVector) -> bool {
         let phase: f64 = self.wavevector * r;
-        phase < 3.0 * self.omega() * self.duration
+        phase < consts::PI * self.duration
     }
 
     fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {

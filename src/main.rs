@@ -229,7 +229,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|i| {
             let z = if focusing {
-                2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                //2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                wavelength * tau + 3.0 * length
             } else {
                 0.5 * wavelength * tau
             };
