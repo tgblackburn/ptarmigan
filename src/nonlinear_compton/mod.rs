@@ -536,6 +536,39 @@ mod tests {
         println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
         assert!(error < 1.0e-3);
     }
+
+    #[test]
+    fn ds_crosscheck() {
+        // Set up laser
+        // kappa = hbar k / (m c^2)
+        let kappa = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
+
+        // and electron beam initial momentum
+        let theta = 0.1 * consts::PI;
+        let u = 17.5e3 / 0.511;
+        let u = FourVector::new(0.0, u * theta.sin() , 0.0, -u * theta.cos()).unitize();
+
+        // from Daniel
+        let a0s = [0.01, 0.1, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0];
+        let rates = [
+            8.413499945078843e-07, 
+            8.39719977159875e-05, 
+            0.0003337455877314787, 
+            0.0020039528587275273, 
+            0.007101726591791834, 
+            0.02110454417089373, 
+            0.03615707160015743, 
+            0.06534971657183357,
+        ];
+
+        for (a, target) in a0s.iter().zip(rates.iter()) {
+            // electron quasi momentum q/mc
+            let q = u + a * a * kappa / (2.0 * kappa * u);
+            let rate = probability(kappa, q, 1.0e-15).unwrap_or(0.0);
+            let error = (target - rate).abs() / target;
+            println!("a0 = {:.3e}, target = {:.3e}, got = {:.3e}, err = {:.3e}", a, target, rate, error);
+        }
+    }
 }
 
 static GAUSS_32_NODES: [f64; 32] = [
