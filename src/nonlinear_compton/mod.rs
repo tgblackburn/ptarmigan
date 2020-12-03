@@ -565,6 +565,7 @@ mod tests {
             // electron quasi momentum q/mc
             let q = u + a * a * kappa / (2.0 * kappa * u);
             let rate = probability(kappa, q, 1.0e-15).unwrap_or(0.0);
+            let target = target * (1.0 + theta.cos());
             let error = (target - rate).abs() / target;
             println!("a0 = {:.3e}, target = {:.3e}, got = {:.3e}, err = {:.3e}", a, target, rate, error);
         }
