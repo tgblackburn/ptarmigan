@@ -97,7 +97,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = Polarization::Circular;
+    let pol = match input.read::<String>("laser", "polarization") {
+        Ok(s) if s == "linear" => Polarization::Linear,
+        Ok(s) if s == "circular" => Polarization::Circular,
+        _ => Polarization::Circular
+    };
+
+    if !using_lcfa && pol == Polarization::Linear {
+        panic!("LMA rates are implemented for circularly polarized waves only!");
+    }
 
     let (focusing, waist) = input
         .read("laser", "waist")
@@ -124,9 +132,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     let num: usize = input.read("beam", "ne")?;
     let gamma: f64 = input.read("beam", "gamma")?;
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
-    let radius: f64 = input.read("beam", "radius")?;
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
+    let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
+        .and_then(|vs| {
+            // whether a single f64 or a tuple of [f64, dstr],
+            // the first value must be the radius
+            let radius = vs.first().map(|s| input.evaluate(s)).flatten();
+            // a second entry, if present, is a distribution spec
+            let normally_distributed = match vs.get(1) {
+                None => Some(true), // if not specified at all, assume normally distributed
+                Some(s) if s == "normally_distributed" => Some(true),
+                Some(s) if s == "uniformly_distributed" => Some(false),
+                _ => None // anything else is an error
+            };
+            if let (Some(r), Some(b)) = (radius, normally_distributed) {
+                Ok((r, b))
+            } else {
+                eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
+                            \tradius: 2.0e-6\n\
+                            or as a numerical value and a distribution, e.g,\n\
+                            \tradius: [2.0e-6, uniformly_distributed]\n\
+                            \tradius: [2.0e-6, normally_distributed].");
+                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+            }
+        })?;
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
     let min_energy: f64 = input
@@ -185,8 +215,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             };
             let t = -z;
             let z = z + length * rng.sample::<f64,_>(StandardNormal);
-            let x = radius * rng.sample::<f64,_>(StandardNormal);
-            let y = radius * rng.sample::<f64,_>(StandardNormal);
+            let (x, y) = if normally_distributed {
+                (
+                    radius * rng.sample::<f64,_>(StandardNormal),
+                    radius * rng.sample::<f64,_>(StandardNormal)
+                )
+            } else { // uniformly distributed
+                let r = radius * rng.gen::<f64>().sqrt();
+                let theta = 2.0 * consts::PI * rng.gen::<f64>();
+                (r * theta.cos(), r * theta.sin())
+            };
             let r = ThreeVector::new(x, y, z);
             let r = r.rotate_around_y(angle);
             let r = FourVector::new(t, r[0], r[1], r[2]);

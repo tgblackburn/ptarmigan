@@ -15,6 +15,7 @@ pub use self::fast_plane_wave::*;
 
 /// The polarization of an electromagnetic wave
 #[allow(unused)]
+#[derive(Eq, PartialEq)]
 pub enum Polarization {
     Linear,
     Circular,
