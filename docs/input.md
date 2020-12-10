@@ -23,8 +23,8 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `ne`: number of primary electrons.
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
-* `radius`: the beam has a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres)...
-* `length` (optional, default = `0.0`): and length (metres)
+* `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
+* `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
 
 ## output
@@ -32,7 +32,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 All output is written to the directory where the input file is found.
 
 * `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output.
-* `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions. 
+* `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
 * `photon`: as above.
 
