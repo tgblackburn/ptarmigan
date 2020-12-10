@@ -97,7 +97,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = Polarization::Circular;
+    let pol = match input.read::<String>("laser", "polarization") {
+        Ok(s) if s == "linear" => Polarization::Linear,
+        Ok(s) if s == "circular" => Polarization::Circular,
+        _ => Polarization::Circular
+    };
+
+    if !using_lcfa && pol == Polarization::Linear {
+        panic!("LMA rates are implemented for circularly polarized waves only!");
+    }
 
     let (focusing, waist) = input
         .read("laser", "waist")
