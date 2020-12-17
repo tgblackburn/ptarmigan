@@ -49,6 +49,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
         if let Some(k) = field.radiate(r, u, dt, rng) {
             let photon = Particle::create(Species::Photon, r)
                 .with_payload((u * u - 1.0).max(0.0).sqrt())
+                .with_weight(primary.weight())
                 .with_normalized_momentum(k);
             secondaries.push(photon);
 
@@ -59,6 +60,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 
         primary.with_position(r);
         primary.with_normalized_momentum(u);
+        primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {
@@ -134,6 +136,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
+    let weight = input.read("beam", "charge")
+        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (num as f64)))
+        .unwrap_or(1.0);
     let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
         .and_then(|vs| {
             // whether a single f64 or a tuple of [f64, dstr],
@@ -159,6 +164,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
+    let plain_text_output = input.read("output", "dump_all_particles").unwrap_or(false);
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
@@ -234,6 +240,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Particle::create(Species::Electron, r)
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))
+                .with_weight(weight)
         })
         .collect();
 
@@ -255,6 +262,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (electrons, photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
+        println!("total energy = {}", laser.total_energy());
         primaries
             .chunks(num / 20)
             .enumerate()
@@ -368,6 +376,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             for stat in &pstats {
                 writeln!(file, "{}", stat)?;
+            }
+        }
+    }
+
+    if plain_text_output {
+        if id == 0 {
+            use std::fs::File;
+            use std::io::Write;
+            let filename = format!("{}{}{}{}particles.out", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let mut file = File::create(filename)?;
+            writeln!(file, "#{:-^1$}", "", 170)?;
+            writeln!(file, "# Particle properties when tracking stops")?;
+            writeln!(file, "#{:-^1$}", "", 170)?;
+            writeln!(file, "# First interacting species: electron\t\tSecond interacting species: laser")?;
+            writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length)?;
+            writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
+            writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
+            writeln!(file, "#{:-^1$}", "", 170)?;
+            writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
+            writeln!(file, "#{:-^1$}", "", 170)?;
+            for pt in &electrons {
+                writeln!(file, "{}", pt)?;
+            }
+            for pt in &photons {
+                writeln!(file, "{}", pt)?;
             }
         }
     }
