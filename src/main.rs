@@ -90,6 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
     let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
+    let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -196,7 +197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
+    let mut rng = Xoshiro256StarStar::seed_from_u64((id as u64) * (rng_seed as u64));
     let num = num / (ntasks as usize);
 
     if id == 0 {
