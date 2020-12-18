@@ -158,7 +158,7 @@ impl Particle {
     /// angle is requested. This function transforms the particle momenta
     /// and positions such that the positive z axis points along the beam
     /// propagation axis instead.
-    pub fn to_beam_coordinate_basis(&mut self, collision_angle: f64) {
+    pub fn to_beam_coordinate_basis(&self, collision_angle: f64) -> Self {
         let theta = std::f64::consts::PI - collision_angle;
 
         let u = ThreeVector::from(self.u).rotate_around_y(theta);
@@ -170,14 +170,14 @@ impl Particle {
         let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
         let r = FourVector::new(self.r[1][0], r[1], r[1], r[2]);
 
-        *self = Particle {
+        Particle {
             species: self.species,
             r: [r0, r],
             u,
             optical_depth: self.optical_depth,
             payload: self.payload,
             weight: self.weight,
-        };
+        }
     }
 }
 

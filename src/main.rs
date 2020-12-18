@@ -262,7 +262,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (electrons, photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        println!("total energy = {}", laser.total_energy());
+        //println!("total energy = {}", laser.total_energy());
         primaries
             .chunks(num / 20)
             .enumerate()
@@ -397,10 +397,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
             writeln!(file, "#{:-^1$}", "", 170)?;
             for pt in &electrons {
-                writeln!(file, "{}", pt)?;
+                writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
             }
             for pt in &photons {
-                writeln!(file, "{}", pt)?;
+                writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
             }
         }
     }
