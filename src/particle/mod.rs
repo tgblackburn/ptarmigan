@@ -165,10 +165,10 @@ impl Particle {
         let u = FourVector::new(self.u[0], u[0], u[1], u[2]);
 
         let r0 = ThreeVector::from(self.r[0]).rotate_around_y(theta);
-        let r0 = FourVector::new(self.r[0][0], r0[1], r0[1], r0[2]);
+        let r0 = FourVector::new(self.r[0][0], r0[0], r0[1], r0[2]);
 
         let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
-        let r = FourVector::new(self.r[1][0], r[1], r[1], r[2]);
+        let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
         Particle {
             species: self.species,
