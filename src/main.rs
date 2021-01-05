@@ -137,6 +137,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
+    let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
     let weight = input.read("beam", "charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (num as f64)))
         .unwrap_or(1.0);
@@ -237,7 +238,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             let r = FourVector::new(t, r[0], r[1], r[2]);
             let u = -(gamma * gamma - 1.0f64).sqrt();
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
-            let u = FourVector::new(0.0, u * angle.sin(), 0.0, u * angle.cos()).unitize();
+            let theta_x = angle + rms_div * rng.sample::<f64,_>(StandardNormal);
+            let theta_y = rms_div * rng.sample::<f64,_>(StandardNormal);
+            let u = FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize();
             Particle::create(Species::Electron, r)
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))

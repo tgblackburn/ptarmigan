@@ -29,6 +29,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
+* `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
 
 ## output
 
