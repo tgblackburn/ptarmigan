@@ -1,13 +1,27 @@
 //! Particles
 
+use std::fmt;
+
+#[cfg(feature = "with-mpi")]
+use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
+
 use crate::constants::*;
 use crate::geometry::*;
 
 #[derive(Copy,Clone,PartialEq,Eq)]
+#[repr(u8)]
 pub enum Species {
     Electron,
     Positron,
     Photon,
+}
+
+#[cfg(feature = "with-mpi")]
+unsafe impl Equivalence for Species {
+    type Out = SystemDatatype;
+    fn equivalent_datatype() -> Self::Out {
+        u8::equivalent_datatype()
+    }
 }
 
 /// A elementary particle is defined by its position
@@ -19,6 +33,56 @@ pub struct Particle {
     u: FourVector,
     optical_depth: f64,
     payload: f64,
+    weight: f64,
+}
+
+#[cfg(feature = "with-mpi")]
+unsafe impl Equivalence for Particle {
+    type Out = UserDatatype;
+    fn equivalent_datatype() -> Self::Out {
+        let blocklengths = [1, 2, 1, 1, 1, 1];
+        let displacements = [
+            offset_of!(Particle, species) as mpi::Address,
+            offset_of!(Particle, r) as mpi::Address,
+            offset_of!(Particle, u) as mpi::Address,
+            offset_of!(Particle, optical_depth) as mpi::Address,
+            offset_of!(Particle, payload) as mpi::Address,
+            offset_of!(Particle, weight) as mpi::Address,
+        ];
+        let types: [&dyn Datatype; 6] = [
+            &Species::equivalent_datatype(),
+            &FourVector::equivalent_datatype(),
+            &FourVector::equivalent_datatype(),
+            &f64::equivalent_datatype(),
+            &f64::equivalent_datatype(),
+            &f64::equivalent_datatype(),
+        ];
+        UserDatatype::structured(6, &blocklengths, &displacements, &types)
+    }
+}
+
+impl fmt::Display for Particle {
+    //"E (GeV) x (um) y (um) z (um) beta_x beta_y beta_z PDG_NUM MP_Wgt MP_ID t xi"
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let pdg_num = match self.species {
+            Species::Electron => 11,
+            Species::Positron => -11,
+            Species::Photon => 22,
+        };
+        let energy = self.momentum()[0]; // units of MeV
+        let beta = self.u / self.u[0];
+        write!(f,
+            "{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{:.6e}\t{}\t{:.6e}\t{:.6e}",
+            1.0e-3 * energy, // E (GeV)
+            1.0e6 * self.r[1][1], 1.0e6 * self.r[1][2], 1.0e6 * self.r[1][3], // x y z (um)
+            beta[1], beta[2], beta[3], // beta (1)
+            pdg_num, // PDG_NUM
+            self.weight, // MP_Wgt
+            0, // MP_ID
+            1.0e6 * self.r[1][0], // t (um/c)
+            self.payload, // a at creation
+        )
+    }
 }
 
 /// A shower, or cascade, consists of the primary
@@ -44,6 +108,7 @@ impl Particle {
             u,
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
+            weight: 1.0,
         }
     }
 
@@ -63,6 +128,17 @@ impl Particle {
     pub fn with_optical_depth(&mut self, tau: f64) -> Self {
         self.optical_depth = tau;
         *self
+    }
+
+    /// Updates the particle weight
+    pub fn with_weight(&mut self, weight: f64) -> Self {
+        self.weight = weight;
+        *self
+    }
+
+    /// Number of real particles this particles represents
+    pub fn weight(&self) -> f64 {
+        self.weight
     }
 
     /// The charge-to-mass ratio of the particle
@@ -112,6 +188,33 @@ impl Particle {
 
     pub fn payload(&self) -> f64 {
         self.payload
+    }
+
+    /// In the default coordinate system, the laser propagates towards
+    /// positive z, and it is the beam that is rotated when a finite collision
+    /// angle is requested. This function transforms the particle momenta
+    /// and positions such that the positive z axis points along the beam
+    /// propagation axis instead.
+    pub fn to_beam_coordinate_basis(&self, collision_angle: f64) -> Self {
+        let theta = std::f64::consts::PI - collision_angle;
+
+        let u = ThreeVector::from(self.u).rotate_around_y(theta);
+        let u = FourVector::new(self.u[0], u[0], u[1], u[2]);
+
+        let r0 = ThreeVector::from(self.r[0]).rotate_around_y(theta);
+        let r0 = FourVector::new(self.r[0][0], r0[0], r0[1], r0[2]);
+
+        let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
+        let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
+
+        Particle {
+            species: self.species,
+            r: [r0, r],
+            u,
+            optical_depth: self.optical_depth,
+            payload: self.payload,
+            weight: self.weight,
+        }
     }
 }
 

@@ -7,6 +7,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
+* `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG
 
 ## laser
 
@@ -22,11 +23,13 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 ## beam
 
 * `ne`: number of primary electrons.
+* `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
 * `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
+* `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
 
 ## output
 
@@ -36,6 +39,20 @@ All output is written to the directory where the input file is found.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
 * `photon`: as above.
+* `dump_all_particles`: (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text`.
+
+The possible distributions are:
+
+* `x`, `y` and `z`: particle spatial coordinates, in metres
+* `px`, `py`, `pz`: particle momenta, in MeV/c
+* `energy`: particle energy, in MeV
+* `gamma`: ratio of particle energy to electron mass, dimensionless
+* `p^-` and `p^+`: particle lightfront momenta, in MeV/c
+* `p_perp`: particle perpendicular momentum, i.e. `sqrt(px^2+py^2)`, in MeV/c
+* `r_perp`: ratio of perpendicular to lightfront momentum, i.e. `p_perp / p^-`, dimensionless
+* `angle_x`, `angle_y`: angle between particle momentum and the negative z-axis, in radians
+* `theta`: polar angle between particle momentum and the negative z-axis, in radians
+* `birth_a`: normalized amplitude a<sub>0</sub> at the point where the particle was created
 
 ## stats
 

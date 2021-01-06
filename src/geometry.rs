@@ -1,8 +1,19 @@
 //! Vectors, matrices etc.
 
+#[cfg(feature = "with-mpi")]
+use {mpi::traits::*, mpi::datatype::UserDatatype};
+
 /// A four-vector
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FourVector(f64, f64, f64, f64);
+
+#[cfg(feature = "with-mpi")]
+unsafe impl Equivalence for FourVector {
+    type Out = UserDatatype;
+    fn equivalent_datatype() -> Self::Out {
+        UserDatatype::contiguous(4, &f64::equivalent_datatype())
+    }
+}
 
 impl FourVector {
     /// Creates a new four-vector with the specified components.
