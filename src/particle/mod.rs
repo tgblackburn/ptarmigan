@@ -34,13 +34,14 @@ pub struct Particle {
     optical_depth: f64,
     payload: f64,
     weight: f64,
+    id: u64,
 }
 
 #[cfg(feature = "with-mpi")]
 unsafe impl Equivalence for Particle {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 1, 1, 1, 1];
+        let blocklengths = [1, 2, 1, 1, 1, 1, 1];
         let displacements = [
             offset_of!(Particle, species) as mpi::Address,
             offset_of!(Particle, r) as mpi::Address,
@@ -48,16 +49,18 @@ unsafe impl Equivalence for Particle {
             offset_of!(Particle, optical_depth) as mpi::Address,
             offset_of!(Particle, payload) as mpi::Address,
             offset_of!(Particle, weight) as mpi::Address,
+            offset_of!(Particle, id) as mpi::Address,
         ];
-        let types: [&dyn Datatype; 6] = [
+        let types: [&dyn Datatype; 7] = [
             &Species::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
+            &u64::equivalent_datatype(),
         ];
-        UserDatatype::structured(6, &blocklengths, &displacements, &types)
+        UserDatatype::structured(7, &blocklengths, &displacements, &types)
     }
 }
 
@@ -78,7 +81,7 @@ impl fmt::Display for Particle {
             beta[1], beta[2], beta[3], // beta (1)
             pdg_num, // PDG_NUM
             self.weight, // MP_Wgt
-            0, // MP_ID
+            self.id, // MP_ID
             1.0e6 * self.r[1][0], // t (um/c)
             self.payload, // a at creation
         )
@@ -109,6 +112,7 @@ impl Particle {
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
             weight: 1.0,
+            id: 0,
         }
     }
 
@@ -214,7 +218,19 @@ impl Particle {
             optical_depth: self.optical_depth,
             payload: self.payload,
             weight: self.weight,
+            id: self.id,
         }
+    }
+
+    /// Updates the particle ID
+    pub fn with_id(&mut self, id: u64) -> Self {
+        self.id = id;
+        *self
+    }
+
+    /// ID of this particle
+    pub fn id(&self) -> u64 {
+        self.id
     }
 }
 
