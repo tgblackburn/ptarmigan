@@ -40,7 +40,7 @@ enum OutputMode {
     PlainText,
 }
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
     let mut primary = incident;
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -55,9 +55,12 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
         );
 
         if let Some(k) = field.radiate(r, u, dt, rng) {
+            let id = *current_id;
+            *current_id = *current_id + 1;
             let photon = Particle::create(Species::Photon, r)
                 .with_payload((u * u - 1.0).max(0.0).sqrt())
                 .with_weight(primary.weight())
+                .with_id(id)
                 .with_normalized_momentum(k);
             secondaries.push(photon);
 
@@ -228,7 +231,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
-        .map(|_i| {
+        .map(|i| {
             let z = if focusing {
                 2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
             } else {
@@ -258,8 +261,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))
                 .with_weight(weight)
+                .with_id(i as u64)
         })
         .collect();
+
+    let mut current_id = num as u64;
 
     let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
         sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
@@ -285,7 +291,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -306,7 +312,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -327,7 +333,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -348,7 +354,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -421,12 +427,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
                 }
 
+                let mut current_id = particles.len() as u64;
+
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     for pt in &particles {
-                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle).with_id(pt.id() + current_id))?;
                     }
+                    current_id += particles.len() as u64;
                 }
             }
 
