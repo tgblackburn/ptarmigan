@@ -72,13 +72,12 @@ impl fmt::Display for Particle {
             Species::Positron => -11,
             Species::Photon => 22,
         };
-        let energy = self.momentum()[0]; // units of MeV
-        let beta = self.u / self.u[0];
+        let p = 1.0e-3 * self.momentum(); // units of GeV
         write!(f,
             "{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{:.6e}\t{}\t{:.6e}\t{:.6e}",
-            1.0e-3 * energy, // E (GeV)
+            p[0], // E (GeV)
             1.0e6 * self.r[1][1], 1.0e6 * self.r[1][2], 1.0e6 * self.r[1][3], // x y z (um)
-            beta[1], beta[2], beta[3], // beta (1)
+            p[1], p[2], p[3], // p (GeV/c)
             pdg_num, // PDG_NUM
             self.weight, // MP_Wgt
             self.id, // MP_ID
