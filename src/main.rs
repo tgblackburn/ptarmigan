@@ -385,6 +385,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     if plain_text_output {
+        let mut particles = [electrons, photons].concat();
         if id == 0 {
             use std::fs::File;
             use std::io::Write;
@@ -400,12 +401,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             writeln!(file, "#{:-^1$}", "", 170)?;
             writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
             writeln!(file, "#{:-^1$}", "", 170)?;
-            for pt in &electrons {
+
+            for pt in &particles {
                 writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
             }
-            for pt in &photons {
-                writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+
+            #[cfg(feature = "with-mpi")]
+            for recv_rank in 1..ntasks {
+                particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                for pt in &particles {
+                    writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+                }
             }
+        }
+
+        #[cfg(feature = "with-mpi")]
+        if id != 0 {
+            world.process_at_rank(0).synchronous_send(&particles[..]);
         }
     }
 

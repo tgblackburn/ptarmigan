@@ -16,10 +16,11 @@ meval = "0.2.0"
 yaml-rust = "0.4"
 num = "0.2"
 fitsio = {version = "0.15", optional = true}
+memoffset = {version = "0.5", optional = true}
 
 [features]
 default = []
 fits-output = ["fitsio"]
-with-mpi = ["mpi"]
+with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 no-radiation-reaction = []
