@@ -41,6 +41,19 @@ All output is written to the directory where the input file is found.
 * `photon`: as above.
 * `dump_all_particles`: (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text`.
 
+The possible distributions are:
+
+* `x`, `y` and `z`: particle spatial coordinates, in metres
+* `px`, `py`, `pz`: particle momenta, in MeV/c
+* `energy`: particle energy, in MeV
+* `gamma`: ratio of particle energy to electron mass, dimensionless
+* `p^-` and `p^+`: particle lightfront momenta, in MeV/c
+* `p_perp`: particle perpendicular momentum, i.e. `sqrt(px^2+py^2)`, in MeV/c
+* `r_perp`: ratio of perpendicular to lightfront momentum, i.e. `p_perp / p^-`, dimensionless
+* `angle_x`, `angle_y`: angle between particle momentum and the negative z-axis, in radians
+* `theta`: polar angle between particle momentum and the negative z-axis, in radians
+* `birth_a`: normalized amplitude a<sub>0</sub> at the point where the particle was created
+
 ## stats
 
 If specified, writes aggregated statistical information about the particle final state distributions to a file called 'stats.txt' (with the appropriate identifier prefix, if specified in [output](#output)) in the same directory as the input file.
