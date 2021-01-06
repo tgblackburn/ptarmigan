@@ -39,6 +39,7 @@ All output is written to the directory where the input file is found.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
 * `photon`: as above.
+* `dump_all_particles`: (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text`.
 
 ## stats
 

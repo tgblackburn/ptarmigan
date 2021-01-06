@@ -32,6 +32,14 @@ use particle::*;
 use output::*;
 use input::*;
 
+/// Specifies how to print information for all particles,
+/// as requested by 'dump_all_particles' in the input file.
+#[derive(Copy,Clone,PartialEq)]
+enum OutputMode {
+    None,
+    PlainText,
+}
+
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64) -> Shower {
     let mut primary = incident;
     let mut secondaries: Vec<Particle> = Vec::new();
@@ -166,7 +174,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
-    let plain_text_output = input.read("output", "dump_all_particles").unwrap_or(false);
+
+    let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
+        Ok(s) if s == "plain_text" => OutputMode::PlainText,
+        _ => OutputMode::None,
+    };
+
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
@@ -384,41 +397,45 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if plain_text_output {
-        let mut particles = [electrons, photons].concat();
-        if id == 0 {
-            use std::fs::File;
-            use std::io::Write;
-            let filename = format!("{}{}{}{}particles.out", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-            let mut file = File::create(filename)?;
-            writeln!(file, "#{:-^1$}", "", 170)?;
-            writeln!(file, "# Particle properties when tracking stops")?;
-            writeln!(file, "#{:-^1$}", "", 170)?;
-            writeln!(file, "# First interacting species: electron\t\tSecond interacting species: laser")?;
-            writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length)?;
-            writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
-            writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
-            writeln!(file, "#{:-^1$}", "", 170)?;
-            writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
-            writeln!(file, "#{:-^1$}", "", 170)?;
+    match plain_text_output {
+        OutputMode::PlainText => {
+            let mut particles = [electrons, photons].concat();
 
-            for pt in &particles {
-                writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
-            }
+            if id == 0 {
+                use std::fs::File;
+                use std::io::Write;
+                let filename = format!("{}{}{}{}particles.out", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+                let mut file = File::create(filename)?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                writeln!(file, "# Particle properties when tracking stops")?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                writeln!(file, "# First interacting species: electron\t\tSecond interacting species: laser")?;
+                writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length)?;
+                writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
+                writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
 
-            #[cfg(feature = "with-mpi")]
-            for recv_rank in 1..ntasks {
-                particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                 for pt in &particles {
                     writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
                 }
-            }
-        }
 
-        #[cfg(feature = "with-mpi")]
-        if id != 0 {
-            world.process_at_rank(0).synchronous_send(&particles[..]);
-        }
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    for pt in &particles {
+                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+                    }
+                }
+            }
+
+            #[cfg(feature = "with-mpi")]
+            if id != 0 {
+                world.process_at_rank(0).synchronous_send(&particles[..]);
+            }
+        },
+        OutputMode::None => {},
     }
 
     if id == 0 {
