@@ -73,11 +73,12 @@ impl fmt::Display for Particle {
             Species::Photon => 22,
         };
         let p = 1.0e-3 * self.momentum(); // units of GeV
+        let v = if cfg!(feature = "write-velocity") {p / p[0]} else {p};
         write!(f,
             "{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{:.6e}\t{}\t{:.6e}\t{}\t{:.6e}\t{:.6e}",
             p[0], // E (GeV)
             1.0e6 * self.r[1][1], 1.0e6 * self.r[1][2], 1.0e6 * self.r[1][3], // x y z (um)
-            p[1], p[2], p[3], // p (GeV/c)
+            v[1], v[2], v[3], // p (GeV/c) OR beta (1)
             pdg_num, // PDG_NUM
             self.weight, // MP_Wgt
             self.id, // MP_ID
