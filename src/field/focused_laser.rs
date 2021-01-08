@@ -94,7 +94,16 @@ impl FocusedLaser {
 
 impl Field for FocusedLaser {
     fn total_energy(&self) -> f64 {
-        0.0
+        // peak power of an LP Gaussian beam
+        let peak_field = ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0 / ELEMENTARY_CHARGE;
+        let peak_power = 0.25 * consts::PI * self.waist.powi(2) * peak_field.powi(2) / (SPEED_OF_LIGHT * VACUUM_PERMEABILITY);
+        // time = int f(t)^2 dt where f is the electric-field envelope
+        let time = self.duration * (consts::PI / 16.0f64.ln()).sqrt();
+        let norm = match self.pol {
+            Polarization::Linear => 1.0,
+            Polarization::Circular => 2.0,
+        };
+        norm * peak_power * time
     }
 
     fn max_timestep(&self) -> Option<f64> {

@@ -32,7 +32,15 @@ use particle::*;
 use output::*;
 use input::*;
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64) -> Shower {
+/// Specifies how to print information for all particles,
+/// as requested by 'dump_all_particles' in the input file.
+#[derive(Copy,Clone,PartialEq)]
+enum OutputMode {
+    None,
+    PlainText,
+}
+
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
     let mut primary = incident;
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -47,7 +55,12 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
         );
 
         if let Some(k) = field.radiate(r, u, dt, rng) {
+            let id = *current_id;
+            *current_id = *current_id + 1;
             let photon = Particle::create(Species::Photon, r)
+                .with_payload((u * u - 1.0).max(0.0).sqrt())
+                .with_weight(primary.weight())
+                .with_id(id)
                 .with_normalized_momentum(k);
             secondaries.push(photon);
 
@@ -58,6 +71,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 
         primary.with_position(r);
         primary.with_normalized_momentum(u);
+        primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {
@@ -87,6 +101,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
     let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
+    let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -96,7 +111,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = Polarization::Circular;
+    let pol = match input.read::<String>("laser", "polarization") {
+        Ok(s) if s == "linear" => Polarization::Linear,
+        Ok(s) if s == "circular" => Polarization::Circular,
+        _ => Polarization::Circular
+    };
+
+    if !using_lcfa && pol == Polarization::Linear {
+        panic!("LMA rates are implemented for circularly polarized waves only!");
+    }
 
     let (focusing, waist) = input
         .read("laser", "waist")
@@ -112,18 +135,54 @@ fn main() -> Result<(), Box<dyn Error>> {
     let chirp_b = if !focusing {
         input.read("laser", "chirp_coeff").unwrap_or(0.0)
     } else {
-        eprintln!("Chirp parameter ignored for focusing laser pulses.");
-        0.0
+        input.read("laser", "chirp_b")
+            .map(|_: f64| {
+                eprintln!("Chirp parameter ignored for focusing laser pulses.");
+                0.0
+            })
+            .unwrap_or(0.0)
     };
 
     let num: usize = input.read("beam", "ne")?;
     let gamma: f64 = input.read("beam", "gamma")?;
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
-    let radius: f64 = input.read("beam", "radius")?;
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
+    let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
+    let weight = input.read("beam", "charge")
+        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (num as f64)))
+        .unwrap_or(1.0);
+    let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
+        .and_then(|vs| {
+            // whether a single f64 or a tuple of [f64, dstr],
+            // the first value must be the radius
+            let radius = vs.first().map(|s| input.evaluate(s)).flatten();
+            // a second entry, if present, is a distribution spec
+            let normally_distributed = match vs.get(1) {
+                None => Some(true), // if not specified at all, assume normally distributed
+                Some(s) if s == "normally_distributed" => Some(true),
+                Some(s) if s == "uniformly_distributed" => Some(false),
+                _ => None // anything else is an error
+            };
+            if let (Some(r), Some(b)) = (radius, normally_distributed) {
+                Ok((r, b))
+            } else {
+                eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
+                            \tradius: 2.0e-6\n\
+                            or as a numerical value and a distribution, e.g,\n\
+                            \tradius: [2.0e-6, uniformly_distributed]\n\
+                            \tradius: [2.0e-6, normally_distributed].");
+                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+            }
+        })?;
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
+
+    let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
+        Ok(s) if s == "plain_text" => OutputMode::PlainText,
+        _ => OutputMode::None,
+    };
+
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
@@ -155,7 +214,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut rng = Xoshiro256StarStar::seed_from_u64(id as u64);
+    let mut rng = Xoshiro256StarStar::seed_from_u64((id as u64) * (rng_seed as u64));
     let num = num / (ntasks as usize);
 
     if id == 0 {
@@ -172,26 +231,41 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
-        .map(|_i| {
+        .map(|i| {
             let z = if focusing {
-                2.0 * SPEED_OF_LIGHT * tau
+                2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
             } else {
                 0.5 * wavelength * tau
             };
-            let z = z + length * (3.0 + rng.sample::<f64,_>(StandardNormal));
-            let x = radius * rng.sample::<f64,_>(StandardNormal);
-            let y = radius * rng.sample::<f64,_>(StandardNormal);
+            let t = -z;
+            let z = z + length * rng.sample::<f64,_>(StandardNormal);
+            let (x, y) = if normally_distributed {
+                (
+                    radius * rng.sample::<f64,_>(StandardNormal),
+                    radius * rng.sample::<f64,_>(StandardNormal)
+                )
+            } else { // uniformly distributed
+                let r = radius * rng.gen::<f64>().sqrt();
+                let theta = 2.0 * consts::PI * rng.gen::<f64>();
+                (r * theta.cos(), r * theta.sin())
+            };
             let r = ThreeVector::new(x, y, z);
             let r = r.rotate_around_y(angle);
-            let r = FourVector::new(-z, r[0], r[1], r[2]);
+            let r = FourVector::new(t, r[0], r[1], r[2]);
             let u = -(gamma * gamma - 1.0f64).sqrt();
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
-            let u = FourVector::new(0.0, u * angle.sin(), 0.0, u * angle.cos()).unitize();
+            let theta_x = angle + rms_div * rng.sample::<f64,_>(StandardNormal);
+            let theta_y = rms_div * rng.sample::<f64,_>(StandardNormal);
+            let u = FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize();
             Particle::create(Species::Electron, r)
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))
+                .with_weight(weight)
+                .with_id(i as u64)
         })
         .collect();
+
+    let mut current_id = num as u64;
 
     let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
         sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
@@ -211,12 +285,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (electrons, photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
+        //println!("total energy = {}", laser.total_energy());
         primaries
             .chunks(num / 20)
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -237,7 +312,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -258,7 +333,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -279,7 +354,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -326,6 +401,53 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "{}", stat)?;
             }
         }
+    }
+
+    match plain_text_output {
+        OutputMode::PlainText => {
+            let mut particles = [electrons, photons].concat();
+
+            if id == 0 {
+                use std::fs::File;
+                use std::io::Write;
+                let filename = format!("{}{}{}{}particles.out", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+                let mut file = File::create(filename)?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                writeln!(file, "# Particle properties when tracking stops")?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                writeln!(file, "# First interacting species: electron\t\tSecond interacting species: laser")?;
+                writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length)?;
+                writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
+                writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+                #[cfg(not(feature = "write-velocity"))]
+                writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tp_x (GeV/c)\tp_y (GeV/c)\tp_z (GeV/c)\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
+                #[cfg(feature = "write-velocity")]
+                writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
+                writeln!(file, "#{:-^1$}", "", 170)?;
+
+                for pt in &particles {
+                    writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+                }
+
+                let mut current_id = particles.len() as u64;
+
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    for pt in &particles {
+                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle).with_id(pt.id() + current_id))?;
+                    }
+                    current_id += particles.len() as u64;
+                }
+            }
+
+            #[cfg(feature = "with-mpi")]
+            if id != 0 {
+                world.process_at_rank(0).synchronous_send(&particles[..]);
+            }
+        },
+        OutputMode::None => {},
     }
 
     if id == 0 {

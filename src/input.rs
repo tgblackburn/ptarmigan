@@ -358,14 +358,22 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for Vec<String> {
     fn try_from(key: Key<'a,'b>) -> Result<Self, Self::Error> {
         match &key.config.input[key.section][key.field] {
             // turn a single String into a vec of length 1.
-            Yaml::String(s) => {
+            Yaml::String(s) | Yaml::Real(s) => {
                 Ok(vec![s.clone()])
+            },
+            Yaml::Integer(i) =>  {
+                Ok(vec![i.to_string()])
+            },
+            Yaml::Boolean(b) =>  {
+                Ok(vec![b.to_string()])
             },
             Yaml::Array(array) => {
                 // a is a vec of Vec<Yaml>
                 let take_yaml_string = |y: &Yaml| -> Option<String> {
                     match y {
-                        Yaml::String(s) => Some(s.clone()),
+                        Yaml::String(s) | Yaml::Real(s) => Some(s.clone()),
+                        Yaml::Integer(i) => Some(i.to_string()),
+                        Yaml::Boolean(b) => Some(b.to_string()),
                         _ => None
                     }
                 };
@@ -388,6 +396,7 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for String {
             Yaml::String(s) => Ok(s.clone()),
             Yaml::Integer(i) => Ok(i.to_string()),
             Yaml::Real(s) => Ok(s.clone()),
+            Yaml::Boolean(b) => Ok(b.to_string()),
             _ => Err(())
         }
     }
