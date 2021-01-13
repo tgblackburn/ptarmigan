@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.2
+
+2021-01-13
+
+Incorporates uninitialized memory fix in linked-hash-map (dependency of yaml-rust, used by ptarmigan's input parsing), needed when compiling with rust >=1.48.
+
 ## v0.5.0
 
 2021-01-08
