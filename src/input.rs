@@ -81,6 +81,7 @@ impl<'a> Config<'a> {
     /// Loads a configuration file.
     /// Fails if the file cannot be opened or if it is not
     /// YAML-formatted.
+    #[allow(unused)]
     pub fn from_file(path: &Path) -> Result<Self, ConfigError> {
         use ConfigErrorKind::*;
         let contents = std::fs::read_to_string(path)
@@ -90,7 +91,8 @@ impl<'a> Config<'a> {
 
     /// Loads a YAML configuration from a string.
     /// Fails if the string is not formatted correctly.
-    fn from_string(s: &str) -> Result<Self, ConfigError> {
+    #[allow(unused)]
+    pub fn from_string(s: &str) -> Result<Self, ConfigError> {
         use ConfigErrorKind::*;
         let input = YamlLoader::load_from_str(s)
             .map_err(|_| ConfigError::raise(MissingFile, "", ""))?;

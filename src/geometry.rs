@@ -5,6 +5,8 @@ use {mpi::traits::*, mpi::datatype::UserDatatype};
 
 /// A four-vector
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
+#[repr(C)]
 pub struct FourVector(f64, f64, f64, f64);
 
 #[cfg(feature = "with-mpi")]

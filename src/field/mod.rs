@@ -15,10 +15,12 @@ pub use self::fast_plane_wave::*;
 
 /// The polarization of an electromagnetic wave
 #[allow(unused)]
-#[derive(Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
+#[repr(u8)]
 pub enum Polarization {
-    Linear,
-    Circular,
+    Linear = 0,
+    Circular = 1,
 }
 
 /// Represents the electromagnetic field in a spatiotemporal domain.
