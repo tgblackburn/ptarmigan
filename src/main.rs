@@ -15,6 +15,9 @@ use rand::prelude::*;
 use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
 
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 3);
+
 mod constants;
 mod field;
 mod geometry;
@@ -500,26 +503,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "hdf5-output")]
         OutputMode::Hdf5 => {
             if id == 0 {
-                let mut photons = photons;
-
-                #[cfg(feature = "with-mpi")]
-                for recv_rank in 1..ntasks {
-                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
-                    photons.append(&mut recv);
-                }
-
-                let (x, p): (Vec<_>, Vec<_>) = photons
-                    .iter()
-                    .map(|pt| (pt.position(), pt.momentum()))
-                    .unzip();
-
-                drop(photons);
-
                 let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
                 let file = hdf5::File::create(&filename)?;
 
                 // Top-level run information
-                let conf = file.create_group("configuration")?;
+                let conf = file.create_group("config")?;
                 conf.write("mpi-tasks", ntasks)?
                     .write_str("ptarmigan-version", env!("CARGO_PKG_VERSION"))?
                     .write_str("input-file", &raw_input)?;
@@ -551,20 +539,53 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("collision_angle", angle)?
                     .write("rms_divergence", rms_div)?
                     .write("transverse_distribution_is_normal", normally_distributed)?
-                    .write("longitudinally_distribution_is_normal", true)?;
+                    .write("longitudinal_distribution_is_normal", true)?;
 
                 conf.create_group("output")?
                     .write("min_energy", min_energy)?;
 
                 // Write particle data
-                file.create_group("photon")?
+                let fs = file.create_group("final-state")?;
+
+                let mut photons = photons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    photons.append(&mut recv);
+                }
+                let (x, p, w) = photons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight()))
+                    .unzip_n_vec();
+                drop(photons);
+
+                fs.create_group("photon")?
+                    .write_all("weight", &w)?
+                    .write_all("position", &x)?
+                    .write_all("momentum", &p)?;
+
+                let mut electrons = electrons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    electrons.append(&mut recv);
+                }
+                let (x, p, w) = electrons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight()))
+                    .unzip_n_vec();
+                drop(electrons);
+
+                fs.create_group("electron")?
+                    .write_all("weight", &w)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
             } else {
                 #[cfg(feature = "with-mpi")] {
-                    //world.process_at_rank(0).synchronous_send(&electrons[..]);
                     world.process_at_rank(0).synchronous_send(&photons[..]);
                     drop(photons);
+                    world.process_at_rank(0).synchronous_send(&electrons[..]);
+                    drop(electrons);
                 }
             }
         },

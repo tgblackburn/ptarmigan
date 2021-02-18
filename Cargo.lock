@@ -628,6 +628,7 @@ dependencies = [
  "rand",
  "rand_distr",
  "rand_xoshiro",
+ "unzip-n",
  "yaml-rust",
 ]
 
@@ -871,6 +872,17 @@ name = "unicode-xid"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
+
+[[package]]
+name = "unzip-n"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2e7e85a0596447f0f2ac090e16bc4c516c6fe91771fb0c0ccf7fa3dae896b9c"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.8",
+ "syn",
+]
 
 [[package]]
 name = "utf8-ranges"

@@ -18,11 +18,12 @@ num = "0.2"
 fitsio = {version = "0.15", optional = true}
 memoffset = {version = "0.5", optional = true}
 hdf5 = {version = "0.7.0", optional = true}
+unzip-n = {version = "0.1.2", optional = true}
 
 [features]
 default = []
 fits-output = ["fitsio"]
-hdf5-output = ["hdf5"]
+hdf5-output = ["hdf5", "unzip-n"]
 with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 no-radiation-reaction = []
