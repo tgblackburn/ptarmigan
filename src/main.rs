@@ -262,7 +262,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut rng = Xoshiro256StarStar::seed_from_u64((id as u64) * (rng_seed as u64));
+    let local_seed = (id as u64) * (1 + rng_seed as u64);
+    let mut rng = Xoshiro256StarStar::seed_from_u64(local_seed);
     let num = num / (ntasks as usize);
 
     if id == 0 {
