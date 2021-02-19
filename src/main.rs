@@ -506,10 +506,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
                 let file = hdf5::File::create(&filename)?;
 
+                // Build info
+                file.create_group("build")?
+                    .write_str("version", env!("CARGO_PKG_VERSION"))?
+                    .write_str("branch",env!("VERGEN_GIT_BRANCH"))?
+                    .write_str("commit-hash",env!("VERGEN_GIT_SHA"))?
+                    .write_str("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+
                 // Top-level run information
                 let conf = file.create_group("config")?;
                 conf.write("mpi-tasks", ntasks)?
-                    .write_str("ptarmigan-version", env!("CARGO_PKG_VERSION"))?
                     .write_str("input-file", &raw_input)?;
 
                 // Parsed input configuration

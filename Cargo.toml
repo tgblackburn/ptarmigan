@@ -6,6 +6,7 @@ edition = "2018"
 publish = false
 readme = "README.md"
 license = "Apache-2.0"
+build = "build.rs"
 
 [dependencies]
 mpi = {version = "0.5", optional = true}
@@ -27,3 +28,6 @@ hdf5-output = ["hdf5", "unzip-n"]
 with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 no-radiation-reaction = []
+
+[build-dependencies]
+vergen = "4.0.3"
