@@ -113,11 +113,13 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
             #[cfg(not(feature = "no-radiation-reaction"))] {
                 u = u - k;
             }
+
+            primary.update_interaction_count(1.0);
         }
 
         primary.with_position(r);
         primary.with_normalized_momentum(u);
-        primary.with_payload((u * u - 1.0).max(0.0).sqrt());
+        //primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {

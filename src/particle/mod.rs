@@ -30,9 +30,10 @@ unsafe impl Equivalence for Species {
 pub struct Particle {
     species: Species,
     r: [FourVector; 2],
-    u: FourVector,
+    u: [FourVector; 2],
     optical_depth: f64,
     payload: f64,
+    interaction_count: f64,
     weight: f64,
     id: u64,
 }
@@ -41,26 +42,28 @@ pub struct Particle {
 unsafe impl Equivalence for Particle {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 1, 1, 1, 1, 1];
+        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1];
         let displacements = [
             offset_of!(Particle, species) as mpi::Address,
             offset_of!(Particle, r) as mpi::Address,
             offset_of!(Particle, u) as mpi::Address,
             offset_of!(Particle, optical_depth) as mpi::Address,
             offset_of!(Particle, payload) as mpi::Address,
+            offset_of!(Particle, interaction_count) as mpi::Address,
             offset_of!(Particle, weight) as mpi::Address,
             offset_of!(Particle, id) as mpi::Address,
         ];
-        let types: [&dyn Datatype; 7] = [
+        let types: [&dyn Datatype; 8] = [
             &Species::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
+            &f64::equivalent_datatype(),
             &u64::equivalent_datatype(),
         ];
-        UserDatatype::structured(7, &blocklengths, &displacements, &types)
+        UserDatatype::structured(8, &blocklengths, &displacements, &types)
     }
 }
 
@@ -109,9 +112,10 @@ impl Particle {
         Particle {
             species,
             r: [r; 2],
-            u,
+            u: [u; 2],
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
+            interaction_count: 0.0,
             weight: 1.0,
             id: 0,
         }
@@ -125,7 +129,7 @@ impl Particle {
 
     /// Updates the particle normalized momentum
     pub fn with_normalized_momentum(&mut self, u: FourVector) -> Self {
-        self.u = u;
+        self.u[1] = u;
         *self
     }
 
@@ -158,14 +162,24 @@ impl Particle {
 
     /// The particle normalized momentum
     pub fn normalized_momentum(&self) -> FourVector {
-        self.u
+        self.u[1]
     }
 
     /// The particle momentum, in units of MeV
     pub fn momentum(&self) -> FourVector {
         match self.species {
             Species::Electron | Species::Positron | Species::Photon => {
-                ELECTRON_MASS_MEV * self.u
+                ELECTRON_MASS_MEV * self.u[1]
+            }
+        }
+    }
+
+    /// The particle momentum at creation, in units of MeV
+    #[allow(unused)]
+    pub fn initial_momentum(&self) -> FourVector {
+        match self.species {
+            Species::Electron | Species::Positron | Species::Photon => {
+                ELECTRON_MASS_MEV * self.u[0]
             }
         }
     }
@@ -195,6 +209,17 @@ impl Particle {
         self.payload
     }
 
+    /// Increments the particle interaction count by the given
+    /// delta.
+    pub fn update_interaction_count(&mut self, delta: f64) -> Self {
+        self.interaction_count = self.interaction_count + delta;
+        *self
+    }
+
+    pub fn interaction_count(&self) -> f64 {
+        self.interaction_count
+    }
+
     /// In the default coordinate system, the laser propagates towards
     /// positive z, and it is the beam that is rotated when a finite collision
     /// angle is requested. This function transforms the particle momenta
@@ -203,8 +228,11 @@ impl Particle {
     pub fn to_beam_coordinate_basis(&self, collision_angle: f64) -> Self {
         let theta = std::f64::consts::PI - collision_angle;
 
-        let u = ThreeVector::from(self.u).rotate_around_y(theta);
-        let u = FourVector::new(self.u[0], u[0], u[1], u[2]);
+        let u0 = ThreeVector::from(self.u[0]).rotate_around_y(theta);
+        let u0 = FourVector::new(self.u[0][0], u0[0], u0[1], u0[2]);
+
+        let u = ThreeVector::from(self.u[1]).rotate_around_y(theta);
+        let u = FourVector::new(self.u[1][0], u[0], u[1], u[2]);
 
         let r0 = ThreeVector::from(self.r[0]).rotate_around_y(theta);
         let r0 = FourVector::new(self.r[0][0], r0[0], r0[1], r0[2]);
@@ -215,9 +243,10 @@ impl Particle {
         Particle {
             species: self.species,
             r: [r0, r],
-            u,
+            u: [u0, u],
             optical_depth: self.optical_depth,
             payload: self.payload,
+            interaction_count: self.interaction_count,
             weight: self.weight,
             id: self.id,
         }
