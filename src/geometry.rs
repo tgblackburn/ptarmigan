@@ -3,9 +3,12 @@
 #[cfg(feature = "with-mpi")]
 use {mpi::traits::*, mpi::datatype::UserDatatype};
 
+#[cfg(feature = "hdf5-output")]
+use hdf5::types::*;
+
 /// A four-vector
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
+//#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
 #[repr(C)]
 pub struct FourVector(f64, f64, f64, f64);
 
@@ -14,6 +17,16 @@ unsafe impl Equivalence for FourVector {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
         UserDatatype::contiguous(4, &f64::equivalent_datatype())
+    }
+}
+
+#[cfg(feature = "hdf5-output")]
+unsafe impl H5Type for FourVector {
+    fn type_descriptor() -> TypeDescriptor {
+        TypeDescriptor::FixedArray(
+            Box::new(f64::type_descriptor()),
+            4,
+        )
     }
 }
 
