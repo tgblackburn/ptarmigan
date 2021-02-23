@@ -16,7 +16,7 @@ use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
 
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 3);
+unzip_n::unzip_n!(pub 4);
 
 mod constants;
 mod field;
@@ -561,16 +561,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w) = photons
+                let (x, p, w, a) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload()))
                     .unzip_n_vec();
                 drop(photons);
 
                 fs.create_group("photon")?
                     .write_all("weight", &w)?
+                    .write_all("a0_at_creation", &a)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
+
+                // Provide alias for a0
+                fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
 
                 let mut electrons = electrons;
                 #[cfg(feature = "with-mpi")]
@@ -578,14 +582,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     electrons.append(&mut recv);
                 }
-                let (x, p, w) = electrons
+                let (x, p, w, n) = electrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
                     .unzip_n_vec();
                 drop(electrons);
 
                 fs.create_group("electron")?
                     .write_all("weight", &w)?
+                    .write_all("n_gamma", &n)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
             } else {
