@@ -12,10 +12,10 @@ cargo build --release [-j NUM_THREADS]
 
 where `NUM_THREADS` is the number of separate threads that Cargo is allowed to spawn.
 
-There are two optional features, `with-mpi` and `fits-output`, which need external libraries to be installed. The former allows the code to run in parallel; the latter switches the default output format from text to FITS. Requirements are an MPI library (ptarmigan is tested against MPICH) and [CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/). To build with one or both, run:
+There are three optional features, `with-mpi`, `fits-output` and `hdf5-output`, which need external libraries to be installed. The first allows the code to run in parallel; the second switches the default output format for distribution functions from text to FITS. Requirements are an MPI library (ptarmigan is tested against MPICH), [CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/) and [libhdf5](https://www.hdfgroup.org/solutions/hdf5/). To build with one or all of these, run:
 
 ```bash
-cargo build --release --features with-mpi,fits-output [-j NUM_THREADS]
+cargo build --release --features with-mpi,fits-output,hdf5-output [-j NUM_THREADS]
 ```
 
 ## Specify problem
