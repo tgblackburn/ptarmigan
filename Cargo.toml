@@ -6,6 +6,7 @@ edition = "2018"
 publish = false
 readme = "README.md"
 license = "Apache-2.0"
+build = "build.rs"
 
 [dependencies]
 mpi = {version = "0.5", optional = true}
@@ -17,11 +18,16 @@ yaml-rust = "0.4.5"
 num = "0.2"
 fitsio = {version = "0.15", optional = true}
 memoffset = {version = "0.5", optional = true}
+hdf5 = {version = "0.7.0", optional = true}
+unzip-n = {version = "0.1.2", optional = true}
 
 [features]
 default = []
 fits-output = ["fitsio"]
+hdf5-output = ["hdf5", "unzip-n"]
 with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 no-radiation-reaction = []
-write-velocity = []
+
+[build-dependencies]
+vergen = "4.0.3"

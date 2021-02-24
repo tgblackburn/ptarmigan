@@ -15,6 +15,9 @@ use rand::prelude::*;
 use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
 
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 4);
+
 mod constants;
 mod field;
 mod geometry;
@@ -38,6 +41,49 @@ use input::*;
 enum OutputMode {
     None,
     PlainText,
+    #[cfg(feature = "hdf5-output")]
+    Hdf5,
+}
+
+#[cfg(feature = "hdf5-output")]
+trait Writeable<T> {
+    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self>;
+    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self>;
+    fn write_if(&self, condition: bool, name: &str, value: T) -> hdf5::Result<&Self> {
+        if condition {
+            self.write(name, value)
+        } else {
+            Ok(self)
+        }
+    }
+}
+
+#[cfg(feature = "hdf5-output")]
+trait WriteableString {
+    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self>;
+}
+
+#[cfg(feature = "hdf5-output")]
+impl<T: hdf5::types::H5Type> Writeable<T> for hdf5::Group {
+    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self> {
+        self.new_dataset::<T>().create(name, ())?.write_scalar(&value).map(|_| self)
+    }
+
+    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self> {
+        self.new_dataset::<T>().create(name, value.len())?.write(value).map(|_| self)
+    }
+}
+
+#[cfg(feature = "hdf5-output")]
+impl WriteableString for hdf5::Group {
+    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self> {
+        use std::str::FromStr;
+        use hdf5::types::VarLenUnicode;
+        match VarLenUnicode::from_str(value) {
+            Ok(vlu) => self.new_dataset::<VarLenUnicode>().create(name, ())?.write_scalar(&vlu).map(|_| self),
+            Err(e) => Err(hdf5::Error::Internal(e.to_string()))
+        }
+    }
 }
 
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
@@ -67,11 +113,13 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
             #[cfg(not(feature = "no-radiation-reaction"))] {
                 u = u - k;
             }
+
+            primary.update_interaction_count(1.0);
         }
 
         primary.with_position(r);
         primary.with_normalized_momentum(u);
-        primary.with_payload((u * u - 1.0).max(0.0).sqrt());
+        //primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {
@@ -95,7 +143,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Read input configuration with default context
 
-    let mut input = Config::from_file(&path)?;
+    let raw_input = std::fs::read_to_string(&path)
+        .map_err(|_| ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+    let mut input = Config::from_string(&raw_input)?;
+    //let mut input = Config::from_file(&path)?;
     input.with_context("constants");
 
     let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
@@ -135,7 +186,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let chirp_b = if !focusing {
         input.read("laser", "chirp_coeff").unwrap_or(0.0)
     } else {
-        input.read("laser", "chirp_b")
+        input.read("laser", "chirp_coeff")
             .map(|_: f64| {
                 eprintln!("Chirp parameter ignored for focusing laser pulses.");
                 0.0
@@ -179,8 +230,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
 
     let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
-        Ok(s) if s == "plain_text" => OutputMode::PlainText,
+        Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
+        #[cfg(feature = "hdf5-output")]
+        Ok(s) if s == "hdf5" => OutputMode::Hdf5,
         _ => OutputMode::None,
+    };
+
+    let laser_defines_z = match input.read::<String>("output", "coordinate_system") {
+        Ok(s) if s == "beam" => false,
+        _ => true,
     };
 
     let min_energy: f64 = input
@@ -225,6 +283,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         #[cfg(feature = "fits-output")] {
             println!("\t* writing FITS output");
+        }
+        #[cfg(feature = "hdf5-output")] {
+            println!("\t* writing HDF5 output");
         }
         #[cfg(feature = "no-radiation-reaction")] {
             println!("\t* with radiation reaction disabled");
@@ -284,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (electrons, photons) = if focusing && !using_lcfa {
+    let (mut electrons, mut photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         //println!("total energy = {}", laser.total_energy());
         primaries
@@ -371,6 +432,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     };
 
+    if !laser_defines_z {
+        electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+    }
+
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &electrons, &prefix)?;
@@ -421,10 +487,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
                 writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
-                #[cfg(not(feature = "write-velocity"))]
                 writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tp_x (GeV/c)\tp_y (GeV/c)\tp_z (GeV/c)\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
-                #[cfg(feature = "write-velocity")]
-                writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
+                //writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
 
                 for pt in &particles {
@@ -437,7 +501,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 for recv_rank in 1..ntasks {
                     particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     for pt in &particles {
-                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle).with_id(pt.id() + current_id))?;
+                        writeln!(file, "{}", pt.clone().with_id(pt.id() + current_id))?;
                     }
                     current_id += particles.len() as u64;
                 }
@@ -446,6 +510,108 @@ fn main() -> Result<(), Box<dyn Error>> {
             #[cfg(feature = "with-mpi")]
             if id != 0 {
                 world.process_at_rank(0).synchronous_send(&particles[..]);
+            }
+        },
+        #[cfg(feature = "hdf5-output")]
+        OutputMode::Hdf5 => {
+            if id == 0 {
+                let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+                let file = hdf5::File::create(&filename)?;
+
+                // Build info
+                file.create_group("build")?
+                    .write_str("version", env!("CARGO_PKG_VERSION"))?
+                    .write_str("branch",env!("VERGEN_GIT_BRANCH"))?
+                    .write_str("commit-hash",env!("VERGEN_GIT_SHA"))?
+                    .write_str("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+
+                // Top-level run information
+                let conf = file.create_group("config")?;
+                conf.write("mpi-tasks", ntasks)?
+                    .write_str("input-file", &raw_input)?;
+
+                // Parsed input configuration
+                conf.create_group("control")?
+                    .write("dt_multiplier", dt_multiplier)?
+                    .write("lcfa", using_lcfa)?
+                    .write("rng_seed", rng_seed)?
+                    .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
+                    .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
+
+                conf.create_group("laser")?
+                    .write("a0", a0)?
+                    .write("wavelength", wavelength)?
+                    .write("polarization", pol)?
+                    .write("focusing", focusing)?
+                    .write("chirp_b", chirp_b)?
+                    .write_if(focusing, "waist", waist)?
+                    .write_if(focusing, "fwhm_duration", tau)?
+                    .write_if(!focusing, "n_cycles", tau)?;
+
+                conf.create_group("beam")?
+                    .write("ne", num)?
+                    .write("gamma", gamma)?
+                    .write("sigma", sigma)?
+                    .write("radius", radius)?
+                    .write("length", length)?
+                    .write("collision_angle", angle)?
+                    .write("rms_divergence", rms_div)?
+                    .write("transverse_distribution_is_normal", normally_distributed)?
+                    .write("longitudinal_distribution_is_normal", true)?;
+
+                conf.create_group("output")?
+                    .write("laser_defines_positive_z", laser_defines_z)?
+                    .write("beam_defines_positive_z", !laser_defines_z)?
+                    .write("min_energy", min_energy)?;
+
+                // Write particle data
+                let fs = file.create_group("final-state")?;
+
+                let mut photons = photons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    photons.append(&mut recv);
+                }
+                let (x, p, w, a) = photons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload()))
+                    .unzip_n_vec();
+                drop(photons);
+
+                fs.create_group("photon")?
+                    .write_all("weight", &w)?
+                    .write_all("a0_at_creation", &a)?
+                    .write_all("position", &x)?
+                    .write_all("momentum", &p)?;
+
+                // Provide alias for a0
+                fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
+
+                let mut electrons = electrons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    electrons.append(&mut recv);
+                }
+                let (x, p, w, n) = electrons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
+                    .unzip_n_vec();
+                drop(electrons);
+
+                fs.create_group("electron")?
+                    .write_all("weight", &w)?
+                    .write_all("n_gamma", &n)?
+                    .write_all("position", &x)?
+                    .write_all("momentum", &p)?;
+            } else {
+                #[cfg(feature = "with-mpi")] {
+                    world.process_at_rank(0).synchronous_send(&photons[..]);
+                    drop(photons);
+                    world.process_at_rank(0).synchronous_send(&electrons[..]);
+                    drop(electrons);
+                }
             }
         },
         OutputMode::None => {},

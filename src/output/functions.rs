@@ -58,6 +58,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "birth_a" => Some(
             (payload as ParticleOutput, "1")
         ),
+        "n_inter" | "n_gamma" | "n_pos" => Some(
+            (interaction_count as ParticleOutput, "1")
+        ),
         _ => None,
     }
 }
@@ -143,4 +146,8 @@ pub fn z(pt: &Particle) -> f64 {
 
 pub fn payload(pt: &Particle) -> f64 {
     pt.payload()
+}
+
+pub fn interaction_count(pt: &Particle) -> f64 {
+    pt.interaction_count()
 }
