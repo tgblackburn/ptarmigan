@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.6.0
+
+2021-02-24
+
+New:
+
+* Export of complete simulation data as HDF5, available when code compiled with feature `hdf5-output`.
+
+Fixed:
+
+* RNG seeding for different MPI tasks.
+
+Removed:
+
+* `write-velocity` feature, in advance of plain-text output itself.
+
 ## v0.5.2
 
 2021-01-13
