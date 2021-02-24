@@ -236,6 +236,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => OutputMode::None,
     };
 
+    let laser_defines_z = match input.read::<String>("output", "coordinate_system") {
+        Ok(s) if s == "beam" => false,
+        _ => true,
+    };
+
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
@@ -340,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (electrons, photons) = if focusing && !using_lcfa {
+    let (mut electrons, mut photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         //println!("total energy = {}", laser.total_energy());
         primaries
@@ -427,6 +432,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     };
 
+    if !laser_defines_z {
+        electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+    }
+
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &electrons, &prefix)?;
@@ -491,7 +501,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 for recv_rank in 1..ntasks {
                     particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     for pt in &particles {
-                        writeln!(file, "{}", pt.to_beam_coordinate_basis(angle).with_id(pt.id() + current_id))?;
+                        writeln!(file, "{}", pt.clone().with_id(pt.id() + current_id))?;
                     }
                     current_id += particles.len() as u64;
                 }
@@ -550,6 +560,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("longitudinal_distribution_is_normal", true)?;
 
                 conf.create_group("output")?
+                    .write("laser_defines_positive_z", laser_defines_z)?
+                    .write("beam_defines_positive_z", !laser_defines_z)?
                     .write("min_energy", min_energy)?;
 
                 // Write particle data
