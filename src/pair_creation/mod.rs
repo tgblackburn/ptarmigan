@@ -74,29 +74,66 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     let s_max = 0.5;
 
     if s_peak.is_finite() {
-        // do integral in two stages, from s_min to s_peak and then
-        // s_peak to s_max
-        let lower: f64 = GAUSS_32_NODES.iter()
-            .map(|x| 0.5 * (s_peak - s_min) * x + 0.5 * (s_min + s_peak))
-            .zip(GAUSS_32_WEIGHTS.iter())
-            .map(|(s, w)| {
-                let sp = partial_spectrum(n, a, eta, s);
-                println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
-                0.5 * (s_peak - s_min) * w * sp
-            })
-            .sum();
+        let s_mid = 2.0 * s_peak - s_min;
+        if s_mid > s_max {
+            // do integral in two stages, from s_min to s_peak and then
+            // s_peak to s_max
+            let lower: f64 = GAUSS_32_NODES.iter()
+                .map(|x| 0.5 * (s_peak - s_min) * x + 0.5 * (s_min + s_peak))
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(s, w)| {
+                    let sp = partial_spectrum(n, a, eta, s);
+                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    0.5 * (s_peak - s_min) * w * sp
+                })
+                .sum();
 
-        let upper: f64 = GAUSS_32_NODES.iter()
-            .map(|x| 0.5 * (s_max - s_peak) * x + 0.5 * (s_peak + s_max))
-            .zip(GAUSS_32_WEIGHTS.iter())
-            .map(|(s, w)| {
-                let sp = partial_spectrum(n, a, eta, s);
-                println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
-                0.5 * (s_max - s_peak) * w * sp
-            })
-            .sum();
+            let upper: f64 = GAUSS_32_NODES.iter()
+                .map(|x| 0.5 * (s_max - s_peak) * x + 0.5 * (s_peak + s_max))
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(s, w)| {
+                    let sp = partial_spectrum(n, a, eta, s);
+                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    0.5 * (s_max - s_peak) * w * sp
+                })
+                .sum();
 
-        2.0 * (upper + lower)
+            2.0 * (upper + lower)
+        } else {
+            // do integral in three stages, from s_min to s_peak,
+            // s_peak to s_mid, and s_mid to s_max
+            let lower: f64 = GAUSS_32_NODES.iter()
+                .map(|x| 0.5 * (s_peak - s_min) * x + 0.5 * (s_min + s_peak))
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(s, w)| {
+                    let sp = partial_spectrum(n, a, eta, s);
+                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    0.5 * (s_peak - s_min) * w * sp
+                })
+                .sum();
+
+            let middle: f64 = GAUSS_32_NODES.iter()
+                .map(|x| 0.5 * (s_mid - s_peak) * x + 0.5 * (s_peak + s_mid))
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(s, w)| {
+                    let sp = partial_spectrum(n, a, eta, s);
+                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    0.5 * (s_mid - s_peak) * w * sp
+                })
+                .sum();
+
+            let upper: f64 = GAUSS_32_NODES.iter()
+                .map(|x| 0.5 * (s_max - s_mid) * x + 0.5 * (s_mid + s_max))
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(s, w)| {
+                    let sp = partial_spectrum(n, a, eta, s);
+                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    0.5 * (s_max - s_mid) * w * sp
+                })
+                .sum();
+
+            2.0 * (lower + middle + upper)
+        }
     } else {
         let total: f64 = GAUSS_32_NODES.iter()
             .map(|x| 0.5 * (s_max - s_min) * x + 0.5 * (s_min + s_max))
@@ -157,26 +194,33 @@ mod tests {
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
         assert!(error < max_error);
 
-        let (n, a, eta) = (38000, 10.0, 0.01);
-        let target = 1.4338498960396018931e-18;
+        let (n, a, eta) = (4000, 5.0, 0.02);
+        let target = 9.2620552570985535880e-61;
         let result = partial_rate(n, a, eta);
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        //assert!(error < max_error);
+        assert!(error < max_error);
 
-        let (n, a, eta) = (40000, 10.0, 0.01);
-        let target = 1.4338498960396018931e-18;
+        let (n, a, eta) = (5000, 5.0, 0.02);
+        let target = 5.9413657401296979089e-17;
         let result = partial_rate(n, a, eta);
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        //assert!(error < max_error);
+        assert!(error < max_error);
 
-        let (n, a, eta) = (60000, 10.0, 0.01);
-        let target = 1.4338498960396018931e-18;
+        let (n, a, eta) = (6000, 5.0, 0.02);
+        let target = 1.1629168979497463847e-18;
         let result = partial_rate(n, a, eta);
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        //assert!(error < max_error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (8000, 5.0, 0.02);
+        let target = 1.6722921069034930599e-23;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
 
         let (n, a, eta) = (3, 0.1, 1.0);
         let target = 2.7926363804797338348e-7;
@@ -201,8 +245,8 @@ mod tests {
 
         // At chi = a eta = 1
 
-        let (n, a, eta) = (2500, 10.0, 0.1);
-        let target = 7.6156411967625443800e-234;
+        let (n, a, eta) = (3000, 10.0, 0.1);
+        let target = 2.8532353822421244101e-48;
         let result = partial_rate(n, a, eta);
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
@@ -220,7 +264,81 @@ mod tests {
         let result = partial_rate(n, a, eta);
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        //assert!(error < max_error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (6, 1.0, 1.0);
+        let target = 0.0031666996194000280745;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (20, 1.0, 1.0);
+        let target = 1.2280171339973043031e-5;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (50, 1.0, 1.0);
+        let target = 7.7268893728561315057e-11;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        // At chi = a eta = 10
+
+        let (n, a, eta) = (300, 10.0, 1.0);
+        let target = 1.6230747656967905300e-7;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (400, 10.0, 1.0);
+        let target = 0.0031791285538880908649;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (2000, 10.0, 1.0);
+        let target = 5.9533991784012215406e-5;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        // At chi = a eta = 0.01
+
+        let (n, a, eta) = (640, 1.0, 0.01);
+        let target = 9.7351336009776642509e-115;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (1000, 1.0, 0.01);
+        let target = 2.3257373741363993054e-156;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (25, 0.1, 0.1);
+        let target = 5.7778053795802739886e-52;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
+
+        let (n, a, eta) = (50, 0.1, 0.1);
+        let target = 3.3444371706672986244e-90;
+        let result = partial_rate(n, a, eta);
+        let error = (target - result).abs() / target;
+        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+        assert!(error < max_error);
     }
 }
 
