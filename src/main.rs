@@ -23,6 +23,7 @@ mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
+mod pair_creation;
 mod lcfa;
 mod special_functions;
 mod output;
