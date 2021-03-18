@@ -20,19 +20,19 @@ fn partial_spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     let sn = 2.0 * ell * eta / (1.0 + a * a);
 
     // equivalent to n > 2 (1 + a^2) / eta
-    if sn <= 4.0 {
-        return 0.0;
-    }
+    //if sn <= 4.0 {
+    //    return 0.0;
+    //}
 
     // limits on v come from requirement that z > 0
-    let (v_min, v_max) = (
-        0.5 - (0.25 - 1.0 / sn).sqrt(),
-        0.5 + (0.25 + 1.0 / sn).sqrt()
-    );
+    //let (v_min, v_max) = (
+    //    0.5 - (0.25 - 1.0 / sn).sqrt(),
+    //    0.5 + (0.25 + 1.0 / sn).sqrt()
+    //);
 
-    if v < v_min || v > v_max {
-        return 0.0;
-    }
+    //if v < v_min || v > v_max {
+    //    return 0.0;
+    //}
 
     let z = {
         let tmp = 1.0 / (sn * v * (1.0 - v));
@@ -57,12 +57,9 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     let sn = 2.0 * ell * eta / (1.0 + a * a);
 
     // equivalent to n > 2 (1 + a^2) / eta
-    if sn <= 4.0 {
-        return 0.0;
-    }
+    assert!(sn > 4.0);
 
     // approx position at which probability is maximised
-    //let beta = 16.0 / (sn * sn) + a * a * (a * a * (1.0/ell + 1.0).powi(2) - 8.0 * (a * a - 2.0) / sn) / (a * a - 2.0).powi(2);
     let beta = a.powi(4) * (1.0/ell + 1.0).powi(2) + 16.0 * (a * a - 2.0).powi(2) / (sn * sn) - 8.0 * a * a * (a * a - 2.0) / sn;
     let beta = beta.sqrt() / (a * a - 2.0);
     let alpha = (a * a + 2.0 * ell) / (ell * (2.0 - a * a)) - 4.0 / sn;
@@ -83,7 +80,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(s, w)| {
                     let sp = partial_spectrum(n, a, eta, s);
-                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                     0.5 * (s_peak - s_min) * w * sp
                 })
                 .sum();
@@ -93,7 +90,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(s, w)| {
                     let sp = partial_spectrum(n, a, eta, s);
-                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                     0.5 * (s_max - s_peak) * w * sp
                 })
                 .sum();
@@ -107,7 +104,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(s, w)| {
                     let sp = partial_spectrum(n, a, eta, s);
-                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                     0.5 * (s_peak - s_min) * w * sp
                 })
                 .sum();
@@ -117,7 +114,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(s, w)| {
                     let sp = partial_spectrum(n, a, eta, s);
-                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                     0.5 * (s_mid - s_peak) * w * sp
                 })
                 .sum();
@@ -127,7 +124,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(s, w)| {
                     let sp = partial_spectrum(n, a, eta, s);
-                    println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                    //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                     0.5 * (s_max - s_mid) * w * sp
                 })
                 .sum();
@@ -140,7 +137,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
             .zip(GAUSS_32_WEIGHTS.iter())
             .map(|(s, w)| {
                 let sp = partial_spectrum(n, a, eta, s);
-                println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
+                //println!("{} {:.3e} {:.3e} {:.6e} {:.6e}", n, a, eta, s, sp);
                 0.5 * (s_max - s_min) * w * sp
             })
             .sum();
@@ -149,14 +146,47 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
 }
 
 /// Returns the sum, over harmonic index, of the partial nonlinear
-/// Compton rates. Equivalent to calling
-/// ```
-/// let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
-/// let rate = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum::<f64>();
-/// ```
-/// but implemented as a table lookup.
-fn rate(a: f64, eta: f64) -> f64 {
+/// Breit-Wheeler rates, implemented as a table lookup.
+fn rate_by_lookup(a: f64, eta: f64) -> f64 {
     unimplemented!()
+}
+
+/// Returns the sum, over harmonic index, of the partial nonlinear
+/// Breit-Wheeler rates.
+fn rate_by_summation(a: f64, eta: f64) -> f64 {
+    let n_min = (2.0 * (1.0 + a * a) / eta).ceil() as i32;
+    let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
+    let n_max = n_min + delta;
+    (n_min..n_max).map(|n| partial_rate(n, a, eta)).sum()
+}
+
+#[allow(dead_code)]
+fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
+    let n_min = (2.0f64 * (1.0 + a * a) / eta).ceil() as i32;
+
+    let mut total = 0.0;
+    let mut n_peak = n_min;
+    let mut partial = partial_rate(n_min, a, eta);
+    let mut n = n_min + 1;
+    loop {
+        total += partial;
+        let tmp = partial_rate(n, a, eta);
+        if tmp > partial {
+            n_peak = n;
+        }
+        partial = tmp;
+        n += 1;
+
+        if n < 2 * n_min {
+            continue;
+        } else if partial / total < max_error {
+            break;
+        } else if total == 0.0 {
+            break;
+        }
+    }
+
+    (n_min, n_peak, n, total)
 }
 
 #[cfg(test)]
@@ -339,6 +369,23 @@ mod tests {
         let error = (target - result).abs() / target;
         eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
         assert!(error < max_error);
+    }
+
+    #[test]
+    #[ignore]
+    fn summation_limits() {
+        let max_error = 1.0e-4;
+        let pts = [
+            (0.1, 1.0), (1.0, 0.1), (10.0, 0.01), (1.0, 1.0), (10.0, 0.1),
+            (10.0, 1.0), (0.1, 0.1), (1.0, 0.01), (0.2, 0.1), (0.5, 0.1),
+            (2.0, 0.1), (5.0, 0.1), (0.2, 1.0), (0.5, 1.0), (2.0, 1.0),
+            (5.0, 1.0), (0.5, 0.01), (2.0, 0.01), (5.0, 0.01)
+        ];
+
+        for (a, eta) in pts.iter() {
+            let (n_min, n_peak, n_max, total) = find_sum_limits(*a, *eta, max_error);
+            println!("{:.6e} {:.6e} {} {} {} {:.6e}", a, eta, n_min, n_peak, n_max, total);
+        }
     }
 }
 
