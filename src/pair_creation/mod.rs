@@ -6,6 +6,8 @@ use crate::constants::*;
 use crate::geometry::*;
 use crate::special_functions::*;
 
+mod rate_table;
+
 /// Evaluates the important part of the nonlinear Breit-Wheeler
 /// differential rate, f,
 /// either
@@ -57,7 +59,9 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     let sn = 2.0 * ell * eta / (1.0 + a * a);
 
     // equivalent to n > 2 (1 + a^2) / eta
-    assert!(sn > 4.0);
+    if sn <= 4.0 {
+        return 0.0;
+    }
 
     // approx position at which probability is maximised
     let beta = a.powi(4) * (1.0/ell + 1.0).powi(2) + 16.0 * (a * a - 2.0).powi(2) / (sn * sn) - 8.0 * a * a * (a * a - 2.0) / sn;
@@ -65,12 +69,12 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     let alpha = (a * a + 2.0 * ell) / (ell * (2.0 - a * a)) - 4.0 / sn;
     let tmp = alpha + beta;
     let s_peak = 0.5 * (1.0 - tmp.sqrt());
-    //eprintln!("alpha = {}, beta = {}, tmp = {}, s_peak = {:.6}", alpha, beta, tmp, s_peak);
 
     let s_min = 0.5 - (0.25 - 1.0 / sn).sqrt();
     let s_max = 0.5;
+    //println!("alpha = {}, beta = {}, tmp = {}, s_peak = {:.6}, s_min = {:.6e}", alpha, beta, tmp, s_peak, s_min);
 
-    if s_peak.is_finite() {
+    let pr = if s_peak.is_finite() {
         let s_mid = 2.0 * s_peak - s_min;
         if s_mid > s_max {
             // do integral in two stages, from s_min to s_peak and then
@@ -142,13 +146,56 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
             })
             .sum();
         2.0 * total
-    }
+    };
+
+    pr
 }
 
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Breit-Wheeler rates, implemented as a table lookup.
+#[allow(unused_parens)]
 fn rate_by_lookup(a: f64, eta: f64) -> f64 {
-    unimplemented!()
+    let (x, y) = (a.ln(), eta.ln());
+
+    if x < rate_table::MIN[0] {
+        panic!("NLBW rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+    } else if y < rate_table::MIN[1] {
+        0.0
+    } else {
+        let ix = ((x - rate_table::MIN[0]) / rate_table::STEP[0]) as usize;
+        let iy = ((y - rate_table::MIN[1]) / rate_table::STEP[1]) as usize;
+        if ix < rate_table::N_COLS - 1 && iy < rate_table::N_ROWS - 1 {
+            if a * eta > 2.0 {
+                // linear interpolation of: log y against log x, best for power law
+                let dx = (x - rate_table::MIN[0]) / rate_table::STEP[0] - (ix as f64);
+                let dy = (y - rate_table::MIN[1]) / rate_table::STEP[1] - (iy as f64);
+                let f = (
+                    (1.0 - dx) * (1.0 - dy) * rate_table::TABLE[iy][ix]
+                    + dx * (1.0 - dy) * rate_table::TABLE[iy][ix+1]
+                    + (1.0 - dx) * dy * rate_table::TABLE[iy+1][ix]
+                    + dx * dy * rate_table::TABLE[iy+1][ix+1]
+                );
+                f.exp()
+            } else {
+                // linear interpolation of: 1 / log y against x, best for exp(-1/x)?
+                let a_min = (rate_table::MIN[0] + (ix as f64) * rate_table::STEP[0]).exp();
+                let a_max = (rate_table::MIN[0] + ((ix+1) as f64) * rate_table::STEP[0]).exp();
+                let eta_min = (rate_table::MIN[1] + (iy as f64) * rate_table::STEP[1]).exp();
+                let eta_max = (rate_table::MIN[1] + ((iy+1) as f64) * rate_table::STEP[1]).exp();
+                let dx = (a - a_min) / (a_max - a_min);
+                let dy = (eta - eta_min) / (eta_max - eta_min);
+                let f = (
+                    (1.0 - dx) * (1.0 - dy) / rate_table::TABLE[iy][ix]
+                    + dx * (1.0 - dy) / rate_table::TABLE[iy][ix+1]
+                    + (1.0 - dx) * dy / rate_table::TABLE[iy+1][ix]
+                    + dx * dy / rate_table::TABLE[iy+1][ix+1]
+                );
+                (1.0 / f).exp()
+            }
+        } else {
+            panic!("NLBW rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+        }
+    }
 }
 
 /// Returns the sum, over harmonic index, of the partial nonlinear
@@ -158,6 +205,30 @@ fn rate_by_summation(a: f64, eta: f64) -> f64 {
     let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
     let n_max = n_min + delta;
     (n_min..n_max).map(|n| partial_rate(n, a, eta)).sum()
+}
+
+/// Checks if a and eta are small enough such that the rate < exp(-200)
+fn rate_too_small(a: f64, eta: f64) -> bool {
+    eta.log10() < -1.0 - (a.log10() + 2.0).powi(2) / 4.5
+}
+
+/// The total probability that an electron-positron pair
+/// is created by a photon with momentum `ell`
+/// in a plane EM wave with (local) wavector `k` and
+/// root-mean-square amplitude `a`, in an interval `dt`.
+///
+/// Both `ell` and `k` are expected to be normalized
+/// to the electron mass.
+pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f64> {
+    let eta = k * ell;
+    let f = if a < 0.02 || rate_too_small(a, eta) {
+        0.0
+    } else if a < rate_table::MIN[0] {
+        rate_by_summation(a, eta)
+    } else {
+        rate_by_lookup(a, eta)
+    };
+    Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
 }
 
 #[allow(dead_code)]
@@ -193,182 +264,72 @@ fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
-    use rand_xoshiro::*;
+    //use rand::prelude::*;
+    //use rand_xoshiro::*;
     use super::*;
 
     #[test]
     fn partial_rates() {
         let max_error = 1.0e-6;
 
-        // At chi = a eta = 0.1:
+        // n, a, eta, target
+        let pts = [
+            // At chi = a eta = 0.1:
+            (50,   1.0, 0.1,  1.4338498960396018931e-18),
+            (100,  1.0, 0.1,  1.3654528056555865291e-18),
+            (200,  1.0, 0.1,  2.0884399327604375975e-34),
+            (4000, 5.0, 0.02, 9.2620552570985535880e-61),
+            (5000, 5.0, 0.02, 5.9413657401296979089e-17),
+            (6000, 5.0, 0.02, 1.1629168979497463847e-18),
+            (8000, 5.0, 0.02, 1.6722921069034930599e-23),
+            (3,    0.1, 1.0,  2.7926363804797338348e-7),
+            (5,    0.1, 1.0,  1.4215822192894496185e-10),
+            (20,   0.1, 1.0,  1.1028787567587238051e-37),
+            // At chi = a eta = 1:
+            (3000, 10.0, 0.1, 2.8532353822421244101e-48),
+            (4000, 10.0, 0.1, 1.4356925580571873594e-5),
+            (8000, 10.0, 0.1, 1.5847977567888444504e-7),
+            (6,    1.0,  1.0, 0.0031666996194000280745),
+            (20,   1.0,  1.0, 1.2280171339973043031e-5),
+            (50,   1.0,  1.0, 7.7268893728561315057e-11),
+            // At chi = a eta = 10:
+            (300,  10.0, 1.0, 1.6230747656967905300e-7),
+            (400,  10.0, 1.0, 0.0031791285538880908649),
+            (2000, 10.0, 1.0, 5.9533991784012215406e-5),
+            // At chi = a eta = 0.01:
+            (640,  1.0, 0.01, 9.7351336009776642509e-115),
+            (1000, 1.0, 0.01, 2.3257373741363993054e-156),
+            (25,   0.1, 0.1,  5.7778053795802739886e-52),
+            (50,   0.1, 0.1,  3.3444371706672986244e-90),
+        ];
 
-        let (n, a, eta) = (50, 1.0, 0.1);
-        let target = 1.4338498960396018931e-18;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
+        for (n, a, eta, target) in &pts {
+            let result = partial_rate(*n, *a, *eta);
+            let error = (target - result).abs() / target;
+            println!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
+            assert!(error < max_error);
+        }
+    }
 
-        let (n, a, eta) = (100, 1.0, 0.1);
-        let target = 1.3654528056555865291e-18;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
+    #[test]
+    fn total_rates() {
+        let max_error = 0.01;
 
-        let (n, a, eta) = (200, 1.0, 0.1);
-        let target = 2.0884399327604375975e-34;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (4000, 5.0, 0.02);
-        let target = 9.2620552570985535880e-61;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (5000, 5.0, 0.02);
-        let target = 5.9413657401296979089e-17;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (6000, 5.0, 0.02);
-        let target = 1.1629168979497463847e-18;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (8000, 5.0, 0.02);
-        let target = 1.6722921069034930599e-23;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (3, 0.1, 1.0);
-        let target = 2.7926363804797338348e-7;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (5, 0.1, 1.0);
-        let target = 1.4215822192894496185e-10;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (20, 0.1, 1.0);
-        let target = 1.1028787567587238051e-37;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        // At chi = a eta = 1
-
-        let (n, a, eta) = (3000, 10.0, 0.1);
-        let target = 2.8532353822421244101e-48;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (4000, 10.0, 0.1);
-        let target = 1.4356925580571873594e-5;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (8000, 10.0, 0.1);
-        let target = 1.5847977567888444504e-7;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (6, 1.0, 1.0);
-        let target = 0.0031666996194000280745;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (20, 1.0, 1.0);
-        let target = 1.2280171339973043031e-5;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (50, 1.0, 1.0);
-        let target = 7.7268893728561315057e-11;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        // At chi = a eta = 10
-
-        let (n, a, eta) = (300, 10.0, 1.0);
-        let target = 1.6230747656967905300e-7;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (400, 10.0, 1.0);
-        let target = 0.0031791285538880908649;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (2000, 10.0, 1.0);
-        let target = 5.9533991784012215406e-5;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        // At chi = a eta = 0.01
-
-        let (n, a, eta) = (640, 1.0, 0.01);
-        let target = 9.7351336009776642509e-115;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (1000, 1.0, 0.01);
-        let target = 2.3257373741363993054e-156;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (25, 0.1, 0.1);
-        let target = 5.7778053795802739886e-52;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
-
-        let (n, a, eta) = (50, 0.1, 0.1);
-        let target = 3.3444371706672986244e-90;
-        let result = partial_rate(n, a, eta);
-        let error = (target - result).abs() / target;
-        eprintln!("n = {}, a = {}, eta = {}, result = {:.6e}, error = {:.6e}", n, a, eta, result, error);
-        assert!(error < max_error);
+        for i in 0..9 {
+            for j in 0..14 {
+                let a = 0.305 * 10.0f64.powf((i as f64) / 5.0);
+                let eta = 0.003 * 10.0f64.powf((j as f64) / 5.0);
+                if rate_too_small(0.9 * a, 0.9 * eta) {
+                    continue;
+                }
+                let target = rate_by_summation(a, eta);
+                let result = rate_by_lookup(a, eta);
+                let error = (target - result).abs() / target;
+                //println!("a = {}, eta = {}, result = {:.6e}, target = {:.6e}, error = {:.6e}", a, eta, result, target, error);
+                println!("{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, error, target, result);
+                assert!(error < max_error);
+            }
+        }
     }
 
     #[test]
@@ -386,6 +347,58 @@ mod tests {
             let (n_min, n_peak, n_max, total) = find_sum_limits(*a, *eta, max_error);
             println!("{:.6e} {:.6e} {} {} {} {:.6e}", a, eta, n_min, n_peak, n_max, total);
         }
+    }
+
+    #[test]
+    #[ignore]
+    fn create_rate_table() {
+        const LOW_ETA_LIMIT: f64 = 0.002;
+        const LOW_A_LIMIT: f64 = 0.3;
+        const A_DENSITY: usize = 40;
+        const ETA_DENSITY: usize = 40;
+        const N_COLS: usize = 70; // 2 * DENSITY;
+        const N_ROWS: usize = 3 * ETA_DENSITY;
+        let mut table = [[0.0; N_COLS]; N_ROWS];
+
+        for i in 0..N_ROWS {
+            let eta = LOW_ETA_LIMIT * 10.0f64.powf((i as f64) / (ETA_DENSITY as f64));
+            for j in 0..N_COLS {
+                let a = LOW_A_LIMIT * 10.0f64.powf((j as f64) / (A_DENSITY as f64));
+                let rate = if rate_too_small(a, eta) {
+                    0.0
+                } else {
+                    rate_by_summation(a, eta)
+                };
+                table[i][j] = rate;
+                println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+            }
+        }
+
+        let mut file = File::create("output/rate_table.rs").unwrap();
+        writeln!(file, "use std::f64::NEG_INFINITY;").unwrap();
+        writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+        writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+        writeln!(file, "pub const MIN: [f64; 2] = [{:.12e}, {:.12e}];", LOW_A_LIMIT.ln(), LOW_ETA_LIMIT.ln()).unwrap();
+        writeln!(file, "pub const STEP: [f64; 2] = [{:.12e}, {:.12e}];", consts::LN_10 / (A_DENSITY as f64), consts::LN_10 / (ETA_DENSITY as f64)).unwrap();
+        writeln!(file, "pub const TABLE: [[f64; {}]; {}] = [", N_COLS, N_ROWS).unwrap();
+        for row in table.iter() {
+            let val = row.first().unwrap().ln();
+            if val.is_finite() {
+                write!(file, "\t[{:>18.12e}", val).unwrap();
+            } else {
+                write!(file, "\t[{:>18}", "NEG_INFINITY").unwrap();
+            }
+            for val in row.iter().skip(1) {
+                let tmp = val.ln();
+                if tmp.is_finite() {
+                    write!(file, ", {:>18.12e}", tmp).unwrap();
+                } else {
+                    write!(file, ", {:>18}", "NEG_INFINITY").unwrap();
+                }
+            }
+            writeln!(file, "],").unwrap();
+        }
+        writeln!(file, "];").unwrap();
     }
 }
 
