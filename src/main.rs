@@ -177,7 +177,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
-    let tau: f64 = if focusing {
+    let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
         input.read("laser", "fwhm_duration")?
     } else {
         input.read("laser", "n_cycles")?
@@ -290,12 +290,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "no-radiation-reaction")] {
             println!("\t* with radiation reaction disabled");
         }
+        #[cfg(feature = "cos2-envelope-in-3d")] {
+            if focusing {
+                println!("\t* with cos^2 temporal envelope");
+            }
+        }
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|i| {
             let z = if focusing {
-                2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                if cfg!(feature = "cos2-envelope-in-3d") {
+                    wavelength * tau + 3.0 * length
+                } else {
+                    2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                }
             } else {
                 0.5 * wavelength * tau
             };

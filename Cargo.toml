@@ -28,6 +28,7 @@ hdf5-output = ["hdf5", "unzip-n"]
 with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 no-radiation-reaction = []
+cos2-envelope-in-3d = []
 
 [build-dependencies]
 vergen = "4.0.3"
