@@ -12,6 +12,7 @@ fn main() {
             "CARGO_FEATURE_WITH_MPI" => features.push("with-mpi"),
             "CARGO_FEATURE_COMPENSATING_CHIRP" => features.push("compensating-chirp"),
             "CARGO_FEATURE_NO_RADIATION_REACTION" => features.push("no-radiation-reaction"),
+            "CARGO_FEATURE_COS2_ENVELOPE_IN_3D" => features.push("cos2-envelope-in-3d"),
             _ => {}
         }
     }
