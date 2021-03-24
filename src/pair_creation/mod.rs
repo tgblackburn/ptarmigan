@@ -201,9 +201,7 @@ fn rate_by_lookup(a: f64, eta: f64) -> f64 {
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Breit-Wheeler rates.
 fn rate_by_summation(a: f64, eta: f64) -> f64 {
-    let n_min = (2.0 * (1.0 + a * a) / eta).ceil() as i32;
-    let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
-    let n_max = n_min + delta;
+    let (n_min, n_max) = sum_limits(a, eta);
     (n_min..n_max).map(|n| partial_rate(n, a, eta)).sum()
 }
 
@@ -229,6 +227,66 @@ pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f6
         rate_by_lookup(a, eta)
     };
     Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
+}
+
+/// Assuming that pair creation takes place, pseudorandomly
+/// generate the momentum of the positron generated
+/// by a photon with normalized momentum `ell`
+/// in a plane EM wave with root-mean-square amplitude `a`
+/// and (local) wavector `k`.
+pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> (i32, f64) {
+    let eta = k * ell;
+    let n = {
+        let (n_min, n_max) = sum_limits(a, eta);
+        let target = if a < rate_table::MIN[0].exp() {
+            rate_by_summation(a, eta)
+        } else {
+            rate_by_lookup(a, eta)
+        };
+        let target = target * rng.gen::<f64>();
+        let mut cumsum: f64 = 0.0;
+        let mut index: i32 = 1;
+        for k in n_min..n_max {
+            cumsum += partial_rate(k, a, eta);
+            if cumsum > target {
+                index = k;
+                break;
+            }
+        };
+        assert!(index >= n_min && index < n_max);
+        index
+    };
+
+    let m = n as f64;
+    let sn = 2.0 * m * eta / (1.0 + a * a);
+    let s_min = 0.5 - (0.25 - 1.0 / sn).sqrt();
+    let s_max = 0.5;
+
+    // Approximate maximum value of the probability density:
+    let max: f64 = GAUSS_32_NODES.iter()
+        .map(|x| 0.5 * (s_max - s_min) * x + 0.5 * (s_min + s_max)) // from x in [-1,1] to s in [s_min, smax]
+        .map(|s| partial_spectrum(n, a, eta, s))
+        .fold(0.0f64 / 0.0f64, |a: f64, b: f64| a.max(b));
+    let max = 1.5 * max;
+
+    // Rejection sampling for s = k.p / k.ell
+    let s = loop {
+        let s = s_min + (1.0 - s_min) * rng.gen::<f64>();
+        let u = rng.gen::<f64>();
+        let f = partial_spectrum(n, a, eta, s);
+        if u <= f / max {
+            break s;
+        }
+    };
+
+    (n, s)
+}
+
+fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
+    let n_min = (2.0 * (1.0 + a * a) / eta).ceil() as i32;
+    let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
+    let n_max = n_min + delta;
+    (n_min, n_max)
 }
 
 #[allow(dead_code)]
@@ -264,8 +322,8 @@ fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    //use rand::prelude::*;
-    //use rand_xoshiro::*;
+    use rand::prelude::*;
+    use rand_xoshiro::*;
     use super::*;
 
     #[test]
@@ -329,6 +387,31 @@ mod tests {
                 println!("{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, error, target, result);
                 assert!(error < max_error);
             }
+        }
+    }
+
+    #[test]
+    fn pair_spectrum() {
+        let a = 1.0;
+        let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
+        let ell = (10_000.0 / 0.511) * FourVector::new(1.0, 0.0, 0.0, -1.0);
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        let (n_min, n_max) = sum_limits(a, k * ell);
+        for n in n_min..n_max {
+            eprintln!("{} {:.6e}", n, partial_rate(n, a, k * ell));
+        }
+
+        let rt = std::time::Instant::now();
+        let pts: Vec<(i32, f64)> = (0..100_000)
+            .map(|_| generate(ell, k, a, &mut rng))
+            .collect();
+        let rt = rt.elapsed();
+
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, k * ell, pts.len(), rt);
+        let mut file = File::create("output/positron_spectrum.dat").unwrap();
+        for (n, s) in pts {
+            writeln!(file, "{} {:.6e}", n, s).unwrap();
         }
     }
 
