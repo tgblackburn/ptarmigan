@@ -153,6 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
     let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
+    let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -399,6 +400,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
+        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
         primaries
         .chunks(num / 20)
         .enumerate()
