@@ -234,8 +234,8 @@ pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f6
 /// by a photon with normalized momentum `ell`
 /// in a plane EM wave with root-mean-square amplitude `a`
 /// and (local) wavector `k`.
-pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> (i32, f64) {
-    let eta = k * ell;
+pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> (i32, FourVector) {
+    let eta: f64 = k * ell;
     let n = {
         let (n_min, n_max) = sum_limits(a, eta);
         let target = if a < rate_table::MIN[0].exp() {
@@ -257,8 +257,8 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
         index
     };
 
-    let m = n as f64;
-    let sn = 2.0 * m * eta / (1.0 + a * a);
+    let j = n as f64;
+    let sn = 2.0 * j * eta / (1.0 + a * a);
     let s_min = 0.5 - (0.25 - 1.0 / sn).sqrt();
     let s_max = 0.5;
 
@@ -279,7 +279,28 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
         }
     };
 
-    (n, s)
+    // Scattering momentum (/m) and angles in zero momentum frame
+    let p_zmf = (0.5 * j * eta).sqrt();
+    let cos_theta_zmf = (1.0 + a * a + p_zmf * p_zmf).sqrt() / p_zmf - 2.0 * s;
+    let cphi_zmf = 2.0 * consts::PI * rng.gen::<f64>();
+
+    assert!(cos_theta_zmf <= 1.0);
+    assert!(cos_theta_zmf >= -1.0);
+
+    // Four-velocity of ZMF (normalized)
+    let u_zmf: FourVector = (ell + j * k) / (ell + j * k).norm_sqr().sqrt();
+
+    // Unit vectors pointed parallel to gamma-ray momentum in ZMF
+    // and perpendicular to it
+    let along = -ThreeVector::from(ell.boost_by(u_zmf)).normalize();
+    let perp = along.orthogonal().rotate_around(along, cphi_zmf);
+
+    // Construct positron momentum and transform back to lab frame
+    let q: ThreeVector = p_zmf * (cos_theta_zmf * along + (1.0 - cos_theta_zmf.powi(2)).sqrt() * perp);
+    let q = FourVector::lightlike(q[0], q[1], q[2]).with_sqr(1.0 + a * a);
+    let q = q.boost_by(u_zmf.reverse());
+
+    (n, q)
 }
 
 fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
@@ -391,6 +412,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn pair_spectrum() {
         let a = 1.0;
         let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
@@ -403,15 +425,16 @@ mod tests {
         }
 
         let rt = std::time::Instant::now();
-        let pts: Vec<(i32, f64)> = (0..100_000)
+        let pts: Vec<(i32, f64, f64)> = (0..100_000)
             .map(|_| generate(ell, k, a, &mut rng))
+            .map(|(n, q)| (n, (k * q) / (k * ell), q[1].hypot(q[2]).sqrt()))
             .collect();
         let rt = rt.elapsed();
 
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, k * ell, pts.len(), rt);
         let mut file = File::create("output/positron_spectrum.dat").unwrap();
-        for (n, s) in pts {
-            writeln!(file, "{} {:.6e}", n, s).unwrap();
+        for (n, s, q_perp) in pts {
+            writeln!(file, "{} {:.6e} {:.6e}", n, s, q_perp).unwrap();
         }
     }
 
