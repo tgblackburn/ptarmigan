@@ -221,7 +221,7 @@ pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f6
     let eta = k * ell;
     let f = if a < 0.02 || rate_too_small(a, eta) {
         0.0
-    } else if a < rate_table::MIN[0] {
+    } else if a < rate_table::MIN[0].exp() {
         rate_by_summation(a, eta)
     } else {
         rate_by_lookup(a, eta)

@@ -1,6 +1,7 @@
 //! Particles
 
 use std::fmt;
+use std::str::FromStr;
 
 #[cfg(feature = "with-mpi")]
 use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
@@ -8,7 +9,7 @@ use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*
 use crate::constants::*;
 use crate::geometry::*;
 
-#[derive(Copy,Clone,PartialEq,Eq)]
+#[derive(Copy,Clone,PartialEq,Eq,Debug)]
 #[repr(u8)]
 pub enum Species {
     Electron,
@@ -21,6 +22,18 @@ unsafe impl Equivalence for Species {
     type Out = SystemDatatype;
     fn equivalent_datatype() -> Self::Out {
         u8::equivalent_datatype()
+    }
+}
+
+impl FromStr for Species {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "electron" => Ok(Species::Electron),
+            "positron" => Ok(Species::Positron),
+            "photon" => Ok(Species::Photon),
+            _ => Err(format!("requested species '{}' is not one of 'electron', 'positron' or 'photon'", s)),
+        }
     }
 }
 
@@ -262,10 +275,15 @@ impl Particle {
     pub fn id(&self) -> u64 {
         self.id
     }
+
+    /// Photon, electron or positron
+    pub fn species(&self) -> Species {
+        self.species
+    }
 }
 
 impl Shower {
     pub fn multiplicity(&self) -> usize {
-        self.secondaries.len()
+        self.secondaries.len() - 1
     }
 }

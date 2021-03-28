@@ -17,6 +17,8 @@ use rand_xoshiro::*;
 
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 4);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 5);
 
 mod constants;
 mod field;
@@ -88,43 +90,80 @@ impl WriteableString for hdf5::Group {
 }
 
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
-    let mut primary = incident;
+    let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
     let dt = dt * dt_multiplier;
 
-    while field.contains(primary.position()) {
-        let (r, mut u) = field.push(
-            primary.position(), 
-            primary.normalized_momentum(),
-            primary.charge_to_mass_ratio(),
-            dt
-        );
+    while let Some(mut pt) = primaries.pop() {
+        match pt.species() {
+            Species::Electron | Species::Positron => {
+                while field.contains(pt.position()) {
+                    let (r, mut u) = field.push(
+                        pt.position(),
+                        pt.normalized_momentum(),
+                        pt.charge_to_mass_ratio(),
+                        dt
+                    );
 
-        if let Some(k) = field.radiate(r, u, dt, rng) {
-            let id = *current_id;
-            *current_id = *current_id + 1;
-            let photon = Particle::create(Species::Photon, r)
-                .with_payload((u * u - 1.0).max(0.0).sqrt())
-                .with_weight(primary.weight())
-                .with_id(id)
-                .with_normalized_momentum(k);
-            secondaries.push(photon);
+                    if let Some(k) = field.radiate(r, u, dt, rng) {
+                        let id = *current_id;
+                        *current_id = *current_id + 1;
+                        let photon = Particle::create(Species::Photon, r)
+                            .with_payload((u * u - 1.0).max(0.0).sqrt())
+                            .with_weight(pt.weight())
+                            .with_id(id)
+                            .with_normalized_momentum(k);
+                        primaries.push(photon);
 
-            #[cfg(not(feature = "no-radiation-reaction"))] {
-                u = u - k;
+                        #[cfg(not(feature = "no-radiation-reaction"))] {
+                            u = u - k;
+                        }
+
+                        pt.update_interaction_count(1.0);
+                    }
+
+                    pt.with_position(r);
+                    pt.with_normalized_momentum(u);
+                }
+                secondaries.push(pt);
+            },
+            Species::Photon => {
+                let mut has_decayed = false;
+                while field.contains(pt.position()) && !has_decayed {
+                    let ell = pt.normalized_momentum();
+                    let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
+
+                    let (prob, momenta) = field.pair_create(r, ell, dt, rng);
+                    if let Some((q_e, q_p)) = momenta {
+                        let id = *current_id;
+                        *current_id = *current_id + 2;
+                        let electron = Particle::create(Species::Electron, r)
+                            .with_weight(pt.weight())
+                            .with_id(id)
+                            .with_normalized_momentum(q_e);
+                        let positron = Particle::create(Species::Positron, r)
+                            .with_weight(pt.weight())
+                            .with_id(id + 1)
+                            .with_normalized_momentum(q_p);
+                        primaries.push(electron);
+                        primaries.push(positron);
+                        has_decayed = true;
+                    }
+
+                    pt.update_interaction_count(prob);
+                    pt.with_position(r);
+                }
+
+                if !has_decayed {
+                    secondaries.push(pt);
+                }
             }
-
-            primary.update_interaction_count(1.0);
         }
-
-        primary.with_position(r);
-        primary.with_normalized_momentum(u);
-        //primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {
-        primary,
+        primary: incident,
         secondaries,
     }
 }
@@ -227,6 +266,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
         })?;
+    let species = input.read::<String>("beam", "species")
+        .map_or_else(
+            |e| match e.kind() {
+                // if the species is not specified, default to electron
+                ConfigErrorKind::MissingField => Ok(Species::Electron),
+                _ => Err(e)
+            },
+            |s| s.parse::<Species>().map_err(|_| ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "species"))
+        )?;
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
 
@@ -247,13 +295,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
 
-    let eospec: Vec<String> = input.read("output", "electron")?;
+    let eospec: Vec<String> = input.read("output", "electron")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
     
-    let pospec: Vec<String> = input.read("output", "photon")?;
+    let gospec: Vec<String> = input.read("output", "photon")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let gospec: Vec<DistributionFunction> = gospec
+        .iter()
+        .map(|s| s.parse())
+        .collect::<Result<Vec<_>,_>>()?;
+
+    let pospec: Vec<String> = input.read("output", "positron")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
         .map(|s| s.parse())
@@ -315,12 +372,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             let r = ThreeVector::new(x, y, z);
             let r = r.rotate_around_y(angle);
             let r = FourVector::new(t, r[0], r[1], r[2]);
-            let u = -(gamma * gamma - 1.0f64).sqrt();
+            let u = match species {
+                Species::Electron | Species::Positron => -(gamma * gamma - 1.0f64).sqrt(),
+                Species::Photon => -gamma,
+            };
             let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
             let theta_x = angle + rms_div * rng.sample::<f64,_>(StandardNormal);
             let theta_y = rms_div * rng.sample::<f64,_>(StandardNormal);
-            let u = FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize();
-            Particle::create(Species::Electron, r)
+            let u = match species {
+                Species::Electron | Species::Positron => FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize(),
+                Species::Photon => FourVector::lightlike(u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()),
+            };
+            Particle::create(species, r)
                 .with_normalized_momentum(u)
                 .with_optical_depth(rng.sample(Exp1))
                 .with_weight(weight)
@@ -330,23 +393,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut current_id = num as u64;
 
-    let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
+    let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
         sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
-        if let Some(m) = multiplicity {
-            if m == sh.multiplicity() {
-                p.push(sh.primary);
-                s.append(&mut sh.secondaries);
+        if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
+            while !sh.secondaries.is_empty() {
+                let pt = sh.secondaries.pop().unwrap();
+                match pt.species() {
+                    Species::Electron => e.push(pt),
+                    Species::Photon => g.push(pt),
+                    Species::Positron => p.push(pt),
+                }
             }
-        } else {
-            p.push(sh.primary);
-            s.append(&mut sh.secondaries);
         }
-        (p, s)
+        (e, g, p)
     };
 
     let runtime = std::time::Instant::now();
 
-    let (mut electrons, mut photons) = if focusing && !using_lcfa {
+    let (mut electrons, mut photons, mut positrons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         //println!("total energy = {}", laser.total_energy());
         primaries
@@ -355,7 +419,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map(|(i, chk)| {
                 let tmp = chk.iter()
                     .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                     (i+1) * chk.len(), num,
@@ -365,8 +429,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tmp
             })
             .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
             )
     } else if focusing { // and using LCFA rates
         let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
@@ -376,7 +440,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .map(|(i, chk)| {
                 let tmp = chk.iter()
                     .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                     (i+1) * chk.len(), num,
@@ -386,8 +450,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tmp
             })
             .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
             )
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
@@ -397,7 +461,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|(i, chk)| {
             let tmp = chk.iter()
                 .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                 (i+1) * chk.len(), num,
@@ -407,8 +471,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             tmp
         })
         .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
         )
     } else { // plane wave and lcfa
         let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
@@ -418,7 +482,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|(i, chk)| {
             let tmp = chk.iter()
                 .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                 (i+1) * chk.len(), num,
@@ -428,8 +492,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             tmp
         })
         .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
         )
     };
 
@@ -443,8 +507,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         dstr.write(&world, &electrons, &prefix)?;
     }
 
-    for dstr in &pospec {
+    for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+        dstr.write(&world, &photons, &prefix)?;
+    }
+
+    for dstr in &pospec {
+        let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &photons, &prefix)?;
     }
 
@@ -574,15 +643,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w, a) = photons
+                let (x, p, w, a, n) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count()))
                     .unzip_n_vec();
                 drop(photons);
 
                 fs.create_group("photon")?
                     .write_all("weight", &w)?
                     .write_all("a0_at_creation", &a)?
+                    .write_all("n_pos", &n)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
 

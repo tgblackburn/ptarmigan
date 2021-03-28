@@ -71,6 +71,11 @@ impl ConfigError {
     pub fn raise(kind: ConfigErrorKind, section: &str, field: &str) -> Self {
         ConfigError {kind: kind, section: section.to_owned(), field: field.to_owned()}
     }
+
+    /// Returns what the problem was
+    pub fn kind(&self) -> ConfigErrorKind {
+        self.kind
+    }
 }
 
 impl Error for ConfigError {}

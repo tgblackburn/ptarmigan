@@ -154,6 +154,10 @@ impl Field for FocusedLaser {
             None
         }
     }
+
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R) -> (f64, Option<(FourVector, FourVector)>) {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
