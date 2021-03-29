@@ -51,7 +51,12 @@ pub trait Field {
     /// a photon (position `r`, normalized momentum `ell`), returning the
     /// probability that it occurs in the specified interval `dt` and,
     /// if so, the momentum of the electron and positron.
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R) -> (f64, Option<(FourVector, FourVector)>);
+    ///
+    /// A non-unity `rate_increase` makes pair creation more probable
+    /// by the given factor, increasing the statistics for what would
+    /// otherwise be a rare event. The probability returned is *not*
+    /// affected by this increase.
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>);
 }
 
 #[cfg(test)]

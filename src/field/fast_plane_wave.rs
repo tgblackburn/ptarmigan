@@ -108,7 +108,7 @@ impl Field for FastPlaneWave {
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R) -> (f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
         unimplemented!()
     }
 }

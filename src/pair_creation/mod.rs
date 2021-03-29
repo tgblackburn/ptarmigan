@@ -253,6 +253,10 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
                 break;
             }
         };
+        // interpolation errors mean that even after the sum, cumsum could be < target
+        if index == 1 {
+            index = n_max - 1;
+        }
         assert!(index >= n_min && index < n_max);
         index
     };

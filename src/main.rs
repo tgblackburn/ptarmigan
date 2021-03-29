@@ -89,7 +89,7 @@ impl WriteableString for hdf5::Group {
     }
 }
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -134,21 +134,24 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
-                    let (prob, momenta) = field.pair_create(r, ell, dt, rng);
+                    let (prob, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
                     if let Some((q_e, q_p)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(pt.weight())
+                            .with_weight(pt.weight() / rate_increase)
                             .with_id(id)
                             .with_normalized_momentum(q_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(pt.weight())
+                            .with_weight(pt.weight() / rate_increase)
                             .with_id(id + 1)
                             .with_normalized_momentum(q_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        has_decayed = true;
+                        pt.with_weight(pt.weight() * (1.0 - 1.0 / rate_increase));
+                        if pt.weight() <= 0.0 {
+                            has_decayed = true;
+                        }
                     }
 
                     pt.update_interaction_count(prob);
@@ -165,6 +168,26 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
     Shower {
         primary: incident,
         secondaries,
+    }
+}
+
+/// Returns the ratio of the pair creation and photon emission rates,
+/// for a photon (or electron) with normalized energy `gamma` in a
+/// laser with amplitude `a0` and wavelength `wavelength`.
+fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
+    let kappa: FourVector = SPEED_OF_LIGHT * COMPTON_TIME * 2.0 * consts::PI * FourVector::new(1.0, 0.0, 0.0, 1.0) / wavelength;
+    let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
+    let u: FourVector = FourVector::new(0.0, 0.0, 0.0, -gamma).unitize();
+    let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
+    let dt = wavelength / SPEED_OF_LIGHT;
+    let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt);
+    if pair_rate.is_none() || photon_rate.is_none() {
+        1.0
+    } else {
+        let ratio = photon_rate.unwrap() / pair_rate.unwrap();
+        //println!("P_pair = {:.6e}, P_photon = {:.6e}, ratio = {:.3}", pair_rate.unwrap(), photon_rate.unwrap(), ratio);
+        ratio.max(1.0)
     }
 }
 
@@ -332,6 +355,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
+    // Rare event sampling for pair creation
+    let pair_rate_increase = input.read::<f64>("control", "increase_pair_rate_by")
+        // if increase is not specified at all, default to unity
+        .or_else(|e| match e.kind() {
+            ConfigErrorKind::MissingField => Ok(1.0),
+            _ => Err(e),
+        })
+        // failing that, check for automatic increase
+        .or_else(|e| match input.read::<String>("control", "increase_pair_rate_by") {
+            Ok(s) if s == "auto" => Ok(increase_pair_rate_by(gamma, a0, wavelength)),
+            _ => Err(e),
+        })
+        .and_then(|r| if r < 1.0 {
+            eprintln!("Increase in pair creation rate must be >= 1.0.");
+            Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "control", "increase_pair_rate_by"))
+        } else {
+            Ok(r)
+        })?;
+
     let local_seed = (id as u64) * (1 + rng_seed as u64);
     let mut rng = Xoshiro256StarStar::seed_from_u64(local_seed);
     let nums: Vec<usize> = {
@@ -425,7 +467,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -446,7 +488,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -467,7 +509,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -488,7 +530,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -612,6 +654,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("dt_multiplier", dt_multiplier)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
+                    .write("increase_pair_rate_by", pair_rate_increase)?
                     .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
                     .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
 

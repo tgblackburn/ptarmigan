@@ -43,7 +43,7 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "energy" => Some(
             (energy as ParticleOutput, "MeV")
         ),
-        "unit" | "number" => Some(
+        "unit" => Some(
             (unit as ParticleOutput, "1")
         ),
         "x" => Some(
@@ -60,6 +60,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         ),
         "n_inter" | "n_gamma" | "n_pos" => Some(
             (interaction_count as ParticleOutput, "1")
+        ),
+        "weight" | "number" => Some(
+            (weighted_by_number as ParticleOutput, "1")
         ),
         _ => None,
     }

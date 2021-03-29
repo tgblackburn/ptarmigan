@@ -133,7 +133,7 @@ impl Field for PlaneWave {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R) -> (f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
         let a = self.a_sqd(r).sqrt();
         let phase: f64 = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -145,7 +145,7 @@ impl Field for PlaneWave {
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
-        let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0);
+        let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0) * rate_increase;
         if rng.gen::<f64>() < prob {
             let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
             (prob, Some((ell + (n as f64) * kappa - q_p, q_p)))
