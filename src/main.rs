@@ -234,14 +234,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(0.0)
     };
 
-    let num: usize = input.read("beam", "ne")?;
+    let npart: usize = input.read("beam", "n")
+        .or_else(|_| input.read("beam", "ne"))
+        ?;
     let gamma: f64 = input.read("beam", "gamma")?;
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
     let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
     let weight = input.read("beam", "charge")
-        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (num as f64)))
+        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
         .unwrap_or(1.0);
     let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
         .and_then(|vs| {
@@ -332,7 +334,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let local_seed = (id as u64) * (1 + rng_seed as u64);
     let mut rng = Xoshiro256StarStar::seed_from_u64(local_seed);
-    let num = num / (ntasks as usize);
+    let nums: Vec<usize> = {
+        let tasks = ntasks as usize;
+        (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()
+    };
+    assert_eq!(nums.iter().sum::<usize>(), npart);
+    let num = nums[id as usize];
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
@@ -619,7 +626,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_if(!focusing, "n_cycles", tau)?;
 
                 conf.create_group("beam")?
-                    .write("ne", num)?
+                    .write("n", npart)?
                     .write("gamma", gamma)?
                     .write("sigma", sigma)?
                     .write("radius", radius)?

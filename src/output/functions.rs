@@ -151,3 +151,13 @@ pub fn payload(pt: &Particle) -> f64 {
 pub fn interaction_count(pt: &Particle) -> f64 {
     pt.interaction_count()
 }
+
+pub fn weighted_by_energy(pt: &Particle) -> f64 {
+    let p = pt.normalized_momentum();
+    let energy = p[0] * constants::ELECTRON_MASS_MEV;
+    pt.weight() * energy
+}
+
+pub fn weighted_by_number(pt: &Particle) -> f64 {
+    pt.weight()
+}

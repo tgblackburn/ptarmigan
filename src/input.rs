@@ -145,6 +145,7 @@ impl<'a> Config<'a> {
             .var("mp", PROTON_MASS)
             .var("c", SPEED_OF_LIGHT)
             .var("e", ELEMENTARY_CHARGE)
+            .var("qe", ELECTRON_CHARGE)
             .var("eV", ELEMENTARY_CHARGE)
             .var("keV", 1.0e3 * ELEMENTARY_CHARGE)
             .var("MeV", 1.0e6 * ELEMENTARY_CHARGE)

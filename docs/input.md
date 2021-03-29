@@ -22,7 +22,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 ## beam
 
-* `ne`: number of primary particles.
+* `n`: number of primary particles. `ne` is also accepted.
 * `species` (optional, default = `electron`): primary particle type, must be one of `electron`, `photon` or `positron`.
 * `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
 * `gamma`: the mean Lorentz factor.
