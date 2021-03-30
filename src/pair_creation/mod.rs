@@ -395,6 +395,18 @@ mod tests {
     }
 
     #[test]
+    fn extra_check() {
+        let eta = 0.2;
+        let a = [0.5, 1.0, 2.5];
+        for a in &a {
+            let target = rate_by_summation(*a, eta);
+            let result = rate_by_lookup(*a, eta);
+            let error = (target - result).abs() / target;
+            println!("a = {}, eta = {}, result = {:.6e}, target = {:.6e}, error = {:.6e}", a, eta, result, target, error);
+        }
+    }
+
+    #[test]
     fn total_rates() {
         let max_error = 0.01;
 
