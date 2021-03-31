@@ -500,10 +500,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 //writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
 
-                for pt in &particles {
-                    writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
-                }
-
                 let mut current_id = particles.len() as u64;
 
                 #[cfg(feature = "with-mpi")]
