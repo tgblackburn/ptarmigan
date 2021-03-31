@@ -196,6 +196,27 @@ impl FastFocusedLaser {
             None
         }
     }
+
+    /// Pseudorandomly create an electron-positron pair from a photon with
+    /// normalized momentum `u`, in an electric field `E` and
+    /// magnetic field `B`.
+    #[allow(non_snake_case)]
+    #[inline]
+    pub fn create_pair<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+        let beta = ThreeVector::from(u) / u[0];
+        let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
+        let chi = if E_rf_sqd > 0.0 {
+            u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
+        } else {
+            0.0
+        };
+        let prob = dt * lcfa::pair_creation::rate(chi, u[0]);
+        if rng.gen::<f64>() < prob * rate_increase {
+            (prob, None)
+        } else {
+            (prob, None)
+        }
+    }
 }
 
 impl Field for FastFocusedLaser {
@@ -224,8 +245,10 @@ impl Field for FastFocusedLaser {
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
     }
 
+    #[allow(non_snake_case)]
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
-        unimplemented!()
+        let (E, B) = self.fields(r);
+        FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase)
     }
 }
 
