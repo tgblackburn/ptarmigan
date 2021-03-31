@@ -89,11 +89,12 @@ impl WriteableString for hdf5::Group {
     }
 }
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
     let dt = dt * dt_multiplier;
+    let primary_id = incident.id();
 
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
@@ -126,7 +127,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     pt.with_position(r);
                     pt.with_normalized_momentum(u);
                 }
-                secondaries.push(pt);
+
+                if pt.id() != primary_id || !discard_bg_e || pt.interaction_count() > 0.0 {
+                    secondaries.push(pt);
+                }
             },
             Species::Photon => {
                 let mut has_decayed = false;
@@ -315,6 +319,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => true,
     };
 
+    let discard_bg_e = input.read("output", "discard_background_e").unwrap_or(false);
+
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
@@ -467,7 +473,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -488,7 +494,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -509,7 +515,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -530,7 +536,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -563,7 +569,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &prefix)?;
+        dstr.write(&world, &positrons, &prefix)?;
     }
 
     for stat in estats.iter_mut() {
@@ -726,12 +732,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_all("n_gamma", &n)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
+
+                let mut positrons = positrons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    positrons.append(&mut recv);
+                }
+                let (x, p, w, n) = positrons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
+                    .unzip_n_vec();
+                drop(positrons);
+
+                fs.create_group("positron")?
+                    .write_all("weight", &w)?
+                    .write_all("n_gamma", &n)?
+                    .write_all("position", &x)?
+                    .write_all("momentum", &p)?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);
                     drop(photons);
                     world.process_at_rank(0).synchronous_send(&electrons[..]);
                     drop(electrons);
+                    world.process_at_rank(0).synchronous_send(&positrons[..]);
+                    drop(positrons);
                 }
             }
         },

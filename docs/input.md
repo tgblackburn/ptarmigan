@@ -43,6 +43,7 @@ All output is written to the directory where the input file is found.
 * `positron` (optional): as above.
 * `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text` and `hdf5`. A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
 * `coordinate_system` (optional, default = `laser`): by default, particle positions and momenta are output in the simulation coordinate system, where the laser travels towards positive z. If set to `beam`, these are transformed such that the beam propagation defines the positive z direction.
+* `discard_background_e` (optional, default = `false`): whether to discard primary electrons that have not radiated, before generating output.
 
 The possible distributions are:
 
