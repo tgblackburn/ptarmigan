@@ -203,7 +203,7 @@ impl FastFocusedLaser {
     #[allow(non_snake_case)]
     #[inline]
     pub fn create_pair<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
-        let beta = ThreeVector::from(u) / u[0];
+        let beta = ThreeVector::from(u).normalize();
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
             u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
@@ -212,7 +212,13 @@ impl FastFocusedLaser {
         };
         let prob = dt * lcfa::pair_creation::rate(chi, u[0]);
         if rng.gen::<f64>() < prob * rate_increase {
-            (prob, None)
+            let gamma_p = lcfa::pair_creation::sample(chi, u[0], rng);
+            let gamma_e = u[0] - gamma_p;
+            let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt() * beta;
+            let u_e = gamma_e * (1.0 - 1.0 / (gamma_e * gamma_e)).sqrt() * beta;
+            let u_p = FourVector::new(0.0, u_p[0], u_p[1], u_p[2]).unitize();
+            let u_e = FourVector::new(0.0, u_e[0], u_e[1], u_e[2]).unitize();
+            (prob, Some((u_e, u_p)))
         } else {
             (prob, None)
         }

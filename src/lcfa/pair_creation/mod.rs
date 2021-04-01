@@ -1,8 +1,7 @@
 //! Nonlinear pair creation, gamma -> e- + e+, in a background field
 
-use std::f64::consts;
+use rand::prelude::*;
 use crate::constants::*;
-//use super::pwmci;
 
 mod tables;
 
@@ -38,6 +37,42 @@ fn auxiliary_t(chi: f64) -> f64 {
 /// Returns the nonlinear Breit-Wheeler rate, per unit time (in seconds)
 pub fn rate(chi: f64, gamma: f64) -> f64 {
     ALPHA_FINE * chi * auxiliary_t(chi) / (COMPTON_TIME * gamma)
+}
+
+/// Proportional to the probability spectrum dW/ds
+fn spectrum(s: f64, chi: f64) -> f64 {
+    tables::GL_NODES.iter()
+        .zip(tables::GL_WEIGHTS.iter())
+        .map(|(t, w)| {
+            let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
+            let prefactor = (-xi * t.cosh() + t).exp();
+            w * prefactor * ((s / (1.0 - s) + (1.0 - s) / s) * (1.5 * t).cosh() + (t / 3.0).cosh() / t.cosh())
+        })
+        .sum()
+}
+
+/// Samples the positron spectrum of an photon with
+/// quantum parameter `chi` and energy (per electron
+/// mass) `gamma`, returning the positron Lorentz factor.
+pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> f64 {
+    let max = if chi < 2.5 {
+        spectrum(0.5, chi)
+    } else {
+        spectrum(1.2 / chi, chi)
+    };
+    let max = 1.2 * max;
+
+    // Rejection sampling for s
+    let s = loop {
+        let s = rng.gen::<f64>();
+        let u = rng.gen::<f64>();
+        let f = spectrum(s, chi);
+        if u <= f / max {
+            break s;
+        }
+    };
+
+    s * gamma
 }
 
 #[cfg(test)]

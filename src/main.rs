@@ -555,6 +555,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !laser_defines_z {
         electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
         photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        positrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
     }
 
     for dstr in &eospec {
@@ -597,7 +598,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match plain_text_output {
         OutputMode::PlainText => {
-            let mut particles = [electrons, photons].concat();
+            let mut particles = [electrons, photons, positrons].concat();
 
             if id == 0 {
                 use std::fs::File;

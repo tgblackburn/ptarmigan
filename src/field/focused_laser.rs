@@ -5,6 +5,7 @@ use crate::field::{Field, Polarization};
 use crate::constants::*;
 use crate::geometry::FourVector;
 use crate::nonlinear_compton;
+use crate::pair_creation;
 
 /// Represents the envelope of a focusing laser pulse, i.e.
 /// the field after cycle averaging
@@ -155,8 +156,16 @@ impl Field for FocusedLaser {
         }
     }
 
-    fn pair_create<R: Rng>(&self, _r: FourVector, _ell: FourVector, _dt: f64, _rng: &mut R, _rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
-        unimplemented!()
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+        let a = self.a_sqd(r).sqrt();
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
+        let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0);
+        if rng.gen::<f64>() < prob * rate_increase {
+            let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
+            (prob, Some((ell + (n as f64) * kappa - q_p, q_p)))
+        } else {
+            (prob, None)
+        }
     }
 }
 
