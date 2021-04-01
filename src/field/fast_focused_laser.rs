@@ -116,9 +116,20 @@ impl FastFocusedLaser {
         };
 
         // Field profile - compare to FocusedLaser, which is for the intensity profile
-        let tau = self.omega() * self.duration;
-        let phi = self.wavevector * r;
-        let envelope = (-2.0 * consts::LN_2 * phi.powi(2) / tau.powi(2)).exp();
+        let phase = self.wavevector * r;
+
+        #[cfg(feature = "cos2-envelope-in-3d")]
+        let envelope = if phase.abs() < consts::PI * self.duration {
+            (phase / (2.0 * self.duration)).cos().powi(2)
+        } else {
+            0.0
+        };
+
+        #[cfg(not(feature = "cos2-envelope-in-3d"))]
+        let envelope = {
+            let tau = self.omega() * self.duration;
+            (-2.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp()
+        };
 
         (envelope * E, envelope * B)
     }
@@ -234,6 +245,13 @@ impl Field for FastFocusedLaser {
         Some(0.1 / self.omega())
     }
 
+    #[cfg(feature = "cos2-envelope-in-3d")]
+    fn contains(&self, r: FourVector) -> bool {
+        let phase: f64 = self.wavevector * r;
+        phase < consts::PI * self.duration
+    }
+
+    #[cfg(not(feature = "cos2-envelope-in-3d"))]
     fn contains(&self, r: FourVector) -> bool {
         let phase: f64 = self.wavevector * r;
         phase < 3.0 * self.omega() * self.duration

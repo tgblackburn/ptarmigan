@@ -13,8 +13,11 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "angle_y" => Some(
             (angle_y as ParticleOutput, "rad")
         ),
-        "theta" => Some(
+        "theta" | "pi_minus_angle" => Some(
             (theta as ParticleOutput, "rad")
+        ),
+        "angle" | "polar_angle" => Some(
+            (polar_angle as ParticleOutput, "rad")
         ),
         "px" => Some(
             (px as ParticleOutput, "MeV/c")
@@ -70,17 +73,22 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
 
 pub fn angle_x(pt: &Particle) -> f64 {
     let p = pt.momentum();
-    p[1].atan2(-p[3])
+    p[1].atan2(p[3])
 }
 
 pub fn angle_y(pt: &Particle) -> f64 {
     let p = pt.momentum();
-    p[2].atan2(-p[3])
+    p[2].atan2(p[3])
 }
 
 pub fn theta(pt: &Particle) -> f64 {
     let p = pt.momentum();
     p[1].hypot(p[2]).atan2(-p[3])
+}
+
+pub fn polar_angle(pt: &Particle) -> f64 {
+    let p = pt.momentum();
+    p[1].hypot(p[2]).atan2(p[3])
 }
 
 pub fn px(pt: &Particle) -> f64 {

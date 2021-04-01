@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1
+
+Adds new compile-time feature `cos2-envelope-in-3d` which switches the laser temporal envelope from the default Gaussian.
+
 ## v0.6.0
 
 2021-02-24

@@ -244,7 +244,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
-    let tau: f64 = if focusing {
+    let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
         input.read("laser", "fwhm_duration")?
     } else {
         input.read("laser", "n_cycles")?
@@ -403,12 +403,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "no-radiation-reaction")] {
             println!("\t* with radiation reaction disabled");
         }
+        #[cfg(feature = "cos2-envelope-in-3d")] {
+            if focusing {
+                println!("\t* with cos^2 temporal envelope");
+            }
+        }
     }
 
     let primaries: Vec<Particle> = (0..num).into_iter()
         .map(|i| {
             let z = if focusing {
-                2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                if cfg!(feature = "cos2-envelope-in-3d") {
+                    wavelength * tau + 3.0 * length
+                } else {
+                    2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+                }
             } else {
                 0.5 * wavelength * tau
             };
@@ -616,10 +625,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tp_x (GeV/c)\tp_y (GeV/c)\tp_z (GeV/c)\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
                 //writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
-
-                for pt in &particles {
-                    writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
-                }
 
                 let mut current_id = particles.len() as u64;
 

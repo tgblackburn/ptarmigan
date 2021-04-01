@@ -50,8 +50,19 @@ impl FocusedLaser {
 
         // Pulse envelope
         let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
+
+        #[cfg(feature = "cos2-envelope-in-3d")]
+        let envelope = if phase.abs() < consts::PI * self.duration {
+            (phase / (2.0 * self.duration)).cos().powi(4)
+        } else {
+            0.0
+        };
+
+        #[cfg(not(feature = "cos2-envelope-in-3d"))]
+        let envelope = {
+            let tau = self.omega() * self.duration;
+            (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp()
+        };
 
         beam * envelope
     }
@@ -75,14 +86,23 @@ impl FocusedLaser {
 
         // Pulse envelope
         let phase = self.wavevector * r; // - r[3] * rho_sqd / (z_r * width_sqd);
-        let tau = self.omega() * self.duration;
-        let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
 
-        let grad_envelope = [
-            0.0,
-            0.0,
-            8.0 * consts::LN_2 * self.wavevector[0] * phase * envelope / tau.powi(2)
-        ];
+        #[cfg(feature = "cos2-envelope-in-3d")]
+        let (envelope, grad_envelope) = if phase.abs() < consts::PI * self.duration {
+            let envelope = (phase / (2.0 * self.duration)).cos().powi(4);
+            (envelope, 2.0 * self.wavevector[0] * (phase / (2.0 * self.duration)).tan() * envelope / self.duration)
+        } else {
+            (0.0, 0.0)
+        };
+
+        #[cfg(not(feature = "cos2-envelope-in-3d"))]
+        let (envelope, grad_envelope) = {
+            let tau = self.omega() * self.duration;
+            let envelope = (-4.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
+            (envelope, 8.0 * consts::LN_2 * self.wavevector[0] * phase * envelope / tau.powi(2))
+        };
+
+        let grad_envelope = [0.0, 0.0, grad_envelope];
 
         FourVector::new(
             0.0,
@@ -111,6 +131,13 @@ impl Field for FocusedLaser {
         Some(1.0 / self.omega())
     }
 
+    #[cfg(feature = "cos2-envelope-in-3d")]
+    fn contains(&self, r: FourVector) -> bool {
+        let phase: f64 = self.wavevector * r;
+        phase < consts::PI * self.duration
+    }
+
+    #[cfg(not(feature = "cos2-envelope-in-3d"))]
     fn contains(&self, r: FourVector) -> bool {
         let phase: f64 = self.wavevector * r;
         phase < 3.0 * self.omega() * self.duration

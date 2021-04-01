@@ -107,26 +107,19 @@ impl fmt::Display for Histogram {
 }
 
 fn min_max_by<T>(base: &[T], f: &impl Fn(&T) -> f64, wrapper: impl Fn(f64) -> f64) -> Option<(f64, f64)> {
-    if base.is_empty() {
-        None
-    } else {
-        let mut min = wrapper(f(base.first().unwrap()));
-        let mut max = min;
-        for t in base.iter() {
-            let v = wrapper(f(t));
-            if v.is_finite() {
-                /*
-                if v < min {
-                    min = v;
-                } else if v > max {
-                    max = v;
-                }
-                */
-                min = min.min(v); // avoid explicit branching, saves time if nthreads >= 4
-                max = max.max(v);
-            }
+    let mut min: Option<f64> = None;
+    let mut max: Option<f64> = None;
+    for t in base.iter() {
+        let v = wrapper(f(t));
+        if v.is_finite() {
+            min = min.map_or(Some(v), |x| Some(x.min(v)));
+            max = max.map_or(Some(v), |x| Some(x.max(v)));
         }
-        Some((min, max))
+    }
+    if min.is_some() && max.is_some() {
+        Some((min.unwrap(), max.unwrap()))
+    } else {
+        None
     }
 }
 
@@ -188,7 +181,7 @@ impl Histogram {
         };
         //let min = base.iter().map(accessor).min_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(std::f64::MAX);
         //let max = base.iter().map(accessor).max_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(-std::f64::MAX);
-        //println!("{}: Local min = {:e}, max = {:e}, num = {}", rank, min, max, base.len());
+        //println!("{}: Local min = {:e}, max = {:e}, num = {}", name, min, max, base.len());
 
         //Global min and max
         let mut gmin = 0.0;
