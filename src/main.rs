@@ -357,6 +357,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (mut electrons, mut photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
+        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
         //println!("total energy = {}", laser.total_energy());
         primaries
             .chunks(num / 20)
