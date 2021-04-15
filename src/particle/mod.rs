@@ -9,6 +9,9 @@ use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*
 use crate::constants::*;
 use crate::geometry::*;
 
+mod builder;
+pub use builder::BeamBuilder;
+
 #[derive(Copy,Clone,PartialEq,Eq,Debug)]
 #[repr(u8)]
 pub enum Species {

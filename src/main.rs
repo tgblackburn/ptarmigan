@@ -265,6 +265,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .or_else(|_| input.read("beam", "ne"))
         ?;
     let gamma: f64 = input.read("beam", "gamma")?;
+    let gamma_min = input.read::<f64>("beam", "gamma_min").unwrap_or(1.0);
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
@@ -304,6 +305,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             },
             |s| s.parse::<Species>().map_err(|_| ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "species"))
         )?;
+    let use_brem_spec = if species == Species::Photon {
+        input.read("beam", "bremsstrahlung_source").unwrap_or(false)
+    } else {
+        false
+    };
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
 
@@ -410,58 +416,42 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let primaries: Vec<Particle> = (0..num).into_iter()
-        .map(|i| {
-            let z = if focusing {
-                if cfg!(feature = "cos2-envelope-in-3d") {
-                    wavelength * tau + 3.0 * length
-                } else {
-                    2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
-                }
-            } else {
-                0.5 * wavelength * tau
-            };
-            let t = -z;
-            let z = z + length * rng.sample::<f64,_>(StandardNormal);
-            let (x, y) = if normally_distributed {
-                (
-                    radius * rng.sample::<f64,_>(StandardNormal),
-                    radius * rng.sample::<f64,_>(StandardNormal)
-                )
-            } else { // uniformly distributed
-                let r = radius * rng.gen::<f64>().sqrt();
-                let theta = 2.0 * consts::PI * rng.gen::<f64>();
-                (r * theta.cos(), r * theta.sin())
-            };
-            let r = ThreeVector::new(x, y, z);
-            let r = r.rotate_around_y(angle);
-            let r = FourVector::new(t, r[0], r[1], r[2]);
-            let u = match species {
-                Species::Electron | Species::Positron => -(gamma * gamma - 1.0f64).sqrt(),
-                Species::Photon => -gamma,
-            };
-            let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
-            let theta_x = angle + rms_div * rng.sample::<f64,_>(StandardNormal);
-            let theta_y = rms_div * rng.sample::<f64,_>(StandardNormal);
-            let u = match species {
-                Species::Electron | Species::Positron => FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize(),
-                Species::Photon => FourVector::lightlike(u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()),
-            };
-            Particle::create(species, r)
-                .with_normalized_momentum(u)
-                .with_optical_depth(rng.sample(Exp1))
-                .with_weight(weight)
-                .with_id(i as u64)
-        })
-        .collect();
+    let initial_z = if focusing {
+        if cfg!(feature = "cos2-envelope-in-3d") {
+            wavelength * tau + 3.0 * length
+        } else {
+            2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+        }
+    } else {
+        0.5 * wavelength * tau
+    };
+
+    let builder = BeamBuilder::new(species, num, initial_z)
+        .with_weight(weight)
+        .with_divergence(rms_div)
+        .with_collision_angle(angle)
+        .with_length(length);
+
+    let builder = if normally_distributed {
+        builder.with_normally_distributed_xy(radius, radius)
+    } else {
+        builder.with_uniformly_distributed_xy(radius)
+    };
+
+    let builder = if use_brem_spec {
+        builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
+    } else {
+        builder.with_normal_energy_spectrum(gamma, sigma)
+    };
+
+    let primaries = builder.build(&mut rng);
 
     let mut current_id = num as u64;
 
     let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
         sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
         if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
-            while !sh.secondaries.is_empty() {
-                let pt = sh.secondaries.pop().unwrap();
+            while let Some(pt) = sh.secondaries.pop() {
                 match pt.species() {
                     Species::Electron => e.push(pt),
                     Species::Photon => g.push(pt),
