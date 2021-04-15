@@ -12,7 +12,6 @@ use no_mpi::*;
 use no_mpi as mpi;
 
 use rand::prelude::*;
-use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
 
 #[cfg(feature = "hdf5-output")]

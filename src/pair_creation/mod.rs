@@ -284,8 +284,10 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
     };
 
     // Scattering momentum (/m) and angles in zero momentum frame
-    let p_zmf = (0.5 * j * eta).sqrt();
-    let cos_theta_zmf = (1.0 + a * a + p_zmf * p_zmf).sqrt() / p_zmf - 2.0 * s;
+    // if ell_perp = 0, (q_perp/m)^2 = 2 n eta s (1-s) - (1+a^2)
+    let e_zmf = (0.5 * j * eta).sqrt();
+    let p_zmf = (0.5 * j * eta - 1.0 - a * a).sqrt();
+    let cos_theta_zmf = (1.0 - 2.0 * s) * e_zmf / p_zmf;
     let cphi_zmf = 2.0 * consts::PI * rng.gen::<f64>();
 
     assert!(cos_theta_zmf <= 1.0);
