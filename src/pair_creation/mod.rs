@@ -6,7 +6,14 @@ use crate::constants::*;
 use crate::geometry::*;
 use crate::special_functions::*;
 
+#[cfg(not(feature = "leading-order-only"))]
 mod rate_table;
+
+#[cfg(feature = "leading-order-only")]
+mod leading_order;
+
+#[cfg(feature = "leading-order-only")]
+pub use leading_order::{probability, generate};
 
 /// Evaluates the important part of the nonlinear Breit-Wheeler
 /// differential rate, f,
@@ -17,6 +24,7 @@ mod rate_table;
 /// where `0 < s < 1`.
 ///
 /// The spectrum is symmetric about s = 1/2.
+#[cfg(not(feature = "leading-order-only"))]
 fn partial_spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     let ell = n as f64;
     let sn = 2.0 * ell * eta / (1.0 + a * a);
@@ -54,6 +62,7 @@ fn partial_spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
 /// or
 ///   `dP/dt = ⍺ m F(n, a, η) / γ`
 /// where F = \int_0^1 f ds.
+#[cfg(not(feature = "leading-order-only"))]
 fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     let ell = n as f64;
     let sn = 2.0 * ell * eta / (1.0 + a * a);
@@ -154,6 +163,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Breit-Wheeler rates, implemented as a table lookup.
 #[allow(unused_parens)]
+#[cfg(not(feature = "leading-order-only"))]
 fn rate_by_lookup(a: f64, eta: f64) -> f64 {
     let (x, y) = (a.ln(), eta.ln());
 
@@ -200,12 +210,14 @@ fn rate_by_lookup(a: f64, eta: f64) -> f64 {
 
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Breit-Wheeler rates.
+#[cfg(not(feature = "leading-order-only"))]
 fn rate_by_summation(a: f64, eta: f64) -> f64 {
     let (n_min, n_max) = sum_limits(a, eta);
     (n_min..n_max).map(|n| partial_rate(n, a, eta)).sum()
 }
 
 /// Checks if a and eta are small enough such that the rate < exp(-200)
+#[cfg(not(feature = "leading-order-only"))]
 fn rate_too_small(a: f64, eta: f64) -> bool {
     eta.log10() < -1.0 - (a.log10() + 2.0).powi(2) / 4.5
 }
@@ -217,6 +229,7 @@ fn rate_too_small(a: f64, eta: f64) -> bool {
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
+#[cfg(not(feature = "leading-order-only"))]
 pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f64> {
     let eta = k * ell;
     let f = if a < 0.02 || rate_too_small(a, eta) {
@@ -234,6 +247,7 @@ pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f6
 /// by a photon with normalized momentum `ell`
 /// in a plane EM wave with root-mean-square amplitude `a`
 /// and (local) wavector `k`.
+#[cfg(not(feature = "leading-order-only"))]
 pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
     let n = {
@@ -275,7 +289,7 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
 
     // Rejection sampling for s = k.p / k.ell
     let s = loop {
-        let s = s_min + (1.0 - s_min) * rng.gen::<f64>();
+        let s = s_min + (1.0 - 2.0 * s_min) * rng.gen::<f64>();
         let u = rng.gen::<f64>();
         let f = partial_spectrum(n, a, eta, s);
         if u <= f / max {
@@ -309,6 +323,7 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
     (n, q)
 }
 
+#[cfg(not(feature = "leading-order-only"))]
 fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
     let n_min = (2.0 * (1.0 + a * a) / eta).ceil() as i32;
     let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
@@ -316,6 +331,7 @@ fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
     (n_min, n_max)
 }
 
+#[cfg(not(feature = "leading-order-only"))]
 #[allow(dead_code)]
 fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
     let n_min = (2.0f64 * (1.0 + a * a) / eta).ceil() as i32;
@@ -345,6 +361,7 @@ fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
     (n_min, n_peak, n, total)
 }
 
+#[cfg(not(feature = "leading-order-only"))]
 #[cfg(test)]
 mod tests {
     use std::fs::File;

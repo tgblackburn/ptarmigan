@@ -413,7 +413,11 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for String {
 /// Estimated time to completion, based on amount of work done
 pub fn ettc(start: std::time::Instant, current: usize, total: usize) -> std::time::Duration {
     let rt = start.elapsed().as_secs_f64();
-    let ettc = rt * ((total - current) as f64) / (current as f64);
+    let ettc = if current < total {
+        rt * ((total - current) as f64) / (current as f64)
+    } else {
+        0.0
+    };
     std::time::Duration::from_secs_f64(ettc)
 }
 
