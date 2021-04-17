@@ -8,6 +8,10 @@ New:
 
 * Finite bandwidth correction: optionally account for the effect of the laser pulse duration when sampling photon momenta.
 
+Fixed:
+
+* Build failure caused by missing git info.
+
 ## v0.6.2
 
 Fixed:

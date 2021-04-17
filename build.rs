@@ -2,7 +2,10 @@ use vergen::*;
 
 fn main() {
     let flags = ConstantsFlags::all();
-    gen(flags).expect("Unable to generate the cargo keys!");
+    gen(flags).unwrap_or_else(|_e| {
+        println!("cargo:rustc-env=VERGEN_GIT_BRANCH=unknown");
+        println!("cargo:rustc-env=VERGEN_GIT_SHA=unknown");
+    });
 
     let mut features = vec![];
     for (k, _v) in std::env::vars() {
