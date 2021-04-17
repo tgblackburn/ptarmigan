@@ -1,5 +1,13 @@
 # Changelog
 
+# v0.7.0
+
+In progress.
+
+New:
+
+* Finite bandwidth correction: optionally account for the effect of the laser pulse duration when sampling photon momenta.
+
 ## v0.6.1
 
 Adds new compile-time feature `cos2-envelope-in-3d` which switches the laser temporal envelope from the default Gaussian.

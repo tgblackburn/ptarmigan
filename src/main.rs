@@ -547,6 +547,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("dt_multiplier", dt_multiplier)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
+                    .write("bandwidth_correction", finite_bandwidth)?
                     .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
                     .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
 
