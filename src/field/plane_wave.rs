@@ -1,5 +1,6 @@
 use std::f64::consts;
 use rand::prelude::*;
+use rand_distr::StandardNormal;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
@@ -14,6 +15,7 @@ pub struct PlaneWave {
     wavevector: FourVector,
     pol: Polarization,
     chirp_b: f64,
+    bandwidth: f64,
 }
 
 impl PlaneWave {
@@ -26,7 +28,16 @@ impl PlaneWave {
             wavevector,
             pol,
             chirp_b,
+            bandwidth: 0.0,
         }
+    }
+
+    pub fn with_finite_bandwidth(self) -> Self {
+        let mut cpy = self;
+        // n_fwhm = 2 n acos[1/2^(1/4)] / pi
+        let n_fwhm = 0.36405666377387671305 * cpy.n_cycles;
+        cpy.bandwidth = (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm);
+        cpy
     }
     
     #[allow(unused)]
@@ -122,7 +133,9 @@ impl Field for PlaneWave {
         if chirp < 0.0 && u * u > 1.0 { // frequency must be positive if local a > 0
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
+        let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
+        assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp * width;
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
             let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);

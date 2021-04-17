@@ -153,6 +153,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
     let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
+    let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -356,6 +357,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (mut electrons, mut photons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
+        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
         //println!("total energy = {}", laser.total_energy());
         primaries
             .chunks(num / 20)
@@ -399,6 +401,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
+        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
         primaries
         .chunks(num / 20)
         .enumerate()
@@ -544,6 +547,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("dt_multiplier", dt_multiplier)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
+                    .write("bandwidth_correction", finite_bandwidth)?
                     .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
                     .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
 
