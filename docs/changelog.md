@@ -8,6 +8,13 @@ New:
 
 * Finite bandwidth correction: optionally account for the effect of the laser pulse duration when sampling photon momenta.
 
+## v0.6.2
+
+Fixed:
+
+* Min-max finding in hgram
+* Particle rotation in plain-text output
+
 ## v0.6.1
 
 Adds new compile-time feature `cos2-envelope-in-3d` which switches the laser temporal envelope from the default Gaussian.

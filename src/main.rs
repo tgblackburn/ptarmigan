@@ -504,7 +504,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "#{:-^1$}", "", 170)?;
 
                 for pt in &particles {
-                    writeln!(file, "{}", pt.to_beam_coordinate_basis(angle))?;
+                    writeln!(file, "{}", pt)?;
                 }
 
                 let mut current_id = particles.len() as u64;
