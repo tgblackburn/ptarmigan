@@ -9,6 +9,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 * `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG
 * `bandwidth_correction` (optional, default = `false`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
+* `increase_pair_rate_by` (optional, default = `1.0`): if specified, increases the pair creation rate, while decreasing the weight of any created electrons and positrons, by the same factor. This helps resolve the positron spectrum when the total probability is much smaller than 1/N, where N is the number of primary particles. A setting of `auto` will be replaced by a suitable default value, as determined from the laser amplitude and particle energy.
 
 ## laser
 
@@ -28,6 +29,8 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
+* `bremsstrahlung_source` (optional, if primary particles are photons, default = `false`): switches energy spectrum from Gaussian to mimic a bremsstrahlung source.
+* `gamma_min` (required if `bremsstrahlung_source` is `true`): lower bound for the bremsstrahlung energy spectrum.
 * `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.

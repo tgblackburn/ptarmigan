@@ -265,7 +265,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .or_else(|_| input.read("beam", "ne"))
         ?;
     let gamma: f64 = input.read("beam", "gamma")?;
-    let gamma_min = input.read::<f64>("beam", "gamma_min").unwrap_or(1.0);
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
@@ -309,6 +308,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         input.read("beam", "bremsstrahlung_source").unwrap_or(false)
     } else {
         false
+    };
+    let gamma_min = if use_brem_spec {
+        input.read::<f64>("beam", "gamma_min")?
+    } else {
+        1.0
     };
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
