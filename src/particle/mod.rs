@@ -3,7 +3,8 @@
 use std::fmt;
 
 #[cfg(feature = "with-mpi")]
-use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
+//use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
+use {mpi::traits::*, mpi::datatype::SystemDatatype};
 
 use crate::constants::*;
 use crate::geometry::*;
@@ -27,6 +28,7 @@ unsafe impl Equivalence for Species {
 /// A elementary particle is defined by its position
 /// and momentum
 #[derive(Copy,Clone)]
+#[derive(Equivalence)]
 pub struct Particle {
     species: Species,
     r: [FourVector; 2],
@@ -36,35 +38,6 @@ pub struct Particle {
     interaction_count: f64,
     weight: f64,
     id: u64,
-}
-
-#[cfg(feature = "with-mpi")]
-unsafe impl Equivalence for Particle {
-    type Out = UserDatatype;
-    fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1];
-        let displacements = [
-            offset_of!(Particle, species) as mpi::Address,
-            offset_of!(Particle, r) as mpi::Address,
-            offset_of!(Particle, u) as mpi::Address,
-            offset_of!(Particle, optical_depth) as mpi::Address,
-            offset_of!(Particle, payload) as mpi::Address,
-            offset_of!(Particle, interaction_count) as mpi::Address,
-            offset_of!(Particle, weight) as mpi::Address,
-            offset_of!(Particle, id) as mpi::Address,
-        ];
-        let types: [&dyn Datatype; 8] = [
-            &Species::equivalent_datatype(),
-            &FourVector::equivalent_datatype(),
-            &FourVector::equivalent_datatype(),
-            &f64::equivalent_datatype(),
-            &f64::equivalent_datatype(),
-            &f64::equivalent_datatype(),
-            &f64::equivalent_datatype(),
-            &u64::equivalent_datatype(),
-        ];
-        UserDatatype::structured(8, &blocklengths, &displacements, &types)
-    }
 }
 
 impl fmt::Display for Particle {
