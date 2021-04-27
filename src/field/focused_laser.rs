@@ -1,5 +1,6 @@
 use std::f64::consts;
 use rand::prelude::*;
+use rand_distr::StandardNormal;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
@@ -15,6 +16,7 @@ pub struct FocusedLaser {
     duration: f64,
     wavevector: FourVector,
     pol: Polarization,
+    bandwidth: f64,
 }
 
 impl FocusedLaser {
@@ -25,8 +27,16 @@ impl FocusedLaser {
             waist,
             duration,
             wavevector,
-            pol
+            pol,
+            bandwidth: 0.0,
         }
+    }
+
+    pub fn with_finite_bandwidth(self) -> Self {
+        let mut cpy = self;
+        let n_fwhm = SPEED_OF_LIGHT * cpy.duration * cpy.wavevector[0] / (2.0 * consts::PI);
+        cpy.bandwidth = (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm);
+        cpy
     }
 
     fn omega(&self) -> f64 {
@@ -173,7 +183,9 @@ impl Field for FocusedLaser {
     }
 
     fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
+        let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
+        assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * width;
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
             let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
