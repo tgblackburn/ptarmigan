@@ -23,7 +23,8 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 ## beam
 
-* `ne`: number of primary electrons.
+* `n`: number of primary particles. `ne` is also accepted.
+* `species` (optional, default = `electron`): primary particle type, must be one of `electron`, `photon` or `positron`.
 * `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
@@ -38,10 +39,12 @@ All output is written to the directory where the input file is found.
 
 * `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
-* `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
-* `photon`: as above.
+* `electron` (optional): list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
+* `photon` (optional): as above.
+* `positron` (optional): as above.
 * `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text` and `hdf5`. A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
 * `coordinate_system` (optional, default = `laser`): by default, particle positions and momenta are output in the simulation coordinate system, where the laser travels towards positive z. If set to `beam`, these are transformed such that the beam propagation defines the positive z direction.
+* `discard_background_e` (optional, default = `false`): whether to discard primary electrons that have not radiated, before generating output.
 
 The possible distributions are:
 

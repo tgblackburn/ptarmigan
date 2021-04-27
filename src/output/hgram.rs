@@ -78,6 +78,7 @@ impl fmt::Display for HeightSpec {
 pub struct Histogram {
     dim: usize,
     total: f64,
+    unweighted_total: f64,
     bin_vol: f64,
     min: Vec<f64>,
     max: Vec<f64>,
@@ -261,6 +262,7 @@ impl Histogram {
         Some(Histogram {
             dim: 1,
             total: gtotal,
+            unweighted_total: gnum as f64,
             bin_vol: bin_vol,
             min: vec![gmin],
             max: vec![gmax],
@@ -378,6 +380,7 @@ impl Histogram {
         Some(Histogram {
             dim: 2,
             total: gtotal,
+            unweighted_total: gnum as f64,
             bin_vol: bin_vol,
             min: gmin.to_vec(),
             max: gmax.to_vec(),
@@ -417,6 +420,7 @@ impl Histogram {
 
         hdu.write_key(&mut file, "BUNIT", &self.bunit[..])?;
         hdu.write_key(&mut file, "TOTAL", self.total)?;
+        hdu.write_key(&mut file, "RAWTOTAL", self.unweighted_total)?;
         hdu.write_key(&mut file, "OBJECT", &self.name[..])?;
 
         let min = self.cts.iter().min_by(|a,b| a.partial_cmp(b).unwrap()).unwrap_or(&0.0);

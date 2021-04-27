@@ -46,7 +46,7 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         "energy" => Some(
             (energy as ParticleOutput, "MeV")
         ),
-        "unit" | "number" => Some(
+        "unit" => Some(
             (unit as ParticleOutput, "1")
         ),
         "x" => Some(
@@ -63,6 +63,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
         ),
         "n_inter" | "n_gamma" | "n_pos" => Some(
             (interaction_count as ParticleOutput, "1")
+        ),
+        "weight" | "number" => Some(
+            (weighted_by_number as ParticleOutput, "1")
         ),
         _ => None,
     }
@@ -158,4 +161,14 @@ pub fn payload(pt: &Particle) -> f64 {
 
 pub fn interaction_count(pt: &Particle) -> f64 {
     pt.interaction_count()
+}
+
+pub fn weighted_by_energy(pt: &Particle) -> f64 {
+    let p = pt.normalized_momentum();
+    let energy = p[0] * constants::ELECTRON_MASS_MEV;
+    pt.weight() * energy
+}
+
+pub fn weighted_by_number(pt: &Particle) -> f64 {
+    pt.weight()
 }

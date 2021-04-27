@@ -107,6 +107,12 @@ impl Field for FastPlaneWave {
         let (E, B) = self.fields(r);
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
     }
+
+    #[allow(non_snake_case)]
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+        let (E, B) = self.fields(r);
+        FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase)
+    }
 }
 
 #[cfg(test)]

@@ -71,6 +71,11 @@ impl ConfigError {
     pub fn raise(kind: ConfigErrorKind, section: &str, field: &str) -> Self {
         ConfigError {kind: kind, section: section.to_owned(), field: field.to_owned()}
     }
+
+    /// Returns what the problem was
+    pub fn kind(&self) -> ConfigErrorKind {
+        self.kind
+    }
 }
 
 impl Error for ConfigError {}
@@ -140,6 +145,7 @@ impl<'a> Config<'a> {
             .var("mp", PROTON_MASS)
             .var("c", SPEED_OF_LIGHT)
             .var("e", ELEMENTARY_CHARGE)
+            .var("qe", ELECTRON_CHARGE)
             .var("eV", ELEMENTARY_CHARGE)
             .var("keV", 1.0e3 * ELEMENTARY_CHARGE)
             .var("MeV", 1.0e6 * ELEMENTARY_CHARGE)
@@ -407,7 +413,11 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for String {
 /// Estimated time to completion, based on amount of work done
 pub fn ettc(start: std::time::Instant, current: usize, total: usize) -> std::time::Duration {
     let rt = start.elapsed().as_secs_f64();
-    let ettc = rt * ((total - current) as f64) / (current as f64);
+    let ettc = if current < total {
+        rt * ((total - current) as f64) / (current as f64)
+    } else {
+        0.0
+    };
     std::time::Duration::from_secs_f64(ettc)
 }
 

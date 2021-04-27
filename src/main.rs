@@ -12,17 +12,19 @@ use no_mpi::*;
 use no_mpi as mpi;
 
 use rand::prelude::*;
-use rand_distr::{Exp1, StandardNormal};
 use rand_xoshiro::*;
 
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 4);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 5);
 
 mod constants;
 mod field;
 mod geometry;
 mod particle;
 mod nonlinear_compton;
+mod pair_creation;
 mod lcfa;
 mod special_functions;
 mod output;
@@ -86,45 +88,109 @@ impl WriteableString for hdf5::Group {
     }
 }
 
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64) -> Shower {
-    let mut primary = incident;
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool) -> Shower {
+    let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
     let dt = dt * dt_multiplier;
+    let primary_id = incident.id();
 
-    while field.contains(primary.position()) {
-        let (r, mut u) = field.push(
-            primary.position(), 
-            primary.normalized_momentum(),
-            primary.charge_to_mass_ratio(),
-            dt
-        );
+    while let Some(mut pt) = primaries.pop() {
+        match pt.species() {
+            Species::Electron | Species::Positron => {
+                while field.contains(pt.position()) {
+                    let (r, mut u) = field.push(
+                        pt.position(),
+                        pt.normalized_momentum(),
+                        pt.charge_to_mass_ratio(),
+                        dt
+                    );
 
-        if let Some(k) = field.radiate(r, u, dt, rng) {
-            let id = *current_id;
-            *current_id = *current_id + 1;
-            let photon = Particle::create(Species::Photon, r)
-                .with_payload((u * u - 1.0).max(0.0).sqrt())
-                .with_weight(primary.weight())
-                .with_id(id)
-                .with_normalized_momentum(k);
-            secondaries.push(photon);
+                    if let Some(k) = field.radiate(r, u, dt, rng) {
+                        let id = *current_id;
+                        *current_id = *current_id + 1;
+                        let photon = Particle::create(Species::Photon, r)
+                            .with_payload((u * u - 1.0).max(0.0).sqrt())
+                            .with_weight(pt.weight())
+                            .with_id(id)
+                            .with_normalized_momentum(k);
+                        primaries.push(photon);
 
-            #[cfg(not(feature = "no-radiation-reaction"))] {
-                u = u - k;
+                        #[cfg(not(feature = "no-radiation-reaction"))] {
+                            u = u - k;
+                        }
+
+                        pt.update_interaction_count(1.0);
+                    }
+
+                    pt.with_position(r);
+                    pt.with_normalized_momentum(u);
+                }
+
+                if pt.id() != primary_id || !discard_bg_e || pt.interaction_count() > 0.0 {
+                    secondaries.push(pt);
+                }
+            },
+            Species::Photon => {
+                let mut has_decayed = false;
+                while field.contains(pt.position()) && !has_decayed {
+                    let ell = pt.normalized_momentum();
+                    let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
+
+                    let (prob, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    if let Some((q_e, q_p)) = momenta {
+                        let id = *current_id;
+                        *current_id = *current_id + 2;
+                        let electron = Particle::create(Species::Electron, r)
+                            .with_weight(pt.weight() / rate_increase)
+                            .with_id(id)
+                            .with_normalized_momentum(q_e);
+                        let positron = Particle::create(Species::Positron, r)
+                            .with_weight(pt.weight() / rate_increase)
+                            .with_id(id + 1)
+                            .with_normalized_momentum(q_p);
+                        primaries.push(electron);
+                        primaries.push(positron);
+                        pt.with_weight(pt.weight() * (1.0 - 1.0 / rate_increase));
+                        if pt.weight() <= 0.0 {
+                            has_decayed = true;
+                        }
+                    }
+
+                    pt.update_interaction_count(prob);
+                    pt.with_position(r);
+                }
+
+                if !has_decayed {
+                    secondaries.push(pt);
+                }
             }
-
-            primary.update_interaction_count(1.0);
         }
-
-        primary.with_position(r);
-        primary.with_normalized_momentum(u);
-        //primary.with_payload((u * u - 1.0).max(0.0).sqrt());
     }
 
     Shower {
-        primary,
+        primary: incident,
         secondaries,
+    }
+}
+
+/// Returns the ratio of the pair creation and photon emission rates,
+/// for a photon (or electron) with normalized energy `gamma` in a
+/// laser with amplitude `a0` and wavelength `wavelength`.
+fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
+    let kappa: FourVector = SPEED_OF_LIGHT * COMPTON_TIME * 2.0 * consts::PI * FourVector::new(1.0, 0.0, 0.0, 1.0) / wavelength;
+    let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
+    let u: FourVector = FourVector::new(0.0, 0.0, 0.0, -gamma).unitize();
+    let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
+    let dt = wavelength / SPEED_OF_LIGHT;
+    let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt);
+    if pair_rate.is_none() || photon_rate.is_none() {
+        1.0
+    } else {
+        let ratio = photon_rate.unwrap() / pair_rate.unwrap();
+        //println!("P_pair = {:.6e}, P_photon = {:.6e}, ratio = {:.3}", pair_rate.unwrap(), photon_rate.unwrap(), ratio);
+        ratio.max(1.0)
     }
 }
 
@@ -195,14 +261,17 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(0.0)
     };
 
-    let num: usize = input.read("beam", "ne")?;
+    let npart: usize = input.read("beam", "n")
+        .or_else(|_| input.read("beam", "ne"))
+        ?;
     let gamma: f64 = input.read("beam", "gamma")?;
+    let gamma_min = input.read::<f64>("beam", "gamma_min").unwrap_or(1.0);
     let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam", "length").unwrap_or(0.0);
     let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
     let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
     let weight = input.read("beam", "charge")
-        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (num as f64)))
+        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
         .unwrap_or(1.0);
     let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
         .and_then(|vs| {
@@ -227,6 +296,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
         })?;
+    let species = input.read::<String>("beam", "species")
+        .map_or_else(
+            |e| match e.kind() {
+                // if the species is not specified, default to electron
+                ConfigErrorKind::MissingField => Ok(Species::Electron),
+                _ => Err(e)
+            },
+            |s| s.parse::<Species>().map_err(|_| ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "species"))
+        )?;
+    let use_brem_spec = if species == Species::Photon {
+        input.read("beam", "bremsstrahlung_source").unwrap_or(false)
+    } else {
+        false
+    };
 
     let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
 
@@ -242,18 +325,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => true,
     };
 
+    let discard_bg_e = input.read("output", "discard_background_e").unwrap_or(false);
+
     let min_energy: f64 = input
         .read("output", "min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
 
-    let eospec: Vec<String> = input.read("output", "electron")?;
+    let eospec: Vec<String> = input.read("output", "electron")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
     
-    let pospec: Vec<String> = input.read("output", "photon")?;
+    let gospec: Vec<String> = input.read("output", "photon")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let gospec: Vec<DistributionFunction> = gospec
+        .iter()
+        .map(|s| s.parse())
+        .collect::<Result<Vec<_>,_>>()?;
+
+    let pospec: Vec<String> = input.read("output", "positron")
+        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
         .map(|s| s.parse())
@@ -273,9 +367,33 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
+    // Rare event sampling for pair creation
+    let pair_rate_increase = input.read::<f64>("control", "increase_pair_rate_by")
+        // if increase is not specified at all, default to unity
+        .or_else(|e| match e.kind() {
+            ConfigErrorKind::MissingField => Ok(1.0),
+            _ => Err(e),
+        })
+        // failing that, check for automatic increase
+        .or_else(|e| match input.read::<String>("control", "increase_pair_rate_by") {
+            Ok(s) if s == "auto" => Ok(increase_pair_rate_by(gamma, a0, wavelength)),
+            _ => Err(e),
+        })
+        .and_then(|r| if r < 1.0 {
+            eprintln!("Increase in pair creation rate must be >= 1.0.");
+            Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "control", "increase_pair_rate_by"))
+        } else {
+            Ok(r)
+        })?;
+
     let local_seed = (id as u64) * (1 + rng_seed as u64);
     let mut rng = Xoshiro256StarStar::seed_from_u64(local_seed);
-    let num = num / (ntasks as usize);
+    let nums: Vec<usize> = {
+        let tasks = ntasks as usize;
+        (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()
+    };
+    assert_eq!(nums.iter().sum::<usize>(), npart);
+    let num = nums[id as usize];
 
     if id == 0 {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
@@ -298,64 +416,55 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let primaries: Vec<Particle> = (0..num).into_iter()
-        .map(|i| {
-            let z = if focusing {
-                if cfg!(feature = "cos2-envelope-in-3d") {
-                    wavelength * tau + 3.0 * length
-                } else {
-                    2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
-                }
-            } else {
-                0.5 * wavelength * tau
-            };
-            let t = -z;
-            let z = z + length * rng.sample::<f64,_>(StandardNormal);
-            let (x, y) = if normally_distributed {
-                (
-                    radius * rng.sample::<f64,_>(StandardNormal),
-                    radius * rng.sample::<f64,_>(StandardNormal)
-                )
-            } else { // uniformly distributed
-                let r = radius * rng.gen::<f64>().sqrt();
-                let theta = 2.0 * consts::PI * rng.gen::<f64>();
-                (r * theta.cos(), r * theta.sin())
-            };
-            let r = ThreeVector::new(x, y, z);
-            let r = r.rotate_around_y(angle);
-            let r = FourVector::new(t, r[0], r[1], r[2]);
-            let u = -(gamma * gamma - 1.0f64).sqrt();
-            let u = u + sigma * rng.sample::<f64,_>(StandardNormal);
-            let theta_x = angle + rms_div * rng.sample::<f64,_>(StandardNormal);
-            let theta_y = rms_div * rng.sample::<f64,_>(StandardNormal);
-            let u = FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize();
-            Particle::create(Species::Electron, r)
-                .with_normalized_momentum(u)
-                .with_optical_depth(rng.sample(Exp1))
-                .with_weight(weight)
-                .with_id(i as u64)
-        })
-        .collect();
+    let initial_z = if focusing {
+        if cfg!(feature = "cos2-envelope-in-3d") {
+            wavelength * tau + 3.0 * length
+        } else {
+            2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+        }
+    } else {
+        0.5 * wavelength * tau
+    };
+
+    let builder = BeamBuilder::new(species, num, initial_z)
+        .with_weight(weight)
+        .with_divergence(rms_div)
+        .with_collision_angle(angle)
+        .with_length(length);
+
+    let builder = if normally_distributed {
+        builder.with_normally_distributed_xy(radius, radius)
+    } else {
+        builder.with_uniformly_distributed_xy(radius)
+    };
+
+    let builder = if use_brem_spec {
+        builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
+    } else {
+        builder.with_normal_energy_spectrum(gamma, sigma)
+    };
+
+    let primaries = builder.build(&mut rng);
 
     let mut current_id = num as u64;
 
-    let merge = |(mut p, mut s): (Vec<Particle>, Vec<Particle>), mut sh: Shower| {
+    let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
         sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
-        if let Some(m) = multiplicity {
-            if m == sh.multiplicity() {
-                p.push(sh.primary);
-                s.append(&mut sh.secondaries);
+        if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
+            while let Some(pt) = sh.secondaries.pop() {
+                match pt.species() {
+                    Species::Electron => e.push(pt),
+                    Species::Photon => g.push(pt),
+                    Species::Positron => p.push(pt),
+                }
             }
-        } else {
-            p.push(sh.primary);
-            s.append(&mut sh.secondaries);
         }
-        (p, s)
+        (e, g, p)
     };
 
     let runtime = std::time::Instant::now();
 
-    let (mut electrons, mut photons) = if focusing && !using_lcfa {
+    let (mut electrons, mut photons, mut positrons) = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
         let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
         //println!("total energy = {}", laser.total_energy());
@@ -364,8 +473,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                     (i+1) * chk.len(), num,
@@ -375,8 +484,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tmp
             })
             .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
             )
     } else if focusing { // and using LCFA rates
         let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
@@ -385,8 +494,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                     (i+1) * chk.len(), num,
@@ -396,8 +505,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 tmp
             })
             .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
             )
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
@@ -407,8 +516,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                 (i+1) * chk.len(), num,
@@ -418,8 +527,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             tmp
         })
         .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
         )
     } else { // plane wave and lcfa
         let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
@@ -428,8 +537,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
                 (i+1) * chk.len(), num,
@@ -439,14 +548,15 @@ fn main() -> Result<(), Box<dyn Error>> {
             tmp
         })
         .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat())
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
         )
     };
 
     if !laser_defines_z {
         electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
         photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        positrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
     }
 
     for dstr in &eospec {
@@ -454,9 +564,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         dstr.write(&world, &electrons, &prefix)?;
     }
 
-    for dstr in &pospec {
+    for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
         dstr.write(&world, &photons, &prefix)?;
+    }
+
+    for dstr in &pospec {
+        let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+        dstr.write(&world, &positrons, &prefix)?;
     }
 
     for stat in estats.iter_mut() {
@@ -484,7 +599,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match plain_text_output {
         OutputMode::PlainText => {
-            let mut particles = [electrons, photons].concat();
+            let mut particles = [electrons, photons, positrons].concat();
 
             if id == 0 {
                 use std::fs::File;
@@ -547,6 +662,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("dt_multiplier", dt_multiplier)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
+                    .write("increase_pair_rate_by", pair_rate_increase)?
                     .write("bandwidth_correction", finite_bandwidth)?
                     .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
                     .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
@@ -562,7 +678,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_if(!focusing, "n_cycles", tau)?;
 
                 conf.create_group("beam")?
-                    .write("ne", num)?
+                    .write("n", npart)?
                     .write("gamma", gamma)?
                     .write("sigma", sigma)?
                     .write("radius", radius)?
@@ -586,15 +702,16 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w, a) = photons
+                let (x, p, w, a, n) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count()))
                     .unzip_n_vec();
                 drop(photons);
 
                 fs.create_group("photon")?
                     .write_all("weight", &w)?
                     .write_all("a0_at_creation", &a)?
+                    .write_all("n_pos", &n)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
 
@@ -618,12 +735,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_all("n_gamma", &n)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
+
+                let mut positrons = positrons;
+                #[cfg(feature = "with-mpi")]
+                for recv_rank in 1..ntasks {
+                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
+                    positrons.append(&mut recv);
+                }
+                let (x, p, w, n) = positrons
+                    .iter()
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
+                    .unzip_n_vec();
+                drop(positrons);
+
+                fs.create_group("positron")?
+                    .write_all("weight", &w)?
+                    .write_all("n_gamma", &n)?
+                    .write_all("position", &x)?
+                    .write_all("momentum", &p)?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);
                     drop(photons);
                     world.process_at_rank(0).synchronous_send(&electrons[..]);
                     drop(electrons);
+                    world.process_at_rank(0).synchronous_send(&positrons[..]);
+                    drop(positrons);
                 }
             }
         },
