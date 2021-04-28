@@ -678,13 +678,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("focusing", focusing)?
                     .write("chirp_b", chirp_b)?
                     .write_if(focusing, "waist", waist)?
-                    .write_if(focusing, "fwhm_duration", tau)?
-                    .write_if(!focusing, "n_cycles", tau)?;
+                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", tau)?
+                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", tau)?;
 
                 conf.create_group("beam")?
                     .write("n", npart)?
                     .write("gamma", gamma)?
                     .write("sigma", sigma)?
+                    .write("bremsstrahlung_source", use_brem_spec)?
+                    .write_if(use_brem_spec, "gamma_min", gamma_min)?
                     .write("radius", radius)?
                     .write("length", length)?
                     .write("collision_angle", angle)?
@@ -695,6 +697,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 conf.create_group("output")?
                     .write("laser_defines_positive_z", laser_defines_z)?
                     .write("beam_defines_positive_z", !laser_defines_z)?
+                    .write("discard_background_e", discard_bg_e)?
                     .write("min_energy", min_energy)?;
 
                 // Write particle data
