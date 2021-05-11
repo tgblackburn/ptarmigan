@@ -1,12 +1,14 @@
 # Changelog
 
-# v0.7.0
+## v0.7.0
 
 In progress.
 
 New:
 
 * Finite bandwidth correction: optionally account for the effect of the laser pulse duration when sampling photon momenta.
+* Electron-positron pair creation, via LMA and LCFA rates. `leading-order-only` feature, if enabled, replaces the LMA rate with a perturbative equivalent.
+* Photon primaries, with either Gaussian or bremsstrahlung energy spectra.
 
 Fixed:
 
