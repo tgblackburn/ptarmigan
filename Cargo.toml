@@ -9,7 +9,7 @@ license = "Apache-2.0"
 build = "build.rs"
 
 [dependencies]
-mpi = {version = "0.5", optional = true}
+mpi = {version = "0.5", optional = true, default-features = false}
 rand = "0.7"
 rand_xoshiro = "0.4"
 rand_distr = "0.2"
