@@ -88,6 +88,7 @@ impl WriteableString for hdf5::Group {
     }
 }
 
+#[allow(unused)]
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
@@ -131,6 +132,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     secondaries.push(pt);
                 }
             },
+
+            #[cfg(feature = "no-pair-creation")]
+            Species::Photon => {},
+
+            #[cfg(not(feature = "no-pair-creation"))]
             Species::Photon => {
                 let mut has_decayed = false;
                 while field.contains(pt.position()) && !has_decayed {
