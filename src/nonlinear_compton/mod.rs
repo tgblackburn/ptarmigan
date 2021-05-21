@@ -331,7 +331,7 @@ mod tests {
         use std::f64::consts;
 
         const N_COLS: usize = 55;
-        const N_ROWS: usize = 60;
+        const N_ROWS: usize = 70;
         let mut table = [[0.0; N_COLS]; N_ROWS];
         for i in 0..N_ROWS {
             // eta = eta_min * 10^(i/20)
@@ -341,7 +341,7 @@ mod tests {
                 let a = total::LOW_A_LIMIT * 10.0f64.powf((j as f64) / 20.0);
                 let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
                 table[i][j] = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum();
-                println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+                println!("NLC: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
             }
         }
 
@@ -368,7 +368,7 @@ mod tests {
             let a = total::LOW_A_LIMIT * 10.0f64.powf((j as f64) / 20.0);
             let nmax = (10.0 * (1.0 + a.powi(3))) as i32;
             table[j] = (1..=nmax).map(|n| integrated_spectrum_low_eta(n, a)).sum();
-            println!("eta -> 0, a = {:.3e}, ln(rate) = {:.6e}", a, table[j].ln());
+            println!("NLC: eta -> 0, a = {:.3e}, ln(rate) = {:.6e}", a, table[j].ln());
         }
 
         let mut file = File::create("output/nlc_low_eta_rate_table.txt").unwrap();
