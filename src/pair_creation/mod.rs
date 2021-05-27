@@ -498,7 +498,7 @@ mod tests {
         const A_DENSITY: usize = 40;
         const ETA_DENSITY: usize = 40;
         const N_COLS: usize = 70; // 2 * DENSITY;
-        const N_ROWS: usize = 3 * ETA_DENSITY;
+        const N_ROWS: usize = 3 * ETA_DENSITY + 5;
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         for i in 0..N_ROWS {
@@ -511,7 +511,7 @@ mod tests {
                     rate_by_summation(a, eta)
                 };
                 table[i][j] = rate;
-                println!("eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+                println!("NBW: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
             }
         }
 
