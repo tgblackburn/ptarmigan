@@ -321,7 +321,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         1.0
     };
 
-    let ident: String = input.read("output", "ident").unwrap_or_else(|_| "".to_owned());
+    let ident: String = input.read("output", "ident")
+        .map(|s| {
+            if s == "auto" {
+                // use the name of the input file instead
+                let stem = path.file_stem().map(|os| os.to_str()).flatten();
+                if let Some(stem) = stem {
+                    stem.to_owned()
+                } else {
+                    eprintln!("Unexpected failure to extract stem of input file ('{}'), as required for 'ident: auto'.", path.display());
+                    "".to_owned()
+                }
+            } else {
+                s
+            }
+        })
+        .unwrap_or_else(|_| "".to_owned());
 
     let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
@@ -418,6 +433,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         #[cfg(feature = "no-radiation-reaction")] {
             println!("\t* with radiation reaction disabled");
+        }
+        #[cfg(feature = "no-pair-creation")] {
+            println!("\t* with pair creation disabled");
         }
         #[cfg(feature = "cos2-envelope-in-3d")] {
             if focusing {

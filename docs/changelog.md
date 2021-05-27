@@ -10,6 +10,7 @@ New:
 * Electron-positron pair creation, via LMA and LCFA rates. `leading-order-only` feature, if enabled, replaces the LMA rate with a perturbative equivalent.
 * Previous behaviour, i.e. no pair creation or photon tracking, is recovered by compiling with `no-pair-creation` feature.
 * Photon primaries, with either Gaussian or bremsstrahlung energy spectra.
+* Automatic naming of output files.
 
 Fixed:
 
