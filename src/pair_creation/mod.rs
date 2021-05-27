@@ -326,7 +326,8 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
 #[cfg(not(feature = "leading-order-only"))]
 fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
     let n_min = (2.0 * (1.0 + a * a) / eta).ceil() as i32;
-    let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
+    //let delta = (1.671 * (1.0 + 1.226 * a * a) * (1.0 + 7.266 * eta) / eta).ceil() as i32;
+    let delta = (0.25 * (1.0 + 3.3 * a.sqrt() + 8.0 * a * a) * (1.0 + 7.3 * eta) / eta).ceil() as i32;
     let n_max = n_min + delta;
     (n_min, n_max)
 }
@@ -336,26 +337,24 @@ fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
 fn find_sum_limits(a: f64, eta: f64, max_error: f64) -> (i32, i32, i32, f64) {
     let n_min = (2.0f64 * (1.0 + a * a) / eta).ceil() as i32;
 
-    let mut total = 0.0;
+    let mut total = partial_rate(n_min, a, eta) + partial_rate(n_min + 1, a, eta) + partial_rate(n_min + 2, a, eta);
+    let mut prev = partial_rate(n_min + 2, a, eta);
+    let mut n = n_min + 3;
     let mut n_peak = n_min;
-    let mut partial = partial_rate(n_min, a, eta);
-    let mut n = n_min + 1;
+
     loop {
-        total += partial;
-        let tmp = partial_rate(n, a, eta);
-        if tmp > partial {
+        let next = partial_rate(n, a, eta);
+        if next > prev {
             n_peak = n;
         }
-        partial = tmp;
-        n += 1;
+        prev = next;
+        total += next;
 
-        if n < 2 * n_min {
-            continue;
-        } else if partial / total < max_error {
-            break;
-        } else if total == 0.0 {
+        if next / total < max_error {
             break;
         }
+
+        n += 1;
     }
 
     (n_min, n_peak, n, total)
@@ -481,12 +480,14 @@ mod tests {
             (0.1, 1.0), (1.0, 0.1), (10.0, 0.01), (1.0, 1.0), (10.0, 0.1),
             (10.0, 1.0), (0.1, 0.1), (1.0, 0.01), (0.2, 0.1), (0.5, 0.1),
             (2.0, 0.1), (5.0, 0.1), (0.2, 1.0), (0.5, 1.0), (2.0, 1.0),
-            (5.0, 1.0), (0.5, 0.01), (2.0, 0.01), (5.0, 0.01)
+            (5.0, 1.0), (0.5, 0.01), (2.0, 0.01), (5.0, 0.01), (0.3, 0.01),
+            (0.3, 0.1), (0.3, 1.0), (0.05, 0.1), (0.05, 1.0), (0.25, 0.01),
         ];
 
         for (a, eta) in pts.iter() {
             let (n_min, n_peak, n_max, total) = find_sum_limits(*a, *eta, max_error);
-            println!("{:.6e} {:.6e} {} {} {} {:.6e}", a, eta, n_min, n_peak, n_max, total);
+            let (_, expected) = sum_limits(*a, *eta);
+            println!("{:.6e} {:.6e} {} {} {} {:.6e} {}", a, eta, n_min, n_peak, n_max, total, expected);
         }
     }
 
