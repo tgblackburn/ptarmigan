@@ -259,7 +259,7 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
         };
         let target = target * rng.gen::<f64>();
         let mut cumsum: f64 = 0.0;
-        let mut index: i32 = 1;
+        let mut index: i32 = -1; // invalid harmonic order
         for k in n_min..n_max {
             cumsum += partial_rate(k, a, eta);
             if cumsum > target {
@@ -268,7 +268,8 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
             }
         };
         // interpolation errors mean that even after the sum, cumsum could be < target
-        if index == 1 {
+        if index == -1 {
+            eprintln!("pair_creation::generate failed to sample a harmonic order (a = {:.3e}, eta = {:.3e}, {} <= n < {}), falling back to {}.", a, eta, n_min, n_max, n_max - 1);
             index = n_max - 1;
         }
         assert!(index >= n_min && index < n_max);
@@ -312,7 +313,7 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
 
     // Unit vectors pointed parallel to gamma-ray momentum in ZMF
     // and perpendicular to it
-    let along = -ThreeVector::from(ell.boost_by(u_zmf)).normalize();
+    let along = -ThreeVector::from((j*k).boost_by(u_zmf)).normalize();
     let perp = along.orthogonal().rotate_around(along, cphi_zmf);
 
     // Construct positron momentum and transform back to lab frame
@@ -448,9 +449,10 @@ mod tests {
     #[test]
     #[ignore]
     fn pair_spectrum() {
-        let a = 1.0;
+        let a = 0.2;
+        let eta = 2.2;
         let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
-        let ell = (10_000.0 / 0.511) * FourVector::new(1.0, 0.0, 0.0, -1.0);
+        let ell = (0.511 * eta / (2.0 * 1.55e-6)) * FourVector::new(1.0, 0.0, 0.0, -1.0);
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         let (n_min, n_max) = sum_limits(a, k * ell);
@@ -459,9 +461,9 @@ mod tests {
         }
 
         let rt = std::time::Instant::now();
-        let pts: Vec<(i32, f64, f64)> = (0..100_000)
+        let pts: Vec<(i32, f64, f64)> = (0..1_000_000)
             .map(|_| generate(ell, k, a, &mut rng))
-            .map(|(n, q)| (n, (k * q) / (k * ell), q[1].hypot(q[2]).sqrt()))
+            .map(|(n, q)| (n, (k * q) / (k * ell), q[1].hypot(q[2])))
             .collect();
         let rt = rt.elapsed();
 
