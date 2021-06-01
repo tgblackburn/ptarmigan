@@ -1,10 +1,12 @@
 use std::f64::consts;
 use rand::prelude::*;
+use rand_distr::StandardNormal;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
 use crate::geometry::FourVector;
 use crate::nonlinear_compton;
+use crate::pair_creation;
 
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
@@ -14,6 +16,7 @@ pub struct PlaneWave {
     wavevector: FourVector,
     pol: Polarization,
     chirp_b: f64,
+    bandwidth: f64,
 }
 
 impl PlaneWave {
@@ -26,7 +29,16 @@ impl PlaneWave {
             wavevector,
             pol,
             chirp_b,
+            bandwidth: 0.0,
         }
+    }
+
+    pub fn with_finite_bandwidth(self) -> Self {
+        let mut cpy = self;
+        // n_fwhm = 2 n acos[1/2^(1/4)] / pi
+        let n_fwhm = 0.36405666377387671305 * cpy.n_cycles;
+        cpy.bandwidth = (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm);
+        cpy
     }
     
     #[allow(unused)]
@@ -111,7 +123,7 @@ impl Field for PlaneWave {
         (r_new, u_new)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
             1.0 + self.chirp_b * self.a_sqd(r)
@@ -122,13 +134,36 @@ impl Field for PlaneWave {
         if chirp < 0.0 && u * u > 1.0 { // frequency must be positive if local a > 0
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
+        let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
+        assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp * width;
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
-            Some(k)
+            let (n, k) = nonlinear_compton::generate(kappa, u, rng, None);
+            Some((k, u + (n as f64) * kappa - k))
         } else {
             None
+        }
+    }
+
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+        let a = self.a_sqd(r).sqrt();
+        let phase: f64 = self.wavevector * r;
+        let chirp = if cfg!(feature = "compensating-chirp") {
+            1.0 + self.chirp_b * a * a
+        } else {
+            1.0 + 2.0 * self.chirp_b * phase
+        };
+        if chirp < 0.0 && a > 0.0 { // frequency must be positive if local a > 0
+            assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
+        }
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
+        let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0);
+        if rng.gen::<f64>() < prob * rate_increase {
+            let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
+            (prob, Some((ell + (n as f64) * kappa - q_p, q_p)))
+        } else {
+            (prob, None)
         }
     }
 }

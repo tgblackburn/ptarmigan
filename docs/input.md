@@ -5,9 +5,13 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 ## control
 
 * `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
+* `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
+* `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 * `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG
+* `bandwidth_correction` (optional, default = `false`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
+* `increase_pair_rate_by` (optional, default = `1.0`): if specified, increases the pair creation rate, while decreasing the weight of any created electrons and positrons, by the same factor. This helps resolve the positron spectrum when the total probability is much smaller than 1/N, where N is the number of primary particles. A setting of `auto` will be replaced by a suitable default value, as determined from the laser amplitude and particle energy.
 
 ## laser
 
@@ -22,10 +26,13 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 ## beam
 
-* `ne`: number of primary electrons.
+* `n`: number of primary particles. `ne` is also accepted.
+* `species` (optional, default = `electron`): primary particle type, must be one of `electron`, `photon` or `positron`.
 * `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
+* `bremsstrahlung_source` (optional, if primary particles are photons, default = `false`): switches energy spectrum from Gaussian to mimic a bremsstrahlung source.
+* `gamma_min` (required if `bremsstrahlung_source` is `true`): lower bound for the bremsstrahlung energy spectrum.
 * `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
@@ -35,12 +42,14 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 
 All output is written to the directory where the input file is found.
 
-* `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output.
+* `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output. Uses the name of the input file if `auto` is specified.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
-* `electron`: list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
-* `photon`: as above.
+* `electron` (optional): list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
+* `photon` (optional): as above.
+* `positron` (optional): as above.
 * `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `plain_text` and `hdf5`. A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
 * `coordinate_system` (optional, default = `laser`): by default, particle positions and momenta are output in the simulation coordinate system, where the laser travels towards positive z. If set to `beam`, these are transformed such that the beam propagation defines the positive z direction.
+* `discard_background_e` (optional, default = `false`): whether to discard primary electrons that have not radiated, before generating output.
 
 The possible distributions are:
 

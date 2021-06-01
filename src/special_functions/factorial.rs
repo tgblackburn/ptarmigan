@@ -9,7 +9,7 @@ pub trait Factorial {
 
 impl Factorial for i32 {
     fn factorial(&self) -> f64 {
-        get_fcache()[*self as usize]
+        get_fcache().get(*self as usize).copied().unwrap_or(std::f64::INFINITY)
     }
 }
 
@@ -38,5 +38,6 @@ mod tests {
     fn factorial() {
         assert!(4i32.factorial() == 24.0);
         assert!(18i32.factorial() == 6402373705728000.0);
+        assert!(171_i32.factorial().is_infinite());
     }
 }
