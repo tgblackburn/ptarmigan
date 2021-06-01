@@ -16,7 +16,7 @@ rand_distr = "0.2"
 meval = "0.2.0"
 yaml-rust = "0.4.5"
 num = "0.2"
-fitsio = {version = "0.17", optional = true, features = ["fitsio-src"]}
+fitsio = {version = "0.17", optional = true}
 memoffset = {version = "0.5", optional = true}
 hdf5 = {version = "0.7.0", optional = true}
 unzip-n = {version = "0.1.2", optional = true}
