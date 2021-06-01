@@ -264,9 +264,9 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
         let (E, B) = self.fields(r);
-        FastFocusedLaser::emit_photon(u, E, B, dt, rng)
+        FastFocusedLaser::emit_photon(u, E, B, dt, rng).map(|k| (k, u - k))
     }
 
     #[allow(non_snake_case)]

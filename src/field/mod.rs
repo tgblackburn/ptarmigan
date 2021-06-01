@@ -44,8 +44,9 @@ pub trait Field {
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
-    /// returns the momentum of that photon
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector>;
+    /// returns the momentum of that photon, as well as the new
+    /// momentum of the electron
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`), returning the

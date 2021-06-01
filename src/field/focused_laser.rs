@@ -182,14 +182,14 @@ impl Field for FocusedLaser {
         (r_new, u_new)
     }
 
-    fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+    fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * width;
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (_n, k) = nonlinear_compton::generate(kappa, u, rng, None);
-            Some(k)
+            let (n, k) = nonlinear_compton::generate(kappa, u, rng, None);
+            Some((k, u + (n as f64) * kappa - k))
         } else {
             None
         }

@@ -107,7 +107,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                         dt
                     );
 
-                    if let Some(k) = field.radiate(r, u, dt, rng) {
+                    if let Some((k, u_prime)) = field.radiate(r, u, dt, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -118,7 +118,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                         primaries.push(photon);
 
                         if rr {
-                            u = u - k;
+                            u = u_prime;
                         }
 
                         pt.update_interaction_count(1.0);
