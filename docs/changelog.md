@@ -16,6 +16,10 @@ Fixed:
 
 * Build failure caused by missing git info.
 
+Removed:
+
+* `no-radiation-reaction` feature. Recoil on photon emission can now be disabled via the input file.
+
 ## v0.6.2
 
 Fixed:

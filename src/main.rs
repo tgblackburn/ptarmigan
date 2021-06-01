@@ -89,7 +89,7 @@ impl WriteableString for hdf5::Group {
 }
 
 #[allow(unused)]
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -117,7 +117,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
-                        #[cfg(not(feature = "no-radiation-reaction"))] {
+                        if rr {
                             u = u - k;
                         }
 
@@ -226,6 +226,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
     let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
     let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
+    let rr = input.read("control", "radiation_reaction").unwrap_or(true);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -431,9 +432,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
         }
-        #[cfg(feature = "no-radiation-reaction")] {
-            println!("\t* with radiation reaction disabled");
-        }
         #[cfg(feature = "no-pair-creation")] {
             println!("\t* with pair creation disabled");
         }
@@ -501,7 +499,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -522,7 +520,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -544,7 +542,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -565,7 +563,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -688,6 +686,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Parsed input configuration
                 conf.create_group("control")?
                     .write("dt_multiplier", dt_multiplier)?
+                    .write("radiation_reaction", rr)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
                     .write("increase_pair_rate_by", pair_rate_increase)?
