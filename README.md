@@ -22,6 +22,8 @@ To build with one or all of these, run:
 cargo build --release --features with-mpi,fits-output,hdf5-output [-j NUM_THREADS]
 ```
 
+The ptarmigan changelog can be found [here](docs/changelog.md).
+
 ## Specify problem
 
 ptarmigan takes as its single argument the path to a YAML file describing the input configuration. Output is automatically written to the same directory as this file. The inputs for some test problems can be found in [examples](examples). Starting from scratch, the input needs to contain the following sections:
