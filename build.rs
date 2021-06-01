@@ -16,7 +16,6 @@ fn main() {
             "CARGO_FEATURE_COMPENSATING_CHIRP" => features.push("compensating-chirp"),
             "CARGO_FEATURE_COS2_ENVELOPE_IN_3D" => features.push("cos2-envelope-in-3d"),
             "CARGO_FEATURE_LEADING_ORDER_ONLY" => features.push("leading-order-only"),
-            "CARGO_FEATURE_NO_PAIR_CREATION" => features.push("no-pair-creation"),
             _ => {}
         }
     }

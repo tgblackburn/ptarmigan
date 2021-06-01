@@ -89,7 +89,7 @@ impl WriteableString for hdf5::Group {
 }
 
 #[allow(unused)]
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -133,13 +133,9 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                 }
             },
 
-            #[cfg(feature = "no-pair-creation")]
-            Species::Photon => {},
-
-            #[cfg(not(feature = "no-pair-creation"))]
             Species::Photon => {
                 let mut has_decayed = false;
-                while field.contains(pt.position()) && !has_decayed {
+                while field.contains(pt.position()) && !has_decayed && tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
@@ -227,6 +223,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
     let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
     let rr = input.read("control", "radiation_reaction").unwrap_or(true);
+    let tracking_photons = input.read("control", "pair_creation").unwrap_or(true);
 
     let a0: f64 = input.read("laser", "a0")?;
     let wavelength: f64 = input
@@ -432,9 +429,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
         }
-        #[cfg(feature = "no-pair-creation")] {
-            println!("\t* with pair creation disabled");
-        }
         #[cfg(feature = "cos2-envelope-in-3d")] {
             if focusing {
                 println!("\t* with cos^2 temporal envelope");
@@ -499,7 +493,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -520,7 +514,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
+                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
                     .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
                 if id == 0 {
                     println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -542,7 +536,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -563,7 +557,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -687,6 +681,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 conf.create_group("control")?
                     .write("dt_multiplier", dt_multiplier)?
                     .write("radiation_reaction", rr)?
+                    .write("pair_creation", tracking_photons)?
                     .write("lcfa", using_lcfa)?
                     .write("rng_seed", rng_seed)?
                     .write("increase_pair_rate_by", pair_rate_increase)?
