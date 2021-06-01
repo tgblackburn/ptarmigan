@@ -40,6 +40,16 @@ impl FromStr for Species {
     }
 }
 
+impl fmt::Display for Species {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Species::Electron => write!(f, "electron"),
+            Species::Positron => write!(f, "positron"),
+            Species::Photon => write!(f, "photon"),
+        }
+    }
+}
+
 /// A elementary particle is defined by its position
 /// and momentum
 #[derive(Copy,Clone)]

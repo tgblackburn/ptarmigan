@@ -637,8 +637,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "#{:-^1$}", "", 170)?;
                 writeln!(file, "# Particle properties when tracking stops")?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
-                writeln!(file, "# First interacting species: electron\t\tSecond interacting species: laser")?;
-                writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length)?;
+                writeln!(file, "# First interacting species: {}\t\tSecond interacting species: laser", species.to_string())?;
+                writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns, count = {}", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length, (npart as f64) * weight)?;
                 writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
                 writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
                 writeln!(file, "#{:-^1$}", "", 170)?;
@@ -707,6 +707,13 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 conf.create_group("beam")?
                     .write("n", npart)?
+                    .write("n_real", (npart as f64) * weight)?
+                    .write("charge", match species {
+                            Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
+                            Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
+                            Species::Photon => 0.0,
+                    })?
+                    .write_str("species", species.to_string().as_ref())?
                     .write("gamma", gamma)?
                     .write("sigma", sigma)?
                     .write("bremsstrahlung_source", use_brem_spec)?
