@@ -139,21 +139,21 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
-                    let (prob, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
                     if let Some((q_e, q_p)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id)
                             .with_normalized_momentum(q_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id + 1)
                             .with_normalized_momentum(q_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - 1.0 / rate_increase));
+                        pt.with_weight(pt.weight() * (1.0 - frac));
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
