@@ -434,6 +434,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!("\t* with cos^2 temporal envelope");
             }
         }
+        if pair_rate_increase > 1.0 {
+            println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
+        }
     }
 
     let initial_z = if focusing {
