@@ -1,5 +1,13 @@
 # Changelog
 
+In progress
+
+Fixed:
+
+* Improved ponderomotive-force particle push.
+* Pair rate increase automatically modified if too large.
+* Stats output for positrons.
+
 ## v0.7.0
 
 2021-06-01
