@@ -71,6 +71,7 @@ If specified, writes aggregated statistical information about the particle final
 
 * `electron` (optional): list of specifiers
 * `photon` (optional): list of specifiers
+* `positron` (optional): list of specifiers
 
 Each specifier must be one of:
 
