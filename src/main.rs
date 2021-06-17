@@ -139,21 +139,21 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
-                    let (prob, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
                     if let Some((q_e, q_p)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id)
                             .with_normalized_momentum(q_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id + 1)
                             .with_normalized_momentum(q_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - 1.0 / rate_increase));
+                        pt.with_weight(pt.weight() * (1.0 - frac));
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
@@ -383,7 +383,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut pstats = input.read("stats", "photon")
+    let mut gstats = input.read("stats", "photon")
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
+
+    let mut pstats = input.read("stats", "positron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
@@ -433,6 +440,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             if focusing {
                 println!("\t* with cos^2 temporal envelope");
             }
+        }
+        if pair_rate_increase > 1.0 {
+            println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
         }
     }
 
@@ -598,12 +608,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         stat.evaluate(&world, &electrons, "electron");
     }
 
-    for stat in pstats.iter_mut() {
+    for stat in gstats.iter_mut() {
         stat.evaluate(&world, &photons, "photon");
     }
 
+    for stat in pstats.iter_mut() {
+        stat.evaluate(&world, &photons, "positron");
+    }
+
     if id == 0 {
-        if !estats.is_empty() || !pstats.is_empty() {
+        if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() {
             use std::fs::File;
             use std::io::Write;
             let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
@@ -612,6 +626,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "{}", stat)?;
             }
             for stat in &pstats {
+                writeln!(file, "{}", stat)?;
+            }
+            for stat in &gstats {
                 writeln!(file, "{}", stat)?;
             }
         }
