@@ -97,7 +97,7 @@ impl Field for FastPlaneWave {
     }
 
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
     }

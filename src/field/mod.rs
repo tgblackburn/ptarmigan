@@ -39,8 +39,9 @@ pub trait Field {
     /// Advances the position `r` and normalized momentum `u`
     /// of a particle with charge to mass ratio `rqm`
     /// by a timestep `dt`, returning a tuple of the new
-    /// position and momentum
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector);
+    /// position and momentum, as well as the change in
+    /// lab time (which may differ from `dt`)
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64);
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
@@ -79,7 +80,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let mut pond = (r, u);
+        let mut pond = (r, u, dt);
         for _i in 0..(20*2*2) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
         }
@@ -88,7 +89,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let mut lorentz = (r, u);
+        let mut lorentz = (r, u, dt);
         for _i in 0..(20*2*100) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
         }
@@ -116,7 +117,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let mut pond = (r, u);
+        let mut pond = (r, u, dt);
         for _i in 0..(20*2*2) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
         }
@@ -125,7 +126,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let mut lorentz = (r, u);
+        let mut lorentz = (r, u, dt);
         for _i in 0..(20*2*100) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
         }

@@ -139,7 +139,7 @@ impl FastFocusedLaser {
     /// over a time interval `dt`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         // velocity in SI units
         let u = ThreeVector::from(ui);
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
@@ -173,7 +173,7 @@ impl FastFocusedLaser {
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
         let r_new = r + SPEED_OF_LIGHT * u_new * dt / gamma;
 
-        (r_new, u_new)
+        (r_new, u_new, dt)
     }
 
     /// Pseudorandomly emit a photon from an electron with normalized
@@ -263,7 +263,7 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
     }

@@ -100,14 +100,14 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) {
-                    let (r, mut u) = field.push(
+                    let (r, mut u, dt_actual) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
                         dt
                     );
 
-                    if let Some((k, u_prime)) = field.radiate(r, u, dt, rng) {
+                    if let Some((k, u_prime)) = field.radiate(r, u, dt_actual, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -613,7 +613,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     for stat in pstats.iter_mut() {
-        stat.evaluate(&world, &photons, "positron");
+        stat.evaluate(&world, &positrons, "positron");
     }
 
     if id == 0 {

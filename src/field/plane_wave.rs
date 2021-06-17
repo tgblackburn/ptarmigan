@@ -101,7 +101,7 @@ impl Field for PlaneWave {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -113,6 +113,7 @@ impl Field for PlaneWave {
 
         // r_{n+1/2} = r_n + c u_n * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = 0.5 * u[0] * dtau;
 
         // u_{n+1} = u_n + f(r_{n+1/2}) * dtau
         let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
@@ -120,13 +121,14 @@ impl Field for PlaneWave {
 
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = dt_actual + 0.5 * u[0] * dtau;
 
         // enforce correct mass
         let u = u.with_sqr(1.0 + self.a_sqd(r));
 
         //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
         //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
-        (r, u)
+        (r, u, dt_actual)
     }
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
