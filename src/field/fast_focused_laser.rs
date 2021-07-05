@@ -228,10 +228,13 @@ impl FastFocusedLaser {
             rate_increase
         };
         if rng.gen::<f64>() < prob * rate_increase {
-            let gamma_p = lcfa::pair_creation::sample(chi, u[0], rng);
-            let gamma_e = u[0] - gamma_p;
-            let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt() * beta;
-            let u_e = gamma_e * (1.0 - 1.0 / (gamma_e * gamma_e)).sqrt() * beta;
+            let (gamma_p, cos_theta, _, _) = lcfa::pair_creation::sample(chi, u[0], rng);
+            let perp = beta.orthogonal().rotate_around(beta, 2.0 * consts::PI * rng.gen::<f64>());
+            let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+            let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt();
+            let u_p = u_p * (cos_theta * beta + sin_theta * perp);
+            // conserving three-momentum
+            let u_e = ThreeVector::from(u) - u_p;
             let u_p = FourVector::new(0.0, u_p[0], u_p[1], u_p[2]).unitize();
             let u_e = FourVector::new(0.0, u_e[0], u_e[1], u_e[2]).unitize();
             (prob, 1.0 / rate_increase, Some((u_e, u_p)))

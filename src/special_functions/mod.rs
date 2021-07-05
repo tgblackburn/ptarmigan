@@ -7,6 +7,7 @@ mod airy;
 
 pub use bessel::*;
 pub use factorial::*;
+pub use airy::*;
 
 const SERIES_MAX_LENGTH: usize = 20;
 
