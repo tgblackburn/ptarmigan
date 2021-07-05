@@ -170,6 +170,7 @@ impl BeamBuilder {
                     .with_optical_depth(rng.sample(Exp1))
                     .with_weight(self.weight)
                     .with_id(i as u64)
+                    .with_parent_id(i as u64)
             })
         .collect()
     }
