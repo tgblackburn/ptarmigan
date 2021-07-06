@@ -586,10 +586,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     };
 
+    // Particle/parent ids are only unique within a single parallel process
+    let mut id_offsets = vec![0u64; world.size() as usize];
+    #[cfg(feature = "with-mpi")]
+    world.all_gather_into(&current_id, &mut id_offsets[..]);
+    id_offsets.iter_mut().fold(0, |mut total, n| {total += *n; *n = total - *n; total});
+    // task n adds id_offsets[n] to each particle/parent id
+    for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+        pt.with_id(pt.id() + id_offsets[id as usize]);
+        pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
+    }
+
     if !laser_defines_z {
-        electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
-        photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
-        positrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+            *pt = pt.to_beam_coordinate_basis(angle);
+        }
     }
 
     for dstr in &eospec {
@@ -662,15 +673,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", pt)?;
                 }
 
-                let mut current_id = particles.len() as u64;
-
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     for pt in &particles {
-                        writeln!(file, "{}", pt.clone().with_id(pt.id() + current_id))?;
+                        writeln!(file, "{}", pt)?;
                     }
-                    current_id += particles.len() as u64;
                 }
             }
 
