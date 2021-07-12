@@ -15,9 +15,9 @@ use rand::prelude::*;
 use rand_xoshiro::*;
 
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 4);
+unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 5);
+unzip_n::unzip_n!(pub 7);
 
 mod constants;
 mod field;
@@ -100,20 +100,21 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) {
-                    let (r, mut u) = field.push(
+                    let (r, mut u, dt_actual) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
                         dt
                     );
 
-                    if let Some((k, u_prime)) = field.radiate(r, u, dt, rng) {
+                    if let Some((k, u_prime)) = field.radiate(r, u, dt_actual, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
                             .with_payload((u * u - 1.0).max(0.0).sqrt())
                             .with_weight(pt.weight())
                             .with_id(id)
+                            .with_parent_id(pt.id())
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
@@ -139,21 +140,23 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
-                    let (prob, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
                     if let Some((q_e, q_p)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id)
+                            .with_parent_id(pt.id())
                             .with_normalized_momentum(q_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(pt.weight() / rate_increase)
+                            .with_weight(frac * pt.weight())
                             .with_id(id + 1)
+                            .with_parent_id(pt.id())
                             .with_normalized_momentum(q_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - 1.0 / rate_increase));
+                        pt.with_weight(pt.weight() * (1.0 - frac));
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
@@ -383,7 +386,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut pstats = input.read("stats", "photon")
+    let mut gstats = input.read("stats", "photon")
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
+
+    let mut pstats = input.read("stats", "positron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
@@ -433,6 +443,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             if focusing {
                 println!("\t* with cos^2 temporal envelope");
             }
+        }
+        if pair_rate_increase > 1.0 {
+            println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
         }
     }
 
@@ -573,10 +586,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     };
 
+    // Particle/parent ids are only unique within a single parallel process
+    let mut id_offsets = vec![0u64; world.size() as usize];
+    #[cfg(feature = "with-mpi")]
+    world.all_gather_into(&current_id, &mut id_offsets[..]);
+    id_offsets.iter_mut().fold(0, |mut total, n| {total += *n; *n = total - *n; total});
+    // task n adds id_offsets[n] to each particle/parent id
+    for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+        pt.with_id(pt.id() + id_offsets[id as usize]);
+        pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
+    }
+
     if !laser_defines_z {
-        electrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
-        photons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
-        positrons.iter_mut().for_each(|pt| *pt = pt.to_beam_coordinate_basis(angle));
+        for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+            *pt = pt.to_beam_coordinate_basis(angle);
+        }
     }
 
     for dstr in &eospec {
@@ -598,12 +622,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         stat.evaluate(&world, &electrons, "electron");
     }
 
-    for stat in pstats.iter_mut() {
+    for stat in gstats.iter_mut() {
         stat.evaluate(&world, &photons, "photon");
     }
 
+    for stat in pstats.iter_mut() {
+        stat.evaluate(&world, &positrons, "positron");
+    }
+
     if id == 0 {
-        if !estats.is_empty() || !pstats.is_empty() {
+        if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() {
             use std::fs::File;
             use std::io::Write;
             let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
@@ -612,6 +640,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 writeln!(file, "{}", stat)?;
             }
             for stat in &pstats {
+                writeln!(file, "{}", stat)?;
+            }
+            for stat in &gstats {
                 writeln!(file, "{}", stat)?;
             }
         }
@@ -642,15 +673,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", pt)?;
                 }
 
-                let mut current_id = particles.len() as u64;
-
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     for pt in &particles {
-                        writeln!(file, "{}", pt.clone().with_id(pt.id() + current_id))?;
+                        writeln!(file, "{}", pt)?;
                     }
-                    current_id += particles.len() as u64;
                 }
             }
 
@@ -734,9 +762,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w, a, n) = photons
+                let (x, p, w, a, n, id, pid) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(photons);
 
@@ -744,6 +772,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_all("weight", &w)?
                     .write_all("a0_at_creation", &a)?
                     .write_all("n_pos", &n)?
+                    .write_all("id", &id)?
+                    .write_all("parent_id", &pid)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
 
@@ -756,15 +786,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     electrons.append(&mut recv);
                 }
-                let (x, p, w, n) = electrons
+                let (x, p, w, n, id, pid) = electrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(electrons);
 
                 fs.create_group("electron")?
                     .write_all("weight", &w)?
                     .write_all("n_gamma", &n)?
+                    .write_all("id", &id)?
+                    .write_all("parent_id", &pid)?
                     .write_all("position", &x)?
                     .write_all("momentum", &p)?;
 
@@ -774,9 +806,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     positrons.append(&mut recv);
                 }
-                let (x, p, w, n) = positrons
+                let (x, p, w, n, id, pid) = positrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count()))
+                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(positrons);
 
@@ -784,6 +816,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write_all("weight", &w)?
                     .write_all("n_gamma", &n)?
                     .write_all("position", &x)?
+                    .write_all("id", &id)?
+                    .write_all("parent_id", &pid)?
                     .write_all("momentum", &p)?;
             } else {
                 #[cfg(feature = "with-mpi")] {

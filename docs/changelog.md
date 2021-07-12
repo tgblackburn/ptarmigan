@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0
+
+2021-07-12
+
+Added:
+
+* Output of particle and parent-particle IDs.
+* Angularly resolved LCFA pair creation rate.
+
+Fixed:
+
+* Improved ponderomotive-force particle push.
+* Pair rate increase automatically modified if too large.
+* Stats output for positrons.
+
 ## v0.7.0
 
 2021-06-01

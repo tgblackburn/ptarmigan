@@ -60,22 +60,26 @@ impl PlaneWave {
         }
     }
 
+    /// Returns the four-gradient (index raised) of the cycle-averaged
+    /// potential, i.e. ∇^μ <a^2> = (∂/∂t, -∂/∂x, -∂/∂y, -∂/∂z) <a^2>,
+    /// as a function of four-position
     pub fn grad_a_sqd(&self, r: FourVector) -> FourVector {
         let norm = match self.pol {
             Polarization::Linear => 0.5,
             Polarization::Circular => 1.0,
         };
         let phase = self.wavevector * r;
+        // ∂/∂z <a^2>
         let grad = if phase.abs() < consts::PI * self.n_cycles {
             norm * self.wavevector[0] * self.a0.powi(2) * (phase/self.n_cycles).sin() * (phase/(2.0 * self.n_cycles)).cos().powi(2) / self.n_cycles
         } else {
             0.0
         };
         FourVector::new(
+            -grad,
             0.0,
             0.0,
-            0.0,
-            grad,
+            -grad,
         )
     }
 }
@@ -94,33 +98,37 @@ impl Field for PlaneWave {
         phase < consts::PI * self.n_cycles
     }
 
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    /// Advances particle position and momentum using a leapfrog method
+    /// in proper time. As a consequence, the change in the time may not
+    /// be identical to the requested `dt`.
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         // equations of motion are:
-        //   du/dt = -c grad<a^2>(r) / (2 gamma) = f(r, u)
-        //   dr/dt = u c / gamma = g(u)
-        // where gamma^2 = 1 + <a^2> + |u|^2, i.e. u * u = 1 + <a^2>
-
+        //   du/dtau = c grad<a^2>(r) / 2 = f(r)
+        //   dr/dtau = c u
+        //
+        // proper time interval approx equivalent to dt
+        // let ct = r[0];
+        let dtau = dt / u[0];
         let scale = (rqm / (ELECTRON_CHARGE / ELECTRON_MASS)).powi(2);
 
-        let f = |r: FourVector, u: FourVector| -> FourVector {
-            -scale * SPEED_OF_LIGHT * self.grad_a_sqd(r) / (2.0 * u[0])
-        };
+        // r_{n+1/2} = r_n + c u_n * dtau / 2
+        let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = 0.5 * u[0] * dtau;
 
-        let g = |u: FourVector| -> FourVector {
-            SPEED_OF_LIGHT * u / u[0]
-        };
+        // u_{n+1} = u_n + f(r_{n+1/2}) * dtau
+        let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
+        let u = u + f * dtau;
 
-        // Heun's method, construct intermediate values
-        let r_inter: FourVector = r + dt * g(u);
-        let u_inter: FourVector = u + dt * f(r, u);
-        let u_inter: FourVector = u_inter.with_sqr(1.0 + self.a_sqd(r_inter));
+        // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
+        let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = dt_actual + 0.5 * u[0] * dtau;
 
-        // And corrected final values
-        let r_new = r + 0.5 * dt * (g(u) + g(u_inter));
-        let u_new = u + 0.5 * dt * (f(r, u) + f(r_inter, u_inter));
-        let u_new = u_new.with_sqr(1.0 + self.a_sqd(r_new));
+        // enforce correct mass
+        let u = u.with_sqr(1.0 + self.a_sqd(r));
 
-        (r_new, u_new)
+        //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
+        //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
+        (r, u, dt_actual)
     }
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
@@ -146,7 +154,7 @@ impl Field for PlaneWave {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>) {
         let a = self.a_sqd(r).sqrt();
         let phase: f64 = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -159,11 +167,16 @@ impl Field for PlaneWave {
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
         let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0);
+        let rate_increase = if prob * rate_increase > 0.1 {
+            0.1 / prob // limit the rate increase
+        } else {
+            rate_increase
+        };
         if rng.gen::<f64>() < prob * rate_increase {
             let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
-            (prob, Some((ell + (n as f64) * kappa - q_p, q_p)))
+            (prob, 1.0 / rate_increase, Some((ell + (n as f64) * kappa - q_p, q_p)))
         } else {
-            (prob, None)
+            (prob, 0.0, None)
         }
     }
 }
@@ -176,20 +189,35 @@ mod tests {
     fn plane_wave_cp() {
         let n_cycles = 8.0;
         let wavelength = 0.8e-6;
-        let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
+        let t_start = -0.25 * n_cycles * wavelength / (SPEED_OF_LIGHT);
         let dt = 0.25 * 0.8e-6 / (SPEED_OF_LIGHT);
         let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0);
 
-        let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
+        let mut u = FourVector::new(0.0, 0.0, 0.0, -200.0).unitize();
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
+        let up = FourVector::new(1.0, 0.0, 0.0, 1.0) * u;
         
-        for _k in 0..2 {
-            for _i in 0..16 {
-                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
-                r = new.0;
-                u = new.1;
-            }
-            println!("phase = 2 pi {:.3}, u_perp = ({:.3e}, {:.3e}), uz = {:.6e}, u^2 = 1 + {:.6e}", laser.k() * r / (2.0 * consts::PI), u[1], u[2], u[3], u * u - 1.0);
+        while laser.contains(r) {
+        //for _k in 0..17 {
+            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            r = new.0;
+            u = new.1;
+            let phase = laser.k() * r;
+            let u_expected = FourVector::new(
+                (1.0 + laser.a_sqd(r) + up * up) / (2.0 * up),
+                0.0,
+                0.0,
+                (1.0 + laser.a_sqd(r) - up * up) / (2.0 * up)
+            );
+            let error = FourVector::new(
+                (u_expected[0] - u[0]) / u_expected[0],
+                (u_expected[1] - u[1]) / u_expected[1],
+                (u_expected[2] - u[2]) / u_expected[2],
+                (u_expected[3] - u[3]) / u_expected[3],
+            );
+            assert!(error[0].abs() < 1.0e-3);
+            assert!(error[3].abs() < 1.0e-3);
+            println!("phase = 2 pi {:+.3}, error in u = [{:+.3e}, ..., ..., {:+.3e}]", phase / (2.0 * consts::PI), error[0], error[3]);
         }
 
         assert!(u[1] < 1.0e-3);

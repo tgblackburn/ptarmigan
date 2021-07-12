@@ -51,10 +51,28 @@ fn spectrum(s: f64, chi: f64) -> f64 {
         .sum()
 }
 
+/// Proportional to the angularly resolved spectrum d^2 W/(ds dz),
+/// where z^(2/3) = 2ɣ^2(1 - β cosθ).
+/// Range is 1 < z < infty, but dominated by 1 < z < 1 + 2 chi
+/// Tested and working.
+fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
+    use std::f64::consts;
+    use crate::special_functions::*;
+    let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
+    let prefactor = (s * s + (1.0 - s) * (1.0 - s)) / (s * (1.0 - s));
+    // Ai(x) = 1/pi sqrt(x/3) K_{1/3}[2 x^(3/2)/3]
+    let x = (1.5 * xi * z).powf(2.0/3.0);
+    let bessel_k = consts::PI * x.ai().unwrap_or(0.0) / (x / 3.0).sqrt();
+    //println!("K_(1/3)(xi z = {:.3e}) = {:.3e}", xi * z, bessel_k);
+    (1.0 + prefactor * z.powf(2.0 / 3.0)) * bessel_k
+}
+
 /// Samples the positron spectrum of an photon with
 /// quantum parameter `chi` and energy (per electron
-/// mass) `gamma`, returning the positron Lorentz factor.
-pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> f64 {
+/// mass) `gamma`, returning the positron Lorentz factor,
+/// the cosine of the scattering angle, as well as the
+/// equivalent s and z for debugging purposes
+pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> (f64, f64, f64, f64) {
     let max = if chi < 2.5 {
         spectrum(0.5, chi)
     } else {
@@ -72,11 +90,54 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> f64 {
         }
     };
 
-    s * gamma
+    // Now that s is fixed, sample from the angular spectrum
+    // d^2 W/(ds dz), which ranges from 1 < z < infty, or
+    // xi/(1+xi) < y < 1 where xi z = y/(1-y)
+    let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
+    let y_min = xi / (1.0 + xi);
+    let max = if y_min > 0.563 {
+        let y = y_min;
+        let z = y / (xi * (1.0 - y));
+        angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y))
+    } else {
+        let y = 0.563;
+        let z = y / (xi * (1.0 - y));
+        angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y))
+    };
+    let max = 1.1 * max;
+
+    // Rejection sampling for z
+    let z = if max <= 0.0 {
+        0.0
+    } else {
+        loop {
+            let y = y_min + (1.0 - y_min) * rng.gen::<f64>();
+            let z = y / (xi * (1.0 - y));
+            let u = rng.gen::<f64>();
+            let f = angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y));
+            if u <= f / max {
+                break z;
+            }
+        }
+    };
+
+    // recall z = 2 gamma^2 (1 - beta cos_theta), where
+    // beta = sqrt(1 - 1/gamma^2), so cos_theta is close
+    // to (2 gamma^2 - z^(2/3)) / (2 gamma^2 - 1)
+    // note that gamma here is the positron gamma
+    let gamma_p = s * gamma;
+    let cos_theta = (2.0 * gamma_p * gamma_p - z.powf(2.0/3.0)) / (2.0 * gamma_p * gamma_p - 1.0);
+    let cos_theta = cos_theta.max(-1.0);
+
+    (gamma_p, cos_theta, s, z)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Write;
+    use rand::prelude::*;
+    use rand_xoshiro::*;
     use super::*;
 
     #[test]
@@ -98,6 +159,22 @@ mod tests {
             let error = (result - target).abs() / target;
             //println!("chi = {:.3e}, t(chi) = {:.6e}, error = {:.3e}", chi, result, error);
             assert!(error < max_error);
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn pair_spectrum_sampling() {
+        let chi = 1.0;
+        let gamma = 1000.0;
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let path = format!("output/lcfa_pair_spectrum_{}.dat", chi);
+        let mut file = File::create(path).unwrap();
+        for _i in 0..100000 {
+            let (_, _, s, z) = sample(chi, gamma, &mut rng);
+            assert!(s > 0.0 && s < 1.0);
+            assert!(z >= 1.0);
+            writeln!(file, "{:.6e} {:.6e}", s, z).unwrap();
         }
     }
 }

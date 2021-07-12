@@ -11,7 +11,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 * `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG
 * `bandwidth_correction` (optional, default = `false`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
-* `increase_pair_rate_by` (optional, default = `1.0`): if specified, increases the pair creation rate, while decreasing the weight of any created electrons and positrons, by the same factor. This helps resolve the positron spectrum when the total probability is much smaller than 1/N, where N is the number of primary particles. A setting of `auto` will be replaced by a suitable default value, as determined from the laser amplitude and particle energy.
+* `increase_pair_rate_by` (optional, default = `1.0`): if specified, increases the pair creation rate, while decreasing the weight of any created electrons and positrons, by the same factor. This helps resolve the positron spectrum when the total probability is much smaller than 1/N, where N is the number of primary particles. A setting of `auto` will be replaced by a suitable default value, as determined from the laser amplitude and particle energy. In principle, an arbitrarily large increase may be specified, because the code automatically adjusts it if the probability per timestep becomes too large. However, this will mean that a very large number of (low-weight) electrons and positrons will be generated and tracked.
 
 ## laser
 
@@ -71,6 +71,7 @@ If specified, writes aggregated statistical information about the particle final
 
 * `electron` (optional): list of specifiers
 * `photon` (optional): list of specifiers
+* `positron` (optional): list of specifiers
 
 Each specifier must be one of:
 

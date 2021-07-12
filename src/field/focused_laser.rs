@@ -77,6 +77,9 @@ impl FocusedLaser {
         beam * envelope
     }
 
+    /// Returns the four-gradient (index raised) of the cycle-averaged
+    /// potential, i.e. ∇^μ <a^2> = (∂/∂t, -∂/∂x, -∂/∂y, -∂/∂z) <a^2>,
+    /// as a function of four-position
     pub fn grad_a_sqd(&self, r: FourVector) -> FourVector {
         // Gaussian beam
         let z_r = self.rayleigh_range();
@@ -114,8 +117,8 @@ impl FocusedLaser {
 
         let grad_envelope = [0.0, 0.0, grad_envelope];
 
-        FourVector::new(
-            0.0,
+        -FourVector::new(
+            beam * grad_envelope[2] + grad_beam[2] * envelope,
             grad_beam[0] * envelope,
             grad_beam[1] * envelope,
             beam * grad_envelope[2] + grad_beam[2] * envelope
@@ -153,33 +156,37 @@ impl Field for FocusedLaser {
         phase < 3.0 * self.omega() * self.duration
     }
 
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector) {
+    /// Advances particle position and momentum using a leapfrog method
+    /// in proper time. As a consequence, the change in the time may not
+    /// be identical to the requested `dt`.
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
         // equations of motion are:
-        //   du/dt = -c grad<a^2>(r) / (2 gamma) = f(r, u)
-        //   dr/dt = u c / gamma = g(u)
-        // where gamma^2 = 1 + <a^2> + |u|^2, i.e. u * u = 1 + <a^2>
-
+        //   du/dtau = c grad<a^2>(r) / 2 = f(r)
+        //   dr/dtau = c u
+        //
+        // proper time interval approx equivalent to dt
+        // let ct = r[0];
+        let dtau = dt / u[0];
         let scale = (rqm / (ELECTRON_CHARGE / ELECTRON_MASS)).powi(2);
 
-        let f = |r: FourVector, u: FourVector| -> FourVector {
-            -scale * SPEED_OF_LIGHT * self.grad_a_sqd(r) / (2.0 * u[0])
-        };
+        // r_{n+1/2} = r_n + c u_n * dtau / 2
+        let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = 0.5 * u[0] * dtau;
 
-        let g = |u: FourVector| -> FourVector {
-            SPEED_OF_LIGHT * u / u[0]
-        };
+        // u_{n+1} = u_n + f(r_{n+1/2}) * dtau
+        let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
+        let u = u + f * dtau;
 
-        // Heun's method, construct intermediate values
-        let r_inter: FourVector = r + dt * g(u);
-        let u_inter: FourVector = u + dt * f(r, u);
-        let u_inter: FourVector = u_inter.with_sqr(1.0 + self.a_sqd(r_inter));
+        // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
+        let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
+        let dt_actual = dt_actual + 0.5 * u[0] * dtau;
 
-        // And corrected final values
-        let r_new = r + 0.5 * dt * (g(u) + g(u_inter));
-        let u_new = u + 0.5 * dt * (f(r, u) + f(r_inter, u_inter));
-        let u_new = u_new.with_sqr(1.0 + self.a_sqd(r_new));
+        // enforce correct mass
+        let u = u.with_sqr(1.0 + self.a_sqd(r));
 
-        (r_new, u_new)
+        //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
+        //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
+        (r, u, dt_actual)
     }
 
     fn radiate<R: Rng>(&self, _r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
@@ -195,15 +202,20 @@ impl Field for FocusedLaser {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>) {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
         let prob = pair_creation::probability(ell, kappa, a, dt).unwrap_or(0.0);
+        let rate_increase = if prob * rate_increase > 0.1 {
+            0.1 / prob // limit the rate increase
+        } else {
+            rate_increase
+        };
         if rng.gen::<f64>() < prob * rate_increase {
             let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
-            (prob, Some((ell + (n as f64) * kappa - q_p, q_p)))
+            (prob, 1.0 / rate_increase, Some((ell + (n as f64) * kappa - q_p, q_p)))
         } else {
-            (prob, None)
+            (prob, 0.0, None)
         }
     }
 }
@@ -231,5 +243,33 @@ mod tests {
         assert!(u[1] < 1.0e-3);
         assert!(u[2] < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn deflection() {
+        let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = 0.25 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let a0 = 100.0;
+        let w0 = 4.0e-6;
+        let lambda = 0.8e-6;
+        let gamma = 1000.0;
+        let laser = FocusedLaser::new(a0, lambda, w0, 30.0e-15, Polarization::Circular);
+
+        for k in 1..8 {
+            let b = (k as f64) * 1.0e-6;
+            let mut u = FourVector::new(gamma, 0.0, 0.0, -(gamma * gamma - 1.0).sqrt());
+            let mut r = FourVector::new(0.0, b, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
+            while laser.contains(r) {
+                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                r = new.0;
+                u = new.1;
+            }
+            let theta = 1000.0 * u[1].atan2(-u[3]);
+            let i_phi = laser.omega() * 30.0e-15 * (consts::PI / (16.0 * consts::LN_2)).sqrt();
+            let theory = 1000.0 * 2.0 * a0 * a0 * i_phi * b * lambda * (-2.0 * b * b / (w0 * w0)).exp() / (2.0 * consts::PI * gamma * gamma * w0 * w0);
+            let error = (theta - theory).abs() / theory;
+            println!("b = {:.3e}, ux = {:.6e}, uz = {:.6e}, theta = {:.3e}, theory = {:.3e}, error = {:.3e} %", b, u[1], u[3], theta, theory, 100.0 * error);
+            assert!(error < 5.0e-3);
+        }
     }
 }
