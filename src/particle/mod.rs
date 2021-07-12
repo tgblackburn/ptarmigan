@@ -62,13 +62,14 @@ pub struct Particle {
     interaction_count: f64,
     weight: f64,
     id: u64,
+    parent_id: u64,
 }
 
 #[cfg(feature = "with-mpi")]
 unsafe impl Equivalence for Particle {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1];
+        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1, 1];
         let displacements = [
             offset_of!(Particle, species) as mpi::Address,
             offset_of!(Particle, r) as mpi::Address,
@@ -78,8 +79,9 @@ unsafe impl Equivalence for Particle {
             offset_of!(Particle, interaction_count) as mpi::Address,
             offset_of!(Particle, weight) as mpi::Address,
             offset_of!(Particle, id) as mpi::Address,
+            offset_of!(Particle, parent_id) as mpi::Address,
         ];
-        let types: [&dyn Datatype; 8] = [
+        let types: [&dyn Datatype; 9] = [
             &Species::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
@@ -88,8 +90,9 @@ unsafe impl Equivalence for Particle {
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &u64::equivalent_datatype(),
+            &u64::equivalent_datatype(),
         ];
-        UserDatatype::structured(8, &blocklengths, &displacements, &types)
+        UserDatatype::structured(9, &blocklengths, &displacements, &types)
     }
 }
 
@@ -144,6 +147,7 @@ impl Particle {
             interaction_count: 0.0,
             weight: 1.0,
             id: 0,
+            parent_id: 0,
         }
     }
 
@@ -275,6 +279,7 @@ impl Particle {
             interaction_count: self.interaction_count,
             weight: self.weight,
             id: self.id,
+            parent_id: self.parent_id,
         }
     }
 
@@ -287,6 +292,17 @@ impl Particle {
     /// ID of this particle
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Updates the particle parent ID
+    pub fn with_parent_id(&mut self, id: u64) -> Self {
+        self.parent_id = id;
+        *self
+    }
+
+    /// ID of this particle's parent
+    pub fn parent_id(&self) -> u64 {
+        self.parent_id
     }
 
     /// Photon, electron or positron
