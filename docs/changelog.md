@@ -1,6 +1,11 @@
 # Changelog
 
-In progress
+## v0.8.0
+
+Added:
+
+* Output of particle and parent-particle IDs.
+* Angularly resolved LCFA pair creation rate.
 
 Fixed:
 
