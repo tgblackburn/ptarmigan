@@ -59,7 +59,7 @@ impl Default for UnitSystem {
 
 /// Represents a dimensionalful quantity in the default
 /// system of units (MeV-m)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Unit {
     scale: f64,
     name: String,

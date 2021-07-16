@@ -623,17 +623,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &electrons, &prefix)?;
+        dstr.write(&world, &electrons, &units, &prefix)?;
     }
 
     for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &prefix)?;
+        dstr.write(&world, &photons, &units, &prefix)?;
     }
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &positrons, &prefix)?;
+        dstr.write(&world, &positrons, &units, &prefix)?;
     }
 
     for stat in estats.iter_mut() {
