@@ -20,6 +20,9 @@ mod functions;
 mod stats;
 pub use stats::*;
 
+mod units;
+pub use units::*;
+
 pub enum OutputError {
     Conversion(String, String),
     Dimension(usize),

@@ -379,6 +379,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
 
+    // Choose the system of units
+    let units = input.read::<String>("output", "units")
+        // if not specified, default to "auto"
+        .or_else(|e| match e.kind() {
+            ConfigErrorKind::MissingField => Ok("auto".to_owned()),
+            _ => Err(e),
+        })
+        .and_then(|s| match s.as_str() {
+            "auto" => Ok(Default::default()),
+            "hep" | "HEP" => Ok(UnitSystem::hep()),
+            "si" | "SI" => Ok(UnitSystem::si()),
+            _ => {
+                eprintln!("Unit system requested, \"{}\", is not one of \"auto\", \"hep\", or \"si\".", s);
+                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "output", "units"))
+            }
+        })
+        ?;
+
     let mut estats = input.read("stats", "electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
@@ -705,6 +723,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 conf.write("mpi-tasks", ntasks)?
                     .write_str("input-file", &raw_input)?;
 
+                conf.create_group("unit")?
+                    .write_str("position", units.length.name())?
+                    .write_str("momentum", units.momentum.name())?;
+
                 // Parsed input configuration
                 conf.create_group("control")?
                     .write("dt_multiplier", dt_multiplier)?
@@ -764,7 +786,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, a, n, id, pid) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(photons);
 
@@ -788,7 +810,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = electrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(electrons);
 
@@ -808,7 +830,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = positrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(positrons);
 
