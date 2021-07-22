@@ -3,69 +3,71 @@
 use crate::constants;
 use crate::particle::Particle;
 use super::ParticleOutput;
+use super::ParticleOutputType;
+use super::ParticleOutputType::*;
 
 /// Returns the ParticleOutput and its unit.
-pub fn identify(name: &str) -> Option<(ParticleOutput, &str)> {
+pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
     match name {
         "angle_x" => Some(
-            (angle_x as ParticleOutput, "rad")
+            (angle_x as ParticleOutput, Angle)
         ),
         "angle_y" => Some(
-            (angle_y as ParticleOutput, "rad")
+            (angle_y as ParticleOutput, Angle)
         ),
         "theta" | "pi_minus_angle" => Some(
-            (theta as ParticleOutput, "rad")
+            (theta as ParticleOutput, Angle)
         ),
         "angle" | "polar_angle" => Some(
-            (polar_angle as ParticleOutput, "rad")
+            (polar_angle as ParticleOutput, Angle)
         ),
         "px" => Some(
-            (px as ParticleOutput, "MeV/c")
+            (px as ParticleOutput, Momentum)
         ),
         "py" => Some(
-            (py as ParticleOutput, "MeV/c")
+            (py as ParticleOutput, Momentum)
         ),
         "pz" => Some(
-            (pz as ParticleOutput, "MeV/c")
+            (pz as ParticleOutput, Momentum)
         ),
         "p_perp" => Some(
-            (p_perp as ParticleOutput, "MeV/c")
+            (p_perp as ParticleOutput, Momentum)
         ),
         "r_perp" => Some(
-            (r_perp as ParticleOutput, "1")
+            (r_perp as ParticleOutput, Dimensionless)
         ),
         "p^-" | "p-" => Some(
-            (p_minus as ParticleOutput, "MeV/c")
+            (p_minus as ParticleOutput, Momentum)
         ),
         "p^+" | "p+" => Some(
-            (p_plus as ParticleOutput, "MeV/c")
+            (p_plus as ParticleOutput, Momentum)
         ),
         "gamma" => Some(
-            (gamma as ParticleOutput, "1")
+            (gamma as ParticleOutput, Dimensionless)
         ),
         "energy" => Some(
-            (energy as ParticleOutput, "MeV")
+            (energy as ParticleOutput, Energy)
         ),
         "unit" => Some(
-            (unit as ParticleOutput, "1")
+            (unit as ParticleOutput, Dimensionless)
         ),
         "x" => Some(
-            (x as ParticleOutput, "m")
+            (x as ParticleOutput, Length)
         ),
         "y" => Some(
-            (y as ParticleOutput, "m")
+            (y as ParticleOutput, Length)
         ),
         "z" => Some(
-            (z as ParticleOutput, "m")
+            (z as ParticleOutput, Length)
         ),
         "birth_a" => Some(
-            (payload as ParticleOutput, "1")
+            (payload as ParticleOutput, Dimensionless)
         ),
         "n_inter" | "n_gamma" | "n_pos" => Some(
-            (interaction_count as ParticleOutput, "1")
+            (interaction_count as ParticleOutput, Dimensionless)
         ),
         "weight" | "number" => Some(
-            (weighted_by_number as ParticleOutput, "1")
+            (weighted_by_number as ParticleOutput, Dimensionless)
         ),
         _ => None,
     }

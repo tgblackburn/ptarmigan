@@ -2,7 +2,6 @@
 //! and other output
 
 use std::fmt;
-use std::error::Error;
 use std::str::FromStr;
 
 #[cfg(feature = "with-mpi")]
@@ -12,6 +11,9 @@ use crate::no_mpi::*;
 
 use crate::particle::*;
 
+mod error;
+use error::*;
+
 mod hgram;
 use hgram::*;
 
@@ -20,42 +22,31 @@ mod functions;
 mod stats;
 pub use stats::*;
 
-pub enum OutputError {
-    Conversion(String, String),
-    Dimension(usize),
-    Write(String),
-}
-
-impl fmt::Display for OutputError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OutputError::Conversion(s, t) => write!(f, "'{}' does not specify a valid {}", s, t),
-            OutputError::Dimension(d) => write!(f, "requested dimension was {}, only 1 and 2 are supported", d),
-            OutputError::Write(s) => writeln!(f, "failed to write histogram to '{}'", s),
-        }
-    }
-}
-
-impl fmt::Debug for OutputError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-impl Error for OutputError {}
+mod units;
+pub use units::*;
 
 //type ParticleOutput = Box<dyn Fn(&Particle) -> f64>;
 type ParticleOutput = fn(&Particle) -> f64;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ParticleOutputType {
+    Dimensionless,
+    Angle,
+    Length,
+    Energy,
+    Momentum,
+}
 
 pub struct DistributionFunction {
     dim: usize,
     bspec: BinSpec,
     hspec: HeightSpec,
     names: Vec<String>,
-    units: Vec<String>,
+    //units: Vec<String>,
     weight: String,
     fweight: ParticleOutput,
     funcs: Vec<ParticleOutput>,
+    func_types: Vec<ParticleOutputType>,
 }
 
 impl fmt::Debug for DistributionFunction {
@@ -64,7 +55,7 @@ impl fmt::Debug for DistributionFunction {
         writeln!(f, "bspec: {}", self.bspec)?;
         writeln!(f, "hspec: {}", self.hspec)?;
         writeln!(f, "names: {:?}", self.names)?;
-        writeln!(f, "units: {:?}", self.units)?;
+        //writeln!(f, "units: {:?}", self.units)?;
         writeln!(f, "funcs = <>, len = {}", self.funcs.len())?;
         Ok(())
     }
@@ -94,7 +85,7 @@ impl FromStr for DistributionFunction {
 
         // Convert strings to closures, associated units and names.
 
-        let (funcs, units): (Vec<Option<ParticleOutput>>, Vec<Option<&str>>) = ss
+        let (funcs, func_types): (Vec<Option<ParticleOutput>>, Vec<Option<ParticleOutputType>>) = ss
             .iter()
             .map(|&name| {
                 if let Some(v) = functions::identify(name) {
@@ -128,10 +119,11 @@ impl FromStr for DistributionFunction {
                 bspec: bspec,
                 hspec: hspec,
                 names: names.into_iter().map(|u| u.unwrap().to_owned()).collect(),
-                units: units.into_iter().map(|u| u.unwrap().to_owned()).collect(),
+                //units: units.into_iter().map(|u| u.unwrap().to_owned()).collect(),
                 weight: weight.to_owned(),
                 fweight: weight_function.unwrap(),
                 funcs: funcs.into_iter().flatten().collect(),
+                func_types: func_types.into_iter().map(|u| u.unwrap()).collect(),
             })
         } else {
             Err(OutputError::Conversion(spec.to_owned(), "distribution function".to_owned()))
@@ -140,16 +132,26 @@ impl FromStr for DistributionFunction {
 }
 
 impl DistributionFunction {
-    pub fn write(&self, world: &impl Communicator, pt: &[Particle], prefix: &str) -> Result<(),OutputError> {
+    pub fn write(&self, world: &impl Communicator, pt: &[Particle], us: &UnitSystem, prefix: &str) -> Result<(),OutputError> {
+        let units: Vec<Unit> = self.func_types.iter()
+            .map(|t| match t {
+                    ParticleOutputType::Dimensionless => Unit::new(1.0, "1"),
+                    ParticleOutputType::Angle => Unit::new(1.0, "rad"),
+                    ParticleOutputType::Length => us.length.clone(),
+                    ParticleOutputType::Energy => us.energy.clone(),
+                    ParticleOutputType::Momentum => us.momentum.clone(),
+                })
+            .collect();
+
         let (hgram, suffix) = match self.dim {
             1 => {
                 let hgram = Histogram::generate_1d(
                     world,
                     pt,
-                    &self.funcs[0],
+                    &|pt| {self.funcs[0](pt).convert(&units[0])},
                     &self.fweight,
                     &self.names[0],
-                    &self.units[0],
+                    units[0].name(),
                     self.bspec,
                     self.hspec
                 );
@@ -167,11 +169,11 @@ impl DistributionFunction {
                 let hgram = Histogram::generate_2d(
                     world,
                     pt,
-                    &self.funcs[0],
-                    &self.funcs[1],
+                    &|pt| {self.funcs[0](pt).convert(&units[0])},
+                    &|pt| {self.funcs[1](pt).convert(&units[1])},
                     &self.fweight,
                     [&self.names[0], &self.names[1]],
-                    [&self.units[0], &self.units[1]],
+                    [units[0].name(), units[1].name()],
                     [self.bspec; 2],
                     self.hspec
                 );
