@@ -333,6 +333,22 @@ impl<'a,'b> TryFrom<Key<'a,'b>> for f64 {
     }
 }
 
+impl<'a,'b> TryFrom<Key<'a,'b>> for Vec<f64> {
+    type Error = ();
+    fn try_from(value: Key<'a,'b>) -> Result<Self, Self::Error> {
+        let ctx = value.config.ctx.clone();
+        let strs: Vec<String> = TryFrom::try_from(value)?;
+        let v: Result<Vec<f64>,_> = strs.iter()
+            .map(|s| {
+                s.parse::<meval::Expr>()
+                    .and_then(|expr| expr.eval_with_context(&ctx))
+                    .map_err(|_| ())
+            })
+            .collect();
+        v
+    }
+}
+
 impl<'a,'b> TryFrom<Key<'a,'b>> for i64 {
     type Error = ();
     fn try_from(key: Key<'a,'b>) -> Result<Self, Self::Error> {
@@ -488,6 +504,8 @@ mod tests {
         
         extra:
           dx: 160
+          r: [0.0, b, 1.0, 2.0 * a]
+          s: [0.0, none]
 
         constants:
           a: 2.0 * pi
@@ -516,6 +534,17 @@ mod tests {
         // Function of one variable
         let ne = config.func("control", "ne", "x").unwrap();
         assert_eq!(ne(0.6), (2.0 * consts::PI * 0.6).sin());
+
+        // array of f64
+        let r: Vec<f64> = config.read("extra", "r").unwrap();
+        assert_eq!(r.len(), 4);
+        assert_eq!(r[0], 0.0);
+        assert_eq!(r[1], 17.0);
+        assert_eq!(r[2], 1.0);
+        assert_eq!(r[3], 4.0 * consts::PI);
+
+        let s: Result<Vec<f64>,_> = config.read("extra", "s");
+        assert!(s.is_err());
     }
 
     #[test]
