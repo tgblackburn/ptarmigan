@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.1
+
+In progress.
+
+Added:
+
+* Choice of units in FITS and HDF5 output
+
 ## v0.8.0
 
 2021-07-12
