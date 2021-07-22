@@ -22,6 +22,7 @@ pub struct BeamBuilder {
     angle: f64,
     rms_div: f64,
     initial_z: f64,
+    offset: ThreeVector,
 }
 
 impl BeamBuilder {
@@ -43,6 +44,7 @@ impl BeamBuilder {
             angle: 0.0,
             rms_div: 0.0,
             initial_z,
+            offset: ThreeVector::new(0.0, 0.0, 0.0),
         }
     }
 
@@ -109,6 +111,14 @@ impl BeamBuilder {
         }
     }
 
+    pub fn with_offset(&self, offset: ThreeVector) -> Self {
+        let offset = ThreeVector::new(-offset[0], offset[1], -offset[2]);
+        BeamBuilder {
+            offset,
+            ..*self
+        }
+    }
+
     pub fn build<R: Rng>(&self, rng: &mut R) -> Vec<Particle> {
         let normal_espec = self.normal_espec.expect("primary energy spectrum not specified");
         (0..self.num).into_iter()
@@ -127,6 +137,7 @@ impl BeamBuilder {
                 };
 
                 let r = ThreeVector::new(x, y, z);
+                let r = r + self.offset;
                 let r = r.rotate_around_y(self.angle);
                 let r = FourVector::new(t, r[0], r[1], r[2]);
 

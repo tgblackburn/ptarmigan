@@ -322,6 +322,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         1.0
     };
 
+    let offset = input.read::<Vec<f64>>("beam", "offset")
+        // if missing, assume to be (0,0,0)
+        .or_else(|e| match e.kind() {
+            ConfigErrorKind::MissingField => Ok(vec![0.0; 3]),
+            _ => Err(e),
+        })
+        .and_then(|v| match v.len() {
+            3 => Ok(ThreeVector::new(v[0], v[1], v[2])),
+            _ => {
+                eprintln!("A collision offset must be expressed as a three-vector [dx, dy, dz].");
+                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "offset"))
+            }
+        })
+        ?;
+
     let ident: String = input.read("output", "ident")
         .map(|s| {
             if s == "auto" {
@@ -481,6 +496,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_weight(weight)
         .with_divergence(rms_div)
         .with_collision_angle(angle)
+        .with_offset(offset)
         .with_length(length);
 
     let builder = if normally_distributed {
@@ -668,7 +684,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match plain_text_output {
         OutputMode::PlainText => {
+            #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
+            #[cfg(not(feature = "with-mpi"))]
+            let particles = [electrons, photons, positrons].concat();
 
             if id == 0 {
                 use std::fs::File;

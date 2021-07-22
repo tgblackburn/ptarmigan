@@ -37,6 +37,9 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
 * `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
+* `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
+The offsets are defined with respect to the beam coordinate system, where `z` points along the propagation direction.
+(The laser propagates in the `x`-`z` plane, towards negative `z` if the collision angle is zero.)
 
 ## output
 
