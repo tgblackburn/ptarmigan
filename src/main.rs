@@ -785,6 +785,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("length", length.convert(&units.length))?
                     .write("collision_angle", angle)?
                     .write("rms_divergence", rms_div)?
+                    .write("offset", offset.convert(&units.length))?
                     .write("transverse_distribution_is_normal", normally_distributed)?
                     .write("longitudinal_distribution_is_normal", true)?;
 
