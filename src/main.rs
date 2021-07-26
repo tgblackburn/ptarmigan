@@ -760,11 +760,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 conf.create_group("laser")?
                     .write("a0", a0)?
-                    .write("wavelength", wavelength)?
+                    .write("wavelength", wavelength.convert(&units.length))?
                     .write("polarization", pol)?
                     .write("focusing", focusing)?
                     .write("chirp_b", chirp_b)?
-                    .write_if(focusing, "waist", waist)?
+                    .write_if(focusing, "waist", waist.convert(&units.length))?
                     .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", tau)?
                     .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", tau)?;
 
@@ -781,8 +781,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("sigma", sigma)?
                     .write("bremsstrahlung_source", use_brem_spec)?
                     .write_if(use_brem_spec, "gamma_min", gamma_min)?
-                    .write("radius", radius)?
-                    .write("length", length)?
+                    .write("radius", radius.convert(&units.length))?
+                    .write("length", length.convert(&units.length))?
                     .write("collision_angle", angle)?
                     .write("rms_divergence", rms_div)?
                     .write("transverse_distribution_is_normal", normally_distributed)?
@@ -792,7 +792,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .write("laser_defines_positive_z", laser_defines_z)?
                     .write("beam_defines_positive_z", !laser_defines_z)?
                     .write("discard_background_e", discard_bg_e)?
-                    .write("min_energy", min_energy)?;
+                    .write("min_energy", min_energy.convert(&units.energy))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
