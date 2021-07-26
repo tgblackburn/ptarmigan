@@ -6,7 +6,8 @@ In progress.
 
 Added:
 
-* Choice of units in FITS and HDF5 output
+* Choice of units in FITS and HDF5 output.
+* Offset between beam and laser when the latter reaches focus.
 
 ## v0.8.0
 
