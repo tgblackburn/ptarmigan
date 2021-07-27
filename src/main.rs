@@ -208,35 +208,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let path = args
         .get(1)
-        .ok_or(ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+        .ok_or(InputError::file())?;
     let path = PathBuf::from(path);
     let output_dir = path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("");
 
     // Read input configuration with default context
 
     let raw_input = std::fs::read_to_string(&path)
-        .map_err(|_| ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+        .map_err(|_| InputError::file())?;
     let mut input = Config::from_string(&raw_input)?;
     //let mut input = Config::from_file(&path)?;
     input.with_context("constants");
 
-    let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
-    let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
-    let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
-    let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
-    let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
-    let rr = input.read("control", "radiation_reaction").unwrap_or(true);
-    let tracking_photons = input.read("control", "pair_creation").unwrap_or(true);
+    let dt_multiplier = input.read("control:dt_multiplier").unwrap_or(1.0);
+    let multiplicity: Option<usize> = input.read("control:select_multiplicity").ok();
+    let using_lcfa = input.read("control:lcfa").unwrap_or(false);
+    let rng_seed = input.read("control:rng_seed").unwrap_or(0usize);
+    let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
+    let rr = input.read("control:radiation_reaction").unwrap_or(true);
+    let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
 
-    let a0: f64 = input.read("laser", "a0")?;
+    let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
-        .read("laser", "wavelength")
+        .read("laser:wavelength")
         .or_else(|_e|
             // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
-            input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+            input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = match input.read::<String>("laser", "polarization") {
+    let pol = match input.read::<String,_>("laser:polarization") {
         Ok(s) if s == "linear" => Polarization::Linear,
         Ok(s) if s == "circular" => Polarization::Circular,
         _ => Polarization::Circular
@@ -247,20 +247,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let (focusing, waist) = input
-        .read("laser", "waist")
+        .read("laser:waist")
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
     let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
-        input.read("laser", "fwhm_duration")?
+        input.read("laser:fwhm_duration")?
     } else {
-        input.read("laser", "n_cycles")?
+        input.read("laser:n_cycles")?
     };
 
     let chirp_b = if !focusing {
-        input.read("laser", "chirp_coeff").unwrap_or(0.0)
+        input.read("laser:chirp_coeff").unwrap_or(0.0)
     } else {
-        input.read("laser", "chirp_coeff")
+        input.read("laser:chirp_coeff")
             .map(|_: f64| {
                 eprintln!("Chirp parameter ignored for focusing laser pulses.");
                 0.0
@@ -268,18 +268,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(0.0)
     };
 
-    let npart: usize = input.read("beam", "n")
-        .or_else(|_| input.read("beam", "ne"))
+    let npart: usize = input.read("beam:n")
+        .or_else(|_| input.read("beam:ne"))
         ?;
-    let gamma: f64 = input.read("beam", "gamma")?;
-    let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
-    let length: f64 = input.read("beam", "length").unwrap_or(0.0);
-    let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
-    let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
-    let weight = input.read("beam", "charge")
+    let gamma: f64 = input.read("beam:gamma")?;
+    let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+    let length: f64 = input.read("beam:length").unwrap_or(0.0);
+    let angle: f64 = input.read("beam:collision_angle").unwrap_or(0.0);
+    let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
+    let weight = input.read("beam:charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
         .unwrap_or(1.0);
-    let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
+    let (radius, normally_distributed) = input.read::<Vec<String>,_>("beam:radius")
         .and_then(|vs| {
             // whether a single f64 or a tuple of [f64, dstr],
             // the first value must be the radius
@@ -299,45 +299,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                             or as a numerical value and a distribution, e.g,\n\
                             \tradius: [2.0e-6, uniformly_distributed]\n\
                             \tradius: [2.0e-6, normally_distributed].");
-                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+                Err(InputError::conversion("beam:radius", "radius"))
+                //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
         })?;
-    let species = input.read::<String>("beam", "species")
+    let species = input.read::<String,_>("beam:species")
         .map_or_else(
             |e| match e.kind() {
                 // if the species is not specified, default to electron
-                ConfigErrorKind::MissingField => Ok(Species::Electron),
+                InputErrorKind::Location => Ok(Species::Electron),
                 _ => Err(e)
             },
-            |s| s.parse::<Species>().map_err(|_| ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "species"))
+            |s| s.parse::<Species>().map_err(|_| InputError::conversion("beam:species", "species"))
         )?;
     let use_brem_spec = if species == Species::Photon {
-        input.read("beam", "bremsstrahlung_source").unwrap_or(false)
+        input.read("beam:bremsstrahlung_source").unwrap_or(false)
     } else {
         false
     };
     let gamma_min = if use_brem_spec {
-        input.read::<f64>("beam", "gamma_min")?
+        input.read("beam:gamma_min")?
     } else {
         1.0
     };
 
-    let offset = input.read::<Vec<f64>>("beam", "offset")
+    let offset = input.read::<Vec<f64>,_>("beam:offset")
         // if missing, assume to be (0,0,0)
         .or_else(|e| match e.kind() {
-            ConfigErrorKind::MissingField => Ok(vec![0.0; 3]),
+            InputErrorKind::Location => Ok(vec![0.0; 3]),
             _ => Err(e),
         })
         .and_then(|v| match v.len() {
             3 => Ok(ThreeVector::new(v[0], v[1], v[2])),
             _ => {
                 eprintln!("A collision offset must be expressed as a three-vector [dx, dy, dz].");
-                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "offset"))
+                Err(InputError::conversion("beam:offset", "offset"))
             }
         })
         ?;
 
-    let ident: String = input.read("output", "ident")
+    let ident: String = input.read("output:ident")
         .map(|s| {
             if s == "auto" {
                 // use the name of the input file instead
@@ -354,51 +355,51 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .unwrap_or_else(|_| "".to_owned());
 
-    let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
+    let plain_text_output = match input.read::<String,_>("output:dump_all_particles") {
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
         _ => OutputMode::None,
     };
 
-    let laser_defines_z = match input.read::<String>("output", "coordinate_system") {
+    let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
         _ => true,
     };
 
-    let discard_bg_e = input.read("output", "discard_background_e").unwrap_or(false);
+    let discard_bg_e = input.read("output:discard_background_e").unwrap_or(false);
 
     let min_energy: f64 = input
-        .read("output", "min_energy")
+        .read("output:min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
 
-    let eospec: Vec<String> = input.read("output", "electron")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let eospec: Vec<String> = input.read("output:electron")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
     
-    let gospec: Vec<String> = input.read("output", "photon")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let gospec: Vec<String> = input.read("output:photon")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let gospec: Vec<DistributionFunction> = gospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
 
-    let pospec: Vec<String> = input.read("output", "positron")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let pospec: Vec<String> = input.read("output:positron")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
 
     // Choose the system of units
-    let units = input.read::<String>("output", "units")
+    let units = input.read::<String,_>("output:units")
         // if not specified, default to "auto"
         .or_else(|e| match e.kind() {
-            ConfigErrorKind::MissingField => Ok("auto".to_owned()),
+            InputErrorKind::Location => Ok("auto".to_owned()),
             _ => Err(e),
         })
         .and_then(|s| match s.as_str() {
@@ -407,26 +408,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             "si" | "SI" => Ok(UnitSystem::si()),
             _ => {
                 eprintln!("Unit system requested, \"{}\", is not one of \"auto\", \"hep\", or \"si\".", s);
-                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "output", "units"))
+                Err(InputError::conversion("output:units", "units"))
             }
         })
         ?;
 
-    let mut estats = input.read("stats", "electron")
+    let mut estats = input.read("stats:electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut gstats = input.read("stats", "photon")
+    let mut gstats = input.read("stats:photon")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut pstats = input.read("stats", "positron")
+    let mut pstats = input.read("stats:positron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
@@ -434,20 +435,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     // Rare event sampling for pair creation
-    let pair_rate_increase = input.read::<f64>("control", "increase_pair_rate_by")
+    let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
         // if increase is not specified at all, default to unity
         .or_else(|e| match e.kind() {
-            ConfigErrorKind::MissingField => Ok(1.0),
+            InputErrorKind::Location => Ok(1.0),
             _ => Err(e),
         })
         // failing that, check for automatic increase
-        .or_else(|e| match input.read::<String>("control", "increase_pair_rate_by") {
+        .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
             Ok(s) if s == "auto" => Ok(increase_pair_rate_by(gamma, a0, wavelength)),
             _ => Err(e),
         })
         .and_then(|r| if r < 1.0 {
             eprintln!("Increase in pair creation rate must be >= 1.0.");
-            Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "control", "increase_pair_rate_by"))
+            Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
         } else {
             Ok(r)
         })?;
