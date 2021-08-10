@@ -199,6 +199,14 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     }
 }
 
+fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
+    let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
+    let chi = 2.0 * gamma * a0 * omega_mc2;
+    let pair_rate = lcfa::pair_creation::rate(chi, gamma);
+    let photon_rate = lcfa::photon_emission::rate(chi, gamma);
+    photon_rate / pair_rate
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
@@ -443,7 +451,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         // failing that, check for automatic increase
         .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
-            Ok(s) if s == "auto" => Ok(increase_pair_rate_by(gamma, a0, wavelength)),
+            Ok(s) if s == "auto" => if using_lcfa {
+                Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
+            } else {
+                Ok(increase_pair_rate_by(gamma, a0, wavelength))
+            },
             _ => Err(e),
         })
         .and_then(|r| if r < 1.0 {
