@@ -24,7 +24,7 @@ impl fmt::Debug for InputError {
         let help_msg = "Usage: mpirun -n np ./opal input-file";
         match self.kind {
             InputErrorKind::File => write!(f, "Unable to open configuration file.\n{}", help_msg),
-            InputErrorKind::Location => write!(f, "Failed to follow specified path: section \"{}\" is missing.\n{}", self.cause, help_msg),
+            InputErrorKind::Location => write!(f, "Failed to follow specified path \"{}\": component \"{}\" is missing.\n{}", self.path, self.cause, help_msg),
             InputErrorKind::Conversion => write!(f, "Could not convert field \"{}\" to target type.\n{}", self.cause, help_msg),
         }
     }

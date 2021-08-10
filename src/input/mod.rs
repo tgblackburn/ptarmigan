@@ -128,13 +128,6 @@ impl<'a> Config<'a> {
         self
     }
 
-    // /// Test if the file contains a specific section
-    // #[allow(unused)]
-    // pub fn contains(&self, section: &str) -> bool {
-    //     use std::ops::Not;
-    //     self.input[section].is_badvalue().not()
-    // }
-
     /// Locates a key-value pair in the configuration file and attempts the
     /// to parse the value as the specified type.
     /// The path to the key-value pair is specified by a string of colon-separated 
@@ -160,15 +153,6 @@ impl<'a> Config<'a> {
     /// as a function of a single variable `arg`.
     #[allow(unused)]
     pub fn func<S: AsRef<str>>(&'a self, path: S, arg: S) -> Result<impl Fn(f64) -> f64 + 'a, InputError> {
-        // use ConfigErrorKind::*;
-        // // Does the section exist?
-        // if self.input[section].is_badvalue() {
-        //     return Err(ConfigError::raise(MissingSection, section, field));
-        // }
-        // // Does the field exist?
-        // if self.input[section][field].is_badvalue() {
-        //     return Err(ConfigError::raise(MissingField, section, field));
-        // }
         // get the field, if it exists
         let s: String = self.read(&path)?;
         // Now try conversion:
@@ -193,8 +177,11 @@ impl<'a> Config<'a> {
     /// ```
     /// where 'density' is specified in the input file.
     #[allow(unused)]
-    pub fn evaluate(&'a self, arg: &str) -> Option<f64> {
-        arg.parse::<meval::Expr>().and_then(|expr| expr.eval_with_context(&self.ctx)).ok()
+    pub fn evaluate<S: AsRef<str>>(&self, arg: S) -> Option<f64> {
+        arg.as_ref()
+            .parse::<meval::Expr>()
+            .and_then(|expr| expr.eval_with_context(&self.ctx))
+            .ok()
     }
 }
 
@@ -220,6 +207,7 @@ mod tests {
         constants:
           a: 2.0 * pi
           b: 17.0
+          y: 1.0
 
         deep:
           nested:
@@ -231,22 +219,18 @@ mod tests {
         config.with_context("constants");
 
         // Plain f64
-        //let dx: f64 = config.read("control", "dx").unwrap();
         let dx: f64 = config.read("control:dx").unwrap();
         assert_eq!(dx, 0.001);
 
         // Plain usize
-        //let nx: usize = config.read("control", "nx").unwrap();
         let nx: usize = config.read("control:nx").unwrap();
         assert_eq!(nx, 4000);
 
         // Evaluates math expr
-        //let ib: f64 = config.read("control", "ib").unwrap();
         let ib: f64 = config.read("control:ib").unwrap();
         assert_eq!(ib, 2.0 * consts::PI * 17.0f64.powi(3));
 
         // Implicit onversion from integer to f64
-        //let dx: f64 = config.read("extra", "dx").unwrap();
         let dx: f64 = config.read("extra:dx").unwrap();
         assert_eq!(dx, 160.0);
 
@@ -255,7 +239,6 @@ mod tests {
         assert_eq!(ne(0.6), (2.0 * consts::PI * 0.6).sin());
 
         // array of f64
-        //let r: Vec<f64> = config.read("extra", "r").unwrap();
         let r: Vec<f64> = config.read("extra:r").unwrap();
         assert_eq!(r.len(), 4);
         assert_eq!(r[0], 0.0);
@@ -263,11 +246,14 @@ mod tests {
         assert_eq!(r[2], 1.0);
         assert_eq!(r[3], 4.0 * consts::PI);
 
-        //let s: Result<Vec<f64>,_> = config.read("extra", "s");
         let s: Result<Vec<f64>, _> = config.read("extra:s");
         assert!(s.is_err());
 
         let key: f64 = config.read("deep:nested:section:key").unwrap();
         assert_eq!(key, 1.0);
+
+        // evaluate arb string
+        let val = config.evaluate("1.0 / (1.0 + y)").unwrap();
+        assert_eq!(val, 1.0 / 2.0);
     }
 }
