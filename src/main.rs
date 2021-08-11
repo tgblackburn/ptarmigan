@@ -47,47 +47,6 @@ enum OutputMode {
     Hdf5,
 }
 
-#[cfg(feature = "hdf5-output")]
-trait Writeable<T> {
-    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self>;
-    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self>;
-    fn write_if(&self, condition: bool, name: &str, value: T) -> hdf5::Result<&Self> {
-        if condition {
-            self.write(name, value)
-        } else {
-            Ok(self)
-        }
-    }
-}
-
-#[cfg(feature = "hdf5-output")]
-trait WriteableString {
-    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self>;
-}
-
-#[cfg(feature = "hdf5-output")]
-impl<T: hdf5::types::H5Type> Writeable<T> for hdf5::Group {
-    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self> {
-        self.new_dataset::<T>().create(name, ())?.write_scalar(&value).map(|_| self)
-    }
-
-    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self> {
-        self.new_dataset::<T>().create(name, value.len())?.write(value).map(|_| self)
-    }
-}
-
-#[cfg(feature = "hdf5-output")]
-impl WriteableString for hdf5::Group {
-    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self> {
-        use std::str::FromStr;
-        use hdf5::types::VarLenUnicode;
-        match VarLenUnicode::from_str(value) {
-            Ok(vlu) => self.new_dataset::<VarLenUnicode>().create(name, ())?.write_scalar(&vlu).map(|_| self),
-            Err(e) => Err(hdf5::Error::Internal(e.to_string()))
-        }
-    }
-}
-
 #[allow(unused)]
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool) -> Shower {
     let mut primaries = vec![incident];
@@ -745,68 +704,70 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Build info
                 file.create_group("build")?
-                    .write_str("version", env!("CARGO_PKG_VERSION"))?
-                    .write_str("branch",env!("VERGEN_GIT_BRANCH"))?
-                    .write_str("commit-hash",env!("VERGEN_GIT_SHA"))?
-                    .write_str("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+                    .write("version", env!("CARGO_PKG_VERSION"))?
+                    .write("branch",env!("VERGEN_GIT_BRANCH"))?
+                    .write("commit-hash",env!("VERGEN_GIT_SHA"))?
+                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
 
                 // Top-level run information
                 let conf = file.create_group("config")?;
-                conf.write("mpi-tasks", ntasks)?
-                    .write_str("input-file", &raw_input)?;
+                conf.write("mpi-tasks", &ntasks)?
+                    .write("input-file", raw_input.as_str())?;
 
                 conf.create_group("unit")?
-                    .write_str("position", units.length.name())?
-                    .write_str("momentum", units.momentum.name())?;
+                    .write("position", units.length.name())?
+                    .write("momentum", units.momentum.name())?;
 
                 // Parsed input configuration
                 conf.create_group("control")?
-                    .write("dt_multiplier", dt_multiplier)?
-                    .write("radiation_reaction", rr)?
-                    .write("pair_creation", tracking_photons)?
-                    .write("lcfa", using_lcfa)?
-                    .write("rng_seed", rng_seed)?
-                    .write("increase_pair_rate_by", pair_rate_increase)?
-                    .write("bandwidth_correction", finite_bandwidth)?
-                    .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
-                    .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
+                    .write("dt_multiplier", &dt_multiplier)?
+                    .write("radiation_reaction", &rr)?
+                    .write("pair_creation", &tracking_photons)?
+                    .write("lcfa", &using_lcfa)?
+                    .write("rng_seed", &rng_seed)?
+                    .write("increase_pair_rate_by", &pair_rate_increase)?
+                    .write("bandwidth_correction", &finite_bandwidth)?
+                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0))?
+                    .write_if(multiplicity.is_none(), "select_multiplicity", &false)?;
 
                 conf.create_group("laser")?
-                    .write("a0", a0)?
-                    .write("wavelength", wavelength.convert(&units.length))?
-                    .write("polarization", pol)?
-                    .write("focusing", focusing)?
-                    .write("chirp_b", chirp_b)?
-                    .write_if(focusing, "waist", waist.convert(&units.length))?
-                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", tau)?
-                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", tau)?;
+                    .write("a0", &a0)?
+                    .write("wavelength", &wavelength.convert(&units.length))?
+                    .write("polarization", &pol)?
+                    .write("focusing", &focusing)?
+                    .write("chirp_b", &chirp_b)?
+                    .write_if(focusing, "waist", &waist.convert(&units.length))?
+                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau)?
+                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau)?;
+
+                let charge = match species {
+                    Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
+                    Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
+                    Species::Photon => 0.0,
+                };
 
                 conf.create_group("beam")?
-                    .write("n", npart)?
-                    .write("n_real", (npart as f64) * weight)?
-                    .write("charge", match species {
-                            Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
-                            Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
-                            Species::Photon => 0.0,
-                    })?
-                    .write_str("species", species.to_string().as_ref())?
-                    .write("gamma", gamma)?
-                    .write("sigma", sigma)?
-                    .write("bremsstrahlung_source", use_brem_spec)?
-                    .write_if(use_brem_spec, "gamma_min", gamma_min)?
-                    .write("radius", radius.convert(&units.length))?
-                    .write("length", length.convert(&units.length))?
-                    .write("collision_angle", angle)?
-                    .write("rms_divergence", rms_div)?
-                    .write("offset", offset.convert(&units.length))?
-                    .write("transverse_distribution_is_normal", normally_distributed)?
-                    .write("longitudinal_distribution_is_normal", true)?;
+                    .write("n", &npart)?
+                    .write("n_real", &((npart as f64) * weight))?
+                    .write("charge", &charge)?
+                    .write("species", species.to_string().as_str())?
+                    .write("gamma", &gamma)?
+                    .write("sigma", &sigma)?
+                    .write("bremsstrahlung_source", &use_brem_spec)?
+                    .write_if(use_brem_spec, "gamma_min", &gamma_min)?
+                    .write("radius", &radius.convert(&units.length))?
+                    .write("length", &length.convert(&units.length))?
+                    .write("collision_angle", &angle)?
+                    .write("rms_divergence", &rms_div)?
+                    .write("offset", &offset.convert(&units.length))?
+                    .write("transverse_distribution_is_normal", &normally_distributed)?
+                    .write("longitudinal_distribution_is_normal", &true)?;
 
                 conf.create_group("output")?
-                    .write("laser_defines_positive_z", laser_defines_z)?
-                    .write("beam_defines_positive_z", !laser_defines_z)?
-                    .write("discard_background_e", discard_bg_e)?
-                    .write("min_energy", min_energy.convert(&units.energy))?;
+                    .write("laser_defines_positive_z", &laser_defines_z)?
+                    .write("beam_defines_positive_z", &!laser_defines_z)?
+                    .write("discard_background_e", &discard_bg_e)?
+                    .write("min_energy", &min_energy.convert(&units.energy))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
@@ -824,13 +785,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(photons);
 
                 fs.create_group("photon")?
-                    .write_all("weight", &w)?
-                    .write_all("a0_at_creation", &a)?
-                    .write_all("n_pos", &n)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("position", &x)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("a0_at_creation", &a[..])?
+                    .write("n_pos", &n[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("position", &x[..])?
+                    .write("momentum", &p[..])?;
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
@@ -848,12 +809,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(electrons);
 
                 fs.create_group("electron")?
-                    .write_all("weight", &w)?
-                    .write_all("n_gamma", &n)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("position", &x)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("n_gamma", &n[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("position", &x[..])?
+                    .write("momentum", &p[..])?;
 
                 let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
@@ -868,12 +829,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(positrons);
 
                 fs.create_group("positron")?
-                    .write_all("weight", &w)?
-                    .write_all("n_gamma", &n)?
-                    .write_all("position", &x)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("n_gamma", &n[..])?
+                    .write("position", &x[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("momentum", &p[..])?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);

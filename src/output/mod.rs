@@ -25,6 +25,11 @@ pub use stats::*;
 mod units;
 pub use units::*;
 
+#[cfg(feature = "hdf5-output")]
+mod binary;
+#[cfg(feature = "hdf5-output")]
+pub use binary::*;
+
 //type ParticleOutput = Box<dyn Fn(&Particle) -> f64>;
 type ParticleOutput = fn(&Particle) -> f64;
 
