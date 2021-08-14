@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.8.1
+
+2021-08-11
+
+Added:
+
+* Choice of units in FITS and HDF5 output.
+* Offset between beam and laser when the latter reaches focus.
+
+Fixed:
+
+* Calculation of automatic pair rate increase when using LCFA
+
 ## v0.8.0
 
 2021-07-12

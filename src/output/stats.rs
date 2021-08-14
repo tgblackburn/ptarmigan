@@ -10,6 +10,7 @@ use crate::no_mpi::*;
 use crate::particle::*;
 
 use super::{ParticleOutput, OutputError, functions};
+use super::ParticleOutputType::*;
 
 /// Ways an array of particle data can be reduced to
 /// a single, representative value
@@ -96,10 +97,17 @@ impl SummaryStatistic {
             if tmp.is_none() || words[2] != "for" {
                 return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()));
             } else {
+                let unit = match tmp.unwrap().1 {
+                    Dimensionless => "1",
+                    Angle => "rad",
+                    Length => "m",
+                    Energy => "MeV",
+                    Momentum => "MeV/c",
+                };
                 Some(Operator {
                     f: tmp.unwrap().0,
                     name: words[3].to_owned(),
-                    unit: tmp.unwrap().1.to_owned(),
+                    unit: unit.to_owned(),
                 })
             }
         } else {
@@ -165,7 +173,14 @@ impl SummaryStatistic {
                     _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
                 };
 
-                let variable = if let Some((f, unit)) = functions::identify(varstr) {
+                let variable = if let Some((f, f_type)) = functions::identify(varstr) {
+                    let unit = match f_type {
+                        Dimensionless => "1",
+                        Angle => "rad",
+                        Length => "m",
+                        Energy => "MeV",
+                        Momentum => "MeV/c",
+                    };
                     // unit is associated with the function at the moment - but needs to
                     // be consistent with op
                     let unit = match op {
@@ -186,7 +201,14 @@ impl SummaryStatistic {
                     return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()));
                 };
 
-                let weight = if let Some((f, unit)) = functions::identify(weightstr) {
+                let weight = if let Some((f, f_type)) = functions::identify(weightstr) {
+                    let unit = match f_type {
+                        Dimensionless => "1",
+                        Angle => "rad",
+                        Length => "m",
+                        Energy => "MeV",
+                        Momentum => "MeV/c",
+                    };
                     Operator {
                         f: f,
                         name: weightstr.to_owned(),

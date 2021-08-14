@@ -213,6 +213,16 @@ pub struct ThreeVector {
     z: f64,
 }
 
+#[cfg(feature = "hdf5-output")]
+unsafe impl H5Type for ThreeVector {
+    fn type_descriptor() -> TypeDescriptor {
+        TypeDescriptor::FixedArray(
+            Box::new(f64::type_descriptor()),
+            3,
+        )
+    }
+}
+
 impl ThreeVector {
     /// Creates a new three-vector with the specified components.
     pub fn new(x: f64, y: f64, z: f64) -> ThreeVector {

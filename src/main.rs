@@ -47,47 +47,6 @@ enum OutputMode {
     Hdf5,
 }
 
-#[cfg(feature = "hdf5-output")]
-trait Writeable<T> {
-    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self>;
-    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self>;
-    fn write_if(&self, condition: bool, name: &str, value: T) -> hdf5::Result<&Self> {
-        if condition {
-            self.write(name, value)
-        } else {
-            Ok(self)
-        }
-    }
-}
-
-#[cfg(feature = "hdf5-output")]
-trait WriteableString {
-    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self>;
-}
-
-#[cfg(feature = "hdf5-output")]
-impl<T: hdf5::types::H5Type> Writeable<T> for hdf5::Group {
-    fn write(&self, name: &str, value: T) -> hdf5::Result<&Self> {
-        self.new_dataset::<T>().create(name, ())?.write_scalar(&value).map(|_| self)
-    }
-
-    fn write_all(&self, name: &str, value: &[T]) -> hdf5::Result<&Self> {
-        self.new_dataset::<T>().create(name, value.len())?.write(value).map(|_| self)
-    }
-}
-
-#[cfg(feature = "hdf5-output")]
-impl WriteableString for hdf5::Group {
-    fn write_str(&self, name: &str, value: &str) -> hdf5::Result<&Self> {
-        use std::str::FromStr;
-        use hdf5::types::VarLenUnicode;
-        match VarLenUnicode::from_str(value) {
-            Ok(vlu) => self.new_dataset::<VarLenUnicode>().create(name, ())?.write_scalar(&vlu).map(|_| self),
-            Err(e) => Err(hdf5::Error::Internal(e.to_string()))
-        }
-    }
-}
-
 #[allow(unused)]
 fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool) -> Shower {
     let mut primaries = vec![incident];
@@ -199,6 +158,14 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     }
 }
 
+fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
+    let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
+    let chi = 2.0 * gamma * a0 * omega_mc2;
+    let pair_rate = lcfa::pair_creation::rate(chi, gamma);
+    let photon_rate = lcfa::photon_emission::rate(chi, gamma);
+    photon_rate / pair_rate
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
@@ -208,35 +175,35 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let path = args
         .get(1)
-        .ok_or(ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+        .ok_or(InputError::file())?;
     let path = PathBuf::from(path);
     let output_dir = path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("");
 
     // Read input configuration with default context
 
     let raw_input = std::fs::read_to_string(&path)
-        .map_err(|_| ConfigError::raise(ConfigErrorKind::MissingFile, "", ""))?;
+        .map_err(|_| InputError::file())?;
     let mut input = Config::from_string(&raw_input)?;
     //let mut input = Config::from_file(&path)?;
     input.with_context("constants");
 
-    let dt_multiplier = input.read("control", "dt_multiplier").unwrap_or(1.0);
-    let multiplicity: Option<usize> = input.read("control", "select_multiplicity").ok();
-    let using_lcfa = input.read("control", "lcfa").unwrap_or(false);
-    let rng_seed = input.read("control", "rng_seed").unwrap_or(0usize);
-    let finite_bandwidth = input.read("control", "bandwidth_correction").unwrap_or(false);
-    let rr = input.read("control", "radiation_reaction").unwrap_or(true);
-    let tracking_photons = input.read("control", "pair_creation").unwrap_or(true);
+    let dt_multiplier = input.read("control:dt_multiplier").unwrap_or(1.0);
+    let multiplicity: Option<usize> = input.read("control:select_multiplicity").ok();
+    let using_lcfa = input.read("control:lcfa").unwrap_or(false);
+    let rng_seed = input.read("control:rng_seed").unwrap_or(0usize);
+    let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
+    let rr = input.read("control:radiation_reaction").unwrap_or(true);
+    let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
 
-    let a0: f64 = input.read("laser", "a0")?;
+    let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
-        .read("laser", "wavelength")
+        .read("laser:wavelength")
         .or_else(|_e|
             // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
-            input.read("laser", "omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+            input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = match input.read::<String>("laser", "polarization") {
+    let pol = match input.read::<String,_>("laser:polarization") {
         Ok(s) if s == "linear" => Polarization::Linear,
         Ok(s) if s == "circular" => Polarization::Circular,
         _ => Polarization::Circular
@@ -247,20 +214,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let (focusing, waist) = input
-        .read("laser", "waist")
+        .read("laser:waist")
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
     let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
-        input.read("laser", "fwhm_duration")?
+        input.read("laser:fwhm_duration")?
     } else {
-        input.read("laser", "n_cycles")?
+        input.read("laser:n_cycles")?
     };
 
     let chirp_b = if !focusing {
-        input.read("laser", "chirp_coeff").unwrap_or(0.0)
+        input.read("laser:chirp_coeff").unwrap_or(0.0)
     } else {
-        input.read("laser", "chirp_coeff")
+        input.read("laser:chirp_coeff")
             .map(|_: f64| {
                 eprintln!("Chirp parameter ignored for focusing laser pulses.");
                 0.0
@@ -268,18 +235,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(0.0)
     };
 
-    let npart: usize = input.read("beam", "n")
-        .or_else(|_| input.read("beam", "ne"))
+    let npart: usize = input.read("beam:n")
+        .or_else(|_| input.read("beam:ne"))
         ?;
-    let gamma: f64 = input.read("beam", "gamma")?;
-    let sigma: f64 = input.read("beam", "sigma").unwrap_or(0.0);
-    let length: f64 = input.read("beam", "length").unwrap_or(0.0);
-    let angle: f64 = input.read("beam", "collision_angle").unwrap_or(0.0);
-    let rms_div: f64 = input.read("beam", "rms_divergence").unwrap_or(0.0);
-    let weight = input.read("beam", "charge")
+    let gamma: f64 = input.read("beam:gamma")?;
+    let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+    let length: f64 = input.read("beam:length").unwrap_or(0.0);
+    let angle: f64 = input.read("beam:collision_angle").unwrap_or(0.0);
+    let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
+    let weight = input.read("beam:charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
         .unwrap_or(1.0);
-    let (radius, normally_distributed) = input.read::<Vec<String>>("beam", "radius")
+    let (radius, normally_distributed) = input.read::<Vec<String>,_>("beam:radius")
         .and_then(|vs| {
             // whether a single f64 or a tuple of [f64, dstr],
             // the first value must be the radius
@@ -299,30 +266,46 @@ fn main() -> Result<(), Box<dyn Error>> {
                             or as a numerical value and a distribution, e.g,\n\
                             \tradius: [2.0e-6, uniformly_distributed]\n\
                             \tradius: [2.0e-6, normally_distributed].");
-                Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+                Err(InputError::conversion("beam:radius", "radius"))
+                //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
         })?;
-    let species = input.read::<String>("beam", "species")
+    let species = input.read::<String,_>("beam:species")
         .map_or_else(
             |e| match e.kind() {
                 // if the species is not specified, default to electron
-                ConfigErrorKind::MissingField => Ok(Species::Electron),
+                InputErrorKind::Location => Ok(Species::Electron),
                 _ => Err(e)
             },
-            |s| s.parse::<Species>().map_err(|_| ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "species"))
+            |s| s.parse::<Species>().map_err(|_| InputError::conversion("beam:species", "species"))
         )?;
     let use_brem_spec = if species == Species::Photon {
-        input.read("beam", "bremsstrahlung_source").unwrap_or(false)
+        input.read("beam:bremsstrahlung_source").unwrap_or(false)
     } else {
         false
     };
     let gamma_min = if use_brem_spec {
-        input.read::<f64>("beam", "gamma_min")?
+        input.read("beam:gamma_min")?
     } else {
         1.0
     };
 
-    let ident: String = input.read("output", "ident")
+    let offset = input.read::<Vec<f64>,_>("beam:offset")
+        // if missing, assume to be (0,0,0)
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(vec![0.0; 3]),
+            _ => Err(e),
+        })
+        .and_then(|v| match v.len() {
+            3 => Ok(ThreeVector::new(v[0], v[1], v[2])),
+            _ => {
+                eprintln!("A collision offset must be expressed as a three-vector [dx, dy, dz].");
+                Err(InputError::conversion("beam:offset", "offset"))
+            }
+        })
+        ?;
+
+    let ident: String = input.read("output:ident")
         .map(|s| {
             if s == "auto" {
                 // use the name of the input file instead
@@ -339,61 +322,79 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .unwrap_or_else(|_| "".to_owned());
 
-    let plain_text_output = match input.read::<String>("output", "dump_all_particles") {
+    let plain_text_output = match input.read::<String,_>("output:dump_all_particles") {
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
         _ => OutputMode::None,
     };
 
-    let laser_defines_z = match input.read::<String>("output", "coordinate_system") {
+    let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
         _ => true,
     };
 
-    let discard_bg_e = input.read("output", "discard_background_e").unwrap_or(false);
+    let discard_bg_e = input.read("output:discard_background_e").unwrap_or(false);
 
     let min_energy: f64 = input
-        .read("output", "min_energy")
+        .read("output:min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
 
-    let eospec: Vec<String> = input.read("output", "electron")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let eospec: Vec<String> = input.read("output:electron")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
     
-    let gospec: Vec<String> = input.read("output", "photon")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let gospec: Vec<String> = input.read("output:photon")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let gospec: Vec<DistributionFunction> = gospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
 
-    let pospec: Vec<String> = input.read("output", "positron")
-        .or_else(|e| match e.kind() {ConfigErrorKind::MissingField => Ok(vec![]), _ => Err(e)})?;
+    let pospec: Vec<String> = input.read("output:positron")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
 
-    let mut estats = input.read("stats", "electron")
+    // Choose the system of units
+    let units = input.read::<String,_>("output:units")
+        // if not specified, default to "auto"
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok("auto".to_owned()),
+            _ => Err(e),
+        })
+        .and_then(|s| match s.as_str() {
+            "auto" => Ok(Default::default()),
+            "hep" | "HEP" => Ok(UnitSystem::hep()),
+            "si" | "SI" => Ok(UnitSystem::si()),
+            _ => {
+                eprintln!("Unit system requested, \"{}\", is not one of \"auto\", \"hep\", or \"si\".", s);
+                Err(InputError::conversion("output:units", "units"))
+            }
+        })
+        ?;
+
+    let mut estats = input.read("stats:electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut gstats = input.read("stats", "photon")
+    let mut gstats = input.read("stats:photon")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
-    let mut pstats = input.read("stats", "positron")
+    let mut pstats = input.read("stats:positron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
@@ -401,20 +402,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     // Rare event sampling for pair creation
-    let pair_rate_increase = input.read::<f64>("control", "increase_pair_rate_by")
+    let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
         // if increase is not specified at all, default to unity
         .or_else(|e| match e.kind() {
-            ConfigErrorKind::MissingField => Ok(1.0),
+            InputErrorKind::Location => Ok(1.0),
             _ => Err(e),
         })
         // failing that, check for automatic increase
-        .or_else(|e| match input.read::<String>("control", "increase_pair_rate_by") {
-            Ok(s) if s == "auto" => Ok(increase_pair_rate_by(gamma, a0, wavelength)),
+        .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
+            Ok(s) if s == "auto" => if using_lcfa {
+                Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
+            } else {
+                Ok(increase_pair_rate_by(gamma, a0, wavelength))
+            },
             _ => Err(e),
         })
         .and_then(|r| if r < 1.0 {
             eprintln!("Increase in pair creation rate must be >= 1.0.");
-            Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "control", "increase_pair_rate_by"))
+            Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
         } else {
             Ok(r)
         })?;
@@ -463,6 +468,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_weight(weight)
         .with_divergence(rms_div)
         .with_collision_angle(angle)
+        .with_offset(offset)
         .with_length(length);
 
     let builder = if normally_distributed {
@@ -605,17 +611,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &electrons, &prefix)?;
+        dstr.write(&world, &electrons, &units, &prefix)?;
     }
 
     for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &prefix)?;
+        dstr.write(&world, &photons, &units, &prefix)?;
     }
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &positrons, &prefix)?;
+        dstr.write(&world, &positrons, &units, &prefix)?;
     }
 
     for stat in estats.iter_mut() {
@@ -650,7 +656,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match plain_text_output {
         OutputMode::PlainText => {
+            #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
+            #[cfg(not(feature = "with-mpi"))]
+            let particles = [electrons, photons, positrons].concat();
 
             if id == 0 {
                 use std::fs::File;
@@ -695,63 +704,70 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Build info
                 file.create_group("build")?
-                    .write_str("version", env!("CARGO_PKG_VERSION"))?
-                    .write_str("branch",env!("VERGEN_GIT_BRANCH"))?
-                    .write_str("commit-hash",env!("VERGEN_GIT_SHA"))?
-                    .write_str("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+                    .write("version", env!("CARGO_PKG_VERSION"))?
+                    .write("branch",env!("VERGEN_GIT_BRANCH"))?
+                    .write("commit-hash",env!("VERGEN_GIT_SHA"))?
+                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
 
                 // Top-level run information
                 let conf = file.create_group("config")?;
-                conf.write("mpi-tasks", ntasks)?
-                    .write_str("input-file", &raw_input)?;
+                conf.write("mpi-tasks", &ntasks)?
+                    .write("input-file", raw_input.as_str())?;
+
+                conf.create_group("unit")?
+                    .write("position", units.length.name())?
+                    .write("momentum", units.momentum.name())?;
 
                 // Parsed input configuration
                 conf.create_group("control")?
-                    .write("dt_multiplier", dt_multiplier)?
-                    .write("radiation_reaction", rr)?
-                    .write("pair_creation", tracking_photons)?
-                    .write("lcfa", using_lcfa)?
-                    .write("rng_seed", rng_seed)?
-                    .write("increase_pair_rate_by", pair_rate_increase)?
-                    .write("bandwidth_correction", finite_bandwidth)?
-                    .write_if(multiplicity.is_some(), "select_multiplicity", multiplicity.unwrap_or(0))?
-                    .write_if(multiplicity.is_none(), "select_multiplicity", false)?;
+                    .write("dt_multiplier", &dt_multiplier)?
+                    .write("radiation_reaction", &rr)?
+                    .write("pair_creation", &tracking_photons)?
+                    .write("lcfa", &using_lcfa)?
+                    .write("rng_seed", &rng_seed)?
+                    .write("increase_pair_rate_by", &pair_rate_increase)?
+                    .write("bandwidth_correction", &finite_bandwidth)?
+                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0))?
+                    .write_if(multiplicity.is_none(), "select_multiplicity", &false)?;
 
                 conf.create_group("laser")?
-                    .write("a0", a0)?
-                    .write("wavelength", wavelength)?
-                    .write("polarization", pol)?
-                    .write("focusing", focusing)?
-                    .write("chirp_b", chirp_b)?
-                    .write_if(focusing, "waist", waist)?
-                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", tau)?
-                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", tau)?;
+                    .write("a0", &a0)?
+                    .write("wavelength", &wavelength.convert(&units.length))?
+                    .write("polarization", &pol)?
+                    .write("focusing", &focusing)?
+                    .write("chirp_b", &chirp_b)?
+                    .write_if(focusing, "waist", &waist.convert(&units.length))?
+                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau)?
+                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau)?;
+
+                let charge = match species {
+                    Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
+                    Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
+                    Species::Photon => 0.0,
+                };
 
                 conf.create_group("beam")?
-                    .write("n", npart)?
-                    .write("n_real", (npart as f64) * weight)?
-                    .write("charge", match species {
-                            Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
-                            Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
-                            Species::Photon => 0.0,
-                    })?
-                    .write_str("species", species.to_string().as_ref())?
-                    .write("gamma", gamma)?
-                    .write("sigma", sigma)?
-                    .write("bremsstrahlung_source", use_brem_spec)?
-                    .write_if(use_brem_spec, "gamma_min", gamma_min)?
-                    .write("radius", radius)?
-                    .write("length", length)?
-                    .write("collision_angle", angle)?
-                    .write("rms_divergence", rms_div)?
-                    .write("transverse_distribution_is_normal", normally_distributed)?
-                    .write("longitudinal_distribution_is_normal", true)?;
+                    .write("n", &npart)?
+                    .write("n_real", &((npart as f64) * weight))?
+                    .write("charge", &charge)?
+                    .write("species", species.to_string().as_str())?
+                    .write("gamma", &gamma)?
+                    .write("sigma", &sigma)?
+                    .write("bremsstrahlung_source", &use_brem_spec)?
+                    .write_if(use_brem_spec, "gamma_min", &gamma_min)?
+                    .write("radius", &radius.convert(&units.length))?
+                    .write("length", &length.convert(&units.length))?
+                    .write("collision_angle", &angle)?
+                    .write("rms_divergence", &rms_div)?
+                    .write("offset", &offset.convert(&units.length))?
+                    .write("transverse_distribution_is_normal", &normally_distributed)?
+                    .write("longitudinal_distribution_is_normal", &true)?;
 
                 conf.create_group("output")?
-                    .write("laser_defines_positive_z", laser_defines_z)?
-                    .write("beam_defines_positive_z", !laser_defines_z)?
-                    .write("discard_background_e", discard_bg_e)?
-                    .write("min_energy", min_energy)?;
+                    .write("laser_defines_positive_z", &laser_defines_z)?
+                    .write("beam_defines_positive_z", &!laser_defines_z)?
+                    .write("discard_background_e", &discard_bg_e)?
+                    .write("min_energy", &min_energy.convert(&units.energy))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
@@ -764,18 +780,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, a, n, id, pid) = photons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(photons);
 
                 fs.create_group("photon")?
-                    .write_all("weight", &w)?
-                    .write_all("a0_at_creation", &a)?
-                    .write_all("n_pos", &n)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("position", &x)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("a0_at_creation", &a[..])?
+                    .write("n_pos", &n[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("position", &x[..])?
+                    .write("momentum", &p[..])?;
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
@@ -788,17 +804,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = electrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(electrons);
 
                 fs.create_group("electron")?
-                    .write_all("weight", &w)?
-                    .write_all("n_gamma", &n)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("position", &x)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("n_gamma", &n[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("position", &x[..])?
+                    .write("momentum", &p[..])?;
 
                 let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
@@ -808,17 +824,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = positrons
                     .iter()
-                    .map(|pt| (pt.position(), pt.momentum(), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
                     .unzip_n_vec();
                 drop(positrons);
 
                 fs.create_group("positron")?
-                    .write_all("weight", &w)?
-                    .write_all("n_gamma", &n)?
-                    .write_all("position", &x)?
-                    .write_all("id", &id)?
-                    .write_all("parent_id", &pid)?
-                    .write_all("momentum", &p)?;
+                    .write("weight", &w[..])?
+                    .write("n_gamma", &n[..])?
+                    .write("position", &x[..])?
+                    .write("id", &id[..])?
+                    .write("parent_id", &pid[..])?
+                    .write("momentum", &p[..])?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);
