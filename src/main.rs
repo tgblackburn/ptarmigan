@@ -425,7 +425,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     let seed = 0x8658b90036b165ebu64 + ((rng_seed as u64) * 0x32f55cddaebae910u64);
-    println!("{:x} {:x} {:x}", 0x8658b90036b165ebu64, 0x32f55cddaebae910u64, seed);
     let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
     for _i in 0..id {
         rng.jump();
