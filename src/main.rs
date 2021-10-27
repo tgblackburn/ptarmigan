@@ -424,8 +424,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(r)
         })?;
 
-    let local_seed = (id as u64) * (1 + rng_seed as u64);
-    let mut rng = Xoshiro256StarStar::seed_from_u64(local_seed);
+    let seed = 0x8658b90036b165ebu64 + ((rng_seed as u64) * 0x32f55cddaebae910u64);
+    let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
+    for _i in 0..id {
+        rng.jump();
+    }
+
     let nums: Vec<usize> = {
         let tasks = ntasks as usize;
         (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()

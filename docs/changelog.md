@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.2
+
+2021-08-19
+
+Fixed:
+
+* Overlapping RNG seeds.
+
 ## v0.8.1
 
 2021-08-11
