@@ -272,15 +272,19 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
-        FastFocusedLaser::emit_photon(u, E, B, dt, rng).map(|k| (k, u - k))
+        let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
+        FastFocusedLaser::emit_photon(u, E, B, dt, rng)
+            .map(|k| (k, u - k, a))
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
-        FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase)
+        let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
+        let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);
+        (prob, frac, momenta.map(|(p1, p2)| (p1, p2, a)))
     }
 }
 
