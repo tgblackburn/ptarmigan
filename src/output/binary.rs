@@ -37,7 +37,7 @@ pub trait AsHdf5Data<'a> {
 impl<'a, T> AsHdf5Data<'a> for T where T: hdf5::types::H5Type {
     fn write_into(&self, group: &'a hdf5::Group, name: &str) -> hdf5::Result<&'a hdf5::Group> {
         group.new_dataset::<T>()
-            .create(name, ())?
+            .create(name)?
             .write_scalar(self)
             .map(|_| group)
     }
@@ -50,7 +50,7 @@ impl<'a> AsHdf5Data<'a> for str {
         match VarLenUnicode::from_str(self) {
             Ok(vlu) => {
                 group.new_dataset::<VarLenUnicode>()
-                    .create(name, ())?
+                    .create(name)?
                     .write_scalar(&vlu)
                     .map(|_| group)
             },
@@ -62,7 +62,7 @@ impl<'a> AsHdf5Data<'a> for str {
 impl<'a, T> AsHdf5Data<'a> for [T] where T: hdf5::types::H5Type {
     fn write_into(&self, group: &'a hdf5::Group, name: &str) -> hdf5::Result<&'a hdf5::Group> {
         group.new_dataset::<T>()
-            .create(name, self.len())?
+            .create(name)?
             .write(self)
             .map(|_| group)
     }
