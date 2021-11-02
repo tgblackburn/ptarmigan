@@ -708,41 +708,41 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Build info
                 file.create_group("build")?
-                    .write("version", env!("CARGO_PKG_VERSION"))?
-                    .write("branch",env!("VERGEN_GIT_BRANCH"))?
-                    .write("commit-hash",env!("VERGEN_GIT_SHA"))?
-                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+                    .write("version", env!("CARGO_PKG_VERSION"), None)?
+                    .write("branch",env!("VERGEN_GIT_BRANCH"), None)?
+                    .write("commit-hash",env!("VERGEN_GIT_SHA"), None)?
+                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"), None)?;
 
                 // Top-level run information
                 let conf = file.create_group("config")?;
-                conf.write("mpi-tasks", &ntasks)?
-                    .write("input-file", raw_input.as_str())?;
+                conf.write("mpi-tasks", &ntasks, None)?
+                    .write("input-file", raw_input.as_str(), None)?;
 
                 conf.create_group("unit")?
-                    .write("position", units.length.name())?
-                    .write("momentum", units.momentum.name())?;
+                    .write("position", units.length.name(), None)?
+                    .write("momentum", units.momentum.name(), None)?;
 
                 // Parsed input configuration
                 conf.create_group("control")?
-                    .write("dt_multiplier", &dt_multiplier)?
-                    .write("radiation_reaction", &rr)?
-                    .write("pair_creation", &tracking_photons)?
-                    .write("lcfa", &using_lcfa)?
-                    .write("rng_seed", &rng_seed)?
-                    .write("increase_pair_rate_by", &pair_rate_increase)?
-                    .write("bandwidth_correction", &finite_bandwidth)?
-                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0))?
-                    .write_if(multiplicity.is_none(), "select_multiplicity", &false)?;
+                    .write("dt_multiplier", &dt_multiplier, None)?
+                    .write("radiation_reaction", &rr, None)?
+                    .write("pair_creation", &tracking_photons, None)?
+                    .write("lcfa", &using_lcfa, None)?
+                    .write("rng_seed", &rng_seed, None)?
+                    .write("increase_pair_rate_by", &pair_rate_increase, None)?
+                    .write("bandwidth_correction", &finite_bandwidth, None)?
+                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0), None)?
+                    .write_if(multiplicity.is_none(), "select_multiplicity", &false, None)?;
 
                 conf.create_group("laser")?
-                    .write("a0", &a0)?
-                    .write("wavelength", &wavelength.convert(&units.length))?
-                    .write("polarization", &pol)?
-                    .write("focusing", &focusing)?
-                    .write("chirp_b", &chirp_b)?
-                    .write_if(focusing, "waist", &waist.convert(&units.length))?
-                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau)?
-                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau)?;
+                    .write("a0", &a0, Some("1"))?
+                    .write("wavelength", &wavelength.convert(&units.length), Some(units.length.name()))?
+                    .write("polarization", &pol, None)?
+                    .write("focusing", &focusing, None)?
+                    .write("chirp_b", &chirp_b, Some("1"))?
+                    .write_if(focusing, "waist", &waist.convert(&units.length), Some(units.length.name()))?
+                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau, Some("s"))?
+                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau, Some("1"))?;
 
                 let charge = match species {
                     Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
@@ -751,27 +751,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
 
                 conf.create_group("beam")?
-                    .write("n", &npart)?
-                    .write("n_real", &((npart as f64) * weight))?
-                    .write("charge", &charge)?
-                    .write("species", species.to_string().as_str())?
-                    .write("gamma", &gamma)?
-                    .write("sigma", &sigma)?
-                    .write("bremsstrahlung_source", &use_brem_spec)?
-                    .write_if(use_brem_spec, "gamma_min", &gamma_min)?
-                    .write("radius", &radius.convert(&units.length))?
-                    .write("length", &length.convert(&units.length))?
-                    .write("collision_angle", &angle)?
-                    .write("rms_divergence", &rms_div)?
-                    .write("offset", &offset.convert(&units.length))?
-                    .write("transverse_distribution_is_normal", &normally_distributed)?
-                    .write("longitudinal_distribution_is_normal", &true)?;
+                    .write("n", &npart, Some("1"))?
+                    .write("n_real", &((npart as f64) * weight), Some("1"))?
+                    .write("charge", &charge, Some("C"))?
+                    .write("species", species.to_string().as_str(), None)?
+                    .write("gamma", &gamma, Some("1"))?
+                    .write("sigma", &sigma, Some("1"))?
+                    .write("bremsstrahlung_source", &use_brem_spec, None)?
+                    .write_if(use_brem_spec, "gamma_min", &gamma_min, Some("1"))?
+                    .write("radius", &radius.convert(&units.length), Some(units.length.name()))?
+                    .write("length", &length.convert(&units.length), Some(units.length.name()))?
+                    .write("collision_angle", &angle, Some("rad"))?
+                    .write("rms_divergence", &rms_div, Some("rad"))?
+                    .write("offset", &offset.convert(&units.length), Some(units.length.name()))?
+                    .write("transverse_distribution_is_normal", &normally_distributed, None)?
+                    .write("longitudinal_distribution_is_normal", &true, None)?;
 
                 conf.create_group("output")?
-                    .write("laser_defines_positive_z", &laser_defines_z)?
-                    .write("beam_defines_positive_z", &!laser_defines_z)?
-                    .write("discard_background_e", &discard_bg_e)?
-                    .write("min_energy", &min_energy.convert(&units.energy))?;
+                    .write("laser_defines_positive_z", &laser_defines_z, None)?
+                    .write("beam_defines_positive_z", &!laser_defines_z, None)?
+                    .write("discard_background_e", &discard_bg_e, None)?
+                    .write("min_energy", &min_energy.convert(&units.energy), Some(units.energy.name()))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
@@ -789,13 +789,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(photons);
 
                 fs.create_group("photon")?
-                    .write("weight", &w[..])?
-                    .write("a0_at_creation", &a[..])?
-                    .write("n_pos", &n[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("position", &x[..])?
-                    .write("momentum", &p[..])?;
+                    .write("weight", &w[..], Some("1"))?
+                    .write("a0_at_creation", &a[..], Some("1"))?
+                    .write("n_pos", &n[..], Some("1"))?
+                    .write("id", &id[..], None)?
+                    .write("parent_id", &pid[..], None)?
+                    .write("position", &x[..], Some(units.length.name()))?
+                    .write("momentum", &p[..], Some(units.momentum.name()))?;
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
@@ -813,12 +813,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(electrons);
 
                 fs.create_group("electron")?
-                    .write("weight", &w[..])?
-                    .write("n_gamma", &n[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("position", &x[..])?
-                    .write("momentum", &p[..])?;
+                    .write("weight", &w[..], Some("1"))?
+                    .write("n_gamma", &n[..], Some("1"))?
+                    .write("id", &id[..], None)?
+                    .write("parent_id", &pid[..], None)?
+                    .write("position", &x[..], Some(units.length.name()))?
+                    .write("momentum", &p[..], Some(units.momentum.name()))?;
 
                 let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
@@ -833,12 +833,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(positrons);
 
                 fs.create_group("positron")?
-                    .write("weight", &w[..])?
-                    .write("n_gamma", &n[..])?
-                    .write("position", &x[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("momentum", &p[..])?;
+                    .write("weight", &w[..], Some("1"))?
+                    .write("n_gamma", &n[..], Some("1"))?
+                    .write("position", &x[..], Some(units.length.name()))?
+                    .write("id", &id[..], None)?
+                    .write("parent_id", &pid[..], None)?
+                    .write("momentum", &p[..], Some(units.momentum.name()))?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);
