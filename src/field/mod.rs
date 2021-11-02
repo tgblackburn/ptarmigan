@@ -45,21 +45,22 @@ pub trait Field {
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
-    /// returns the momentum of that photon, as well as the new
-    /// momentum of the electron
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)>;
+    /// returns the momentum of that photon, the new momentum of the electron,
+    /// and the effective a0 of the interaction.
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`), returning the
     /// probability that it occurs in the specified interval `dt` and,
-    /// if so, the fraction of the photon that decays and the
-    /// the momentum of the electron and positron.
+    /// if so, the fraction of the photon that decays, the
+    /// the momentum of the electron and positron, and the effective
+    /// a0 of the interaction.
     ///
     /// A non-unity `rate_increase` makes pair creation more probable
     /// by the given factor, increasing the statistics for what would
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>);
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>);
 }
 
 #[cfg(test)]
