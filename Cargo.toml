@@ -1,6 +1,6 @@
 [package]
 name = "ptarmigan"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["tgblackburn"]
 edition = "2018"
 publish = false
