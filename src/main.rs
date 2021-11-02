@@ -708,41 +708,41 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Build info
                 file.create_group("build")?
-                    .write("version", env!("CARGO_PKG_VERSION"), None)?
-                    .write("branch",env!("VERGEN_GIT_BRANCH"), None)?
-                    .write("commit-hash",env!("VERGEN_GIT_SHA"), None)?
-                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"), None)?;
+                    .new_data("version").write(env!("CARGO_PKG_VERSION"))?
+                    .new_data("branch").write(env!("VERGEN_GIT_BRANCH"))?
+                    .new_data("commit-hash").write(env!("VERGEN_GIT_SHA"))?
+                    .new_data("features").write(env!("PTARMIGAN_ACTIVE_FEATURES"))?;
 
                 // Top-level run information
                 let conf = file.create_group("config")?;
-                conf.write("mpi-tasks", &ntasks, None)?
-                    .write("input-file", raw_input.as_str(), None)?;
+                conf.new_data("mpi-tasks").write(&ntasks)?
+                    .new_data("input-file").write(raw_input.as_str())?;
 
                 conf.create_group("unit")?
-                    .write("position", units.length.name(), None)?
-                    .write("momentum", units.momentum.name(), None)?;
+                    .new_data("position").write(units.length.name())?
+                    .new_data("momentum").write(units.momentum.name())?;
 
                 // Parsed input configuration
                 conf.create_group("control")?
-                    .write("dt_multiplier", &dt_multiplier, None)?
-                    .write("radiation_reaction", &rr, None)?
-                    .write("pair_creation", &tracking_photons, None)?
-                    .write("lcfa", &using_lcfa, None)?
-                    .write("rng_seed", &rng_seed, None)?
-                    .write("increase_pair_rate_by", &pair_rate_increase, None)?
-                    .write("bandwidth_correction", &finite_bandwidth, None)?
-                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0), None)?
-                    .write_if(multiplicity.is_none(), "select_multiplicity", &false, None)?;
+                    .new_data("dt_multiplier").write(&dt_multiplier)?
+                    .new_data("radiation_reaction").write(&rr)?
+                    .new_data("pair_creation").write(&tracking_photons)?
+                    .new_data("lcfa").write(&using_lcfa)?
+                    .new_data("rng_seed").write(&rng_seed)?
+                    .new_data("increase_pair_rate_by").write(&pair_rate_increase)?
+                    .new_data("bandwidth_correction").write(&finite_bandwidth)?
+                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
+                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_none()).write(&false)?;
 
                 conf.create_group("laser")?
-                    .write("a0", &a0, Some("1"))?
-                    .write("wavelength", &wavelength.convert(&units.length), Some(units.length.name()))?
-                    .write("polarization", &pol, None)?
-                    .write("focusing", &focusing, None)?
-                    .write("chirp_b", &chirp_b, Some("1"))?
-                    .write_if(focusing, "waist", &waist.convert(&units.length), Some(units.length.name()))?
-                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau, Some("s"))?
-                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau, Some("1"))?;
+                    .new_data("a0").with_unit("1").write(&a0)?
+                    .new_data("wavelength").with_unit(units.length.name()).write(&wavelength.convert(&units.length))?
+                    .new_data("polarization").write(&pol)?
+                    .new_data("focusing").write(&focusing)?
+                    .new_data("chirp_b").with_unit("1").write(&chirp_b)?
+                    .new_data("waist").with_unit(units.length.name()).with_condition(|| focusing).write(&waist)?
+                    .new_data("fwhm_duration").with_unit("s").with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?
+                    .new_data("n_cycles").with_unit("1").with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?;
 
                 let charge = match species {
                     Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
@@ -751,27 +751,33 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
 
                 conf.create_group("beam")?
-                    .write("n", &npart, Some("1"))?
-                    .write("n_real", &((npart as f64) * weight), Some("1"))?
-                    .write("charge", &charge, Some("C"))?
-                    .write("species", species.to_string().as_str(), None)?
-                    .write("gamma", &gamma, Some("1"))?
-                    .write("sigma", &sigma, Some("1"))?
-                    .write("bremsstrahlung_source", &use_brem_spec, None)?
-                    .write_if(use_brem_spec, "gamma_min", &gamma_min, Some("1"))?
-                    .write("radius", &radius.convert(&units.length), Some(units.length.name()))?
-                    .write("length", &length.convert(&units.length), Some(units.length.name()))?
-                    .write("collision_angle", &angle, Some("rad"))?
-                    .write("rms_divergence", &rms_div, Some("rad"))?
-                    .write("offset", &offset.convert(&units.length), Some(units.length.name()))?
-                    .write("transverse_distribution_is_normal", &normally_distributed, None)?
-                    .write("longitudinal_distribution_is_normal", &true, None)?;
+                    .new_data("n")
+                        .with_unit("1")
+                        .with_desc("number of primary macroparticles")
+                        .write(&npart)?
+                    .new_data("n_real")
+                        .with_unit("1")
+                        .with_desc("total number of real particles represented by the primary macroparticles")
+                        .write(&((npart as f64) * weight))?
+                    .new_data("charge").with_unit("C").write(&charge)?
+                    .new_data("species").write(species.to_string().as_str())?
+                    .new_data("gamma").with_unit("1").write(&gamma)?
+                    .new_data("sigma").with_unit("1").write(&sigma)?
+                    .new_data("bremsstrahlung_source").write(&use_brem_spec)?
+                    .new_data("gamma_min").with_unit("1").with_condition(|| use_brem_spec).write(&gamma_min)?
+                    .new_data("radius").with_unit(units.length.name()).write(&radius.convert(&units.length))?
+                    .new_data("length").with_unit(units.length.name()).write(&length.convert(&units.length))?
+                    .new_data("collision_angle").with_unit("rad").write(&angle)?
+                    .new_data("rms_divergence").with_unit("rad").write(&rms_div)?
+                    .new_data("offset").with_unit(units.length.name()).write(&offset.convert(&units.length))?
+                    .new_data("transverse_distribution_is_normal").write(&normally_distributed)?
+                    .new_data("longitudinal_distribution_is_normal").write(&true)?;
 
                 conf.create_group("output")?
-                    .write("laser_defines_positive_z", &laser_defines_z, None)?
-                    .write("beam_defines_positive_z", &!laser_defines_z, None)?
-                    .write("discard_background_e", &discard_bg_e, None)?
-                    .write("min_energy", &min_energy.convert(&units.energy), Some(units.energy.name()))?;
+                    .new_data("laser_defines_positive_z").write(&laser_defines_z)?
+                    .new_data("beam_defines_positive_z").write(&!laser_defines_z)?
+                    .new_data("discard_background_e").write(&discard_bg_e)?
+                    .new_data("min_energy").with_unit(units.energy.name()).write(&min_energy.convert(&units.energy))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
@@ -789,13 +795,32 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(photons);
 
                 fs.create_group("photon")?
-                    .write("weight", &w[..], Some("1"))?
-                    .write("a0_at_creation", &a[..], Some("1"))?
-                    .write("n_pos", &n[..], Some("1"))?
-                    .write("id", &id[..], None)?
-                    .write("parent_id", &pid[..], None)?
-                    .write("position", &x[..], Some(units.length.name()))?
-                    .write("momentum", &p[..], Some(units.momentum.name()))?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real photons each macrophoton represents")
+                        .write(&w[..])?
+                    .new_data("a0_at_creation")
+                        .with_unit("1")
+                        .with_desc("normalized amplitude at point of emission")
+                        .write(&a[..])?
+                    .new_data("n_pos")
+                        .with_unit("1")
+                        .with_desc("total probability of pair creation for the photon")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the photon")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the photon")
+                        .write(&x[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the photon")
+                        .write(&p[..])?;
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
@@ -813,12 +838,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                 drop(electrons);
 
                 fs.create_group("electron")?
-                    .write("weight", &w[..], Some("1"))?
-                    .write("n_gamma", &n[..], Some("1"))?
-                    .write("id", &id[..], None)?
-                    .write("parent_id", &pid[..], None)?
-                    .write("position", &x[..], Some(units.length.name()))?
-                    .write("momentum", &p[..], Some(units.momentum.name()))?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real electrons each macroelectron represents")
+                        .write(&w[..])?
+                    .new_data("n_gamma")
+                        .with_unit("1")
+                        .with_desc("total number of photons emitted by the electron")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the electron")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the electron")
+                        .write(&x[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the electron")
+                        .write(&p[..])?;
 
                 let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
@@ -826,19 +867,41 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     positrons.append(&mut recv);
                 }
-                let (x, p, w, n, id, pid) = positrons
+                let (x, p, w, n, id, pid, a) = positrons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id(), pt.payload()))
                     .unzip_n_vec();
                 drop(positrons);
 
                 fs.create_group("positron")?
-                    .write("weight", &w[..], Some("1"))?
-                    .write("n_gamma", &n[..], Some("1"))?
-                    .write("position", &x[..], Some(units.length.name()))?
-                    .write("id", &id[..], None)?
-                    .write("parent_id", &pid[..], None)?
-                    .write("momentum", &p[..], Some(units.momentum.name()))?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real positrons each macropositron represents")
+                        .write(&w[..])?
+                    .new_data("a0_at_creation")
+                        .with_unit("1")
+                        .with_desc("normalized amplitude at point of creation")
+                        .write(&a[..])?
+                    .new_data("n_gamma")
+                        .with_unit("1")
+                        .with_desc("total number of photons emitted by the positron")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the positron")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the positron")
+                        .write(&x[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the positron")
+                        .write(&p[..])?;
+
+                fs.group("positron")?.link_soft("a0_at_creation", "xi")?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);
