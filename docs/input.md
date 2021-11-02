@@ -68,7 +68,8 @@ The possible distributions are:
 * `angle_x`, `angle_y`: angle between particle momentum and the z-axis, in radians
 * `angle`: polar angle between particle momentum and the z-axis, in radians
 * `pi_minus_angle` (`theta` also accepted): polar angle between particle momentum and the *negative* z-axis, in radians
-* `birth_a`: normalized amplitude a<sub>0</sub> at the point where the particle was created
+* `birth_a`: normalized amplitude a<sub>0</sub> at the point where the particle was created:
+either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value, `e E / m c omega` (if using LCFA).
 
 ## stats
 
