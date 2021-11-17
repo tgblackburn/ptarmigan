@@ -66,11 +66,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                         dt
                     );
 
-                    if let Some((k, u_prime)) = field.radiate(r, u, dt_actual, rng) {
+                    if let Some((k, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
-                            .with_payload((u * u - 1.0).max(0.0).sqrt())
+                            .with_payload(a_eff)
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
@@ -100,17 +100,19 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
 
                     let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
-                    if let Some((q_e, q_p)) = momenta {
+                    if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
                             .with_weight(frac * pt.weight())
                             .with_id(id)
+                            .with_payload(a_eff)
                             .with_parent_id(pt.id())
                             .with_normalized_momentum(q_e);
                         let positron = Particle::create(Species::Positron, r)
                             .with_weight(frac * pt.weight())
                             .with_id(id + 1)
+                            .with_payload(a_eff)
                             .with_parent_id(pt.id())
                             .with_normalized_momentum(q_p);
                         primaries.push(electron);

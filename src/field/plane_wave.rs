@@ -131,7 +131,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -149,13 +149,13 @@ impl Field for PlaneWave {
         let prob = nonlinear_compton::probability(kappa, u, dt).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
             let (n, k) = nonlinear_compton::generate(kappa, u, rng, None);
-            Some((k, u + (n as f64) * kappa - k))
+            Some((k, u + (n as f64) * kappa - k, a))
         } else {
             None
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
         let a = self.a_sqd(r).sqrt();
         let phase: f64 = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -175,7 +175,7 @@ impl Field for PlaneWave {
         };
         if rng.gen::<f64>() < prob * rate_increase {
             let (n, q_p) = pair_creation::generate(ell, kappa, a, rng);
-            (prob, 1.0 / rate_increase, Some((ell + (n as f64) * kappa - q_p, q_p)))
+            (prob, 1.0 / rate_increase, Some((ell + (n as f64) * kappa - q_p, q_p, a)))
         } else {
             (prob, 0.0, None)
         }

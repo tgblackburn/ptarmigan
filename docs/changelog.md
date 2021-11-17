@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.8.3
+
+In progress.
+
+Fixed:
+
+* Output of birth a (normalised amplitude at particle creation point) under LCFA.
+
 ## v0.8.2
 
 2021-08-19
