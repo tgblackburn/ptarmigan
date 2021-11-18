@@ -742,7 +742,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_data("polarization").write(&pol)?
                     .new_data("focusing").write(&focusing)?
                     .new_data("chirp_b").with_unit("1").write(&chirp_b)?
-                    .new_data("waist").with_unit(units.length.name()).with_condition(|| focusing).write(&waist)?
+                    .new_data("waist").with_unit(units.length.name()).with_condition(|| focusing).write(&waist.convert(&units.length))?
                     .new_data("fwhm_duration").with_unit("s").with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?
                     .new_data("n_cycles").with_unit("1").with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?;
 
