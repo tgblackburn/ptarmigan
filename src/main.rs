@@ -737,14 +737,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_data("select_multiplicity").with_condition(|| multiplicity.is_none()).write(&false)?;
 
                 conf.create_group("laser")?
-                    .new_data("a0").with_unit("1").write(&a0)?
-                    .new_data("wavelength").with_unit(units.length.name()).write(&wavelength.convert(&units.length))?
-                    .new_data("polarization").write(&pol)?
-                    .new_data("focusing").write(&focusing)?
-                    .new_data("chirp_b").with_unit("1").write(&chirp_b)?
-                    .new_data("waist").with_unit(units.length.name()).with_condition(|| focusing).write(&waist.convert(&units.length))?
-                    .new_data("fwhm_duration").with_unit("s").with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?
-                    .new_data("n_cycles").with_unit("1").with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d")).write(&tau)?;
+                    .new_data("a0")
+                        .with_unit("1")
+                        .with_desc("peak value of the laser normalized amplitude")
+                        .write(&a0)?
+                    .new_data("wavelength")
+                        .with_unit(units.length.name())
+                        .with_desc("wavelength of the carrier")
+                        .write(&wavelength.convert(&units.length))?
+                    .new_data("polarization")
+                        .with_desc("linear/circular")
+                        .write(&pol)?
+                    .new_data("focusing")
+                        .with_desc("true/false => pulse is modelled in 1d/3d")
+                        .write(&focusing)?
+                    .new_data("chirp_b")
+                        .with_unit("1")
+                        .with_desc("parameter that appears in carrier phase = phi + b phi^2")
+                        .write(&chirp_b)?
+                    .new_data("waist")
+                        .with_unit(units.length.name())
+                        .with_desc("radius in the focal plane at which intensity is 1/e^2 of its peak value")
+                        .with_condition(|| focusing)
+                        .write(&waist.convert(&units.length))?
+                    .new_data("fwhm_duration")
+                        .with_unit("s")
+                        .with_desc("full width at half maximum of the temporal intensity profile")
+                        .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
+                        .write(&tau)?
+                    .new_data("n_cycles")
+                        .with_unit("1")
+                        .with_desc("number of wavelengths corresponding to the total pulse duration")
+                        .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
+                        .write(&tau)?;
 
                 let charge = match species {
                     Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
