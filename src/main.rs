@@ -18,6 +18,8 @@ use rand_xoshiro::*;
 unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 7);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 8);
 
 mod constants;
 mod field;
@@ -817,7 +819,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, a, n, id, pid) = photons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.payload(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id()
+                    ))
                     .unzip_n_vec();
                 drop(photons);
 
@@ -860,7 +870,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = electrons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id()
+                    ))
                     .unzip_n_vec();
                 drop(electrons);
 
@@ -894,9 +911,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     positrons.append(&mut recv);
                 }
-                let (x, p, w, n, id, pid, a) = positrons
+                let (x, x0, p, w, n, id, pid, a) = positrons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id(), pt.payload()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.was_created_at().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id(),
+                        pt.payload()
+                    ))
                     .unzip_n_vec();
                 drop(positrons);
 
@@ -923,6 +949,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_unit(units.length.name())
                         .with_desc("four-position of the positron")
                         .write(&x[..])?
+                    .new_data("position_at_creation")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position at which the positron was created")
+                        .write(&x0[..])?
                     .new_data("momentum")
                         .with_unit(units.momentum.name())
                         .with_desc("four-momentum of the positron")
