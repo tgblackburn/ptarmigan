@@ -389,300 +389,91 @@ mod tests {
 
     #[test]
     fn partial_rate() {
-        let (n, a, eta) = (2, 0.5, 0.15);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 2.7484865392e-3;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-9);
+        let max_error = 1.0e-6;
 
-        let (n, a, eta) = (10, 1.0, 0.2);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 1.984654425e-4;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-9);
+        // n, a, eta, target
+        let pts = [
+            (2,    0.5, 0.15,   2.748486539e-3),
+            (10,   1.0, 0.2,    1.984654425e-4),
+            (80,   2.0, 0.2,    3.751480198e-6),
+            (160,  2.0, 0.2,    6.842944878e-9),
+            (50,   3.0, 0.1,    5.090018978e-4),
+            (200,  3.0, 0.1,    3.504645316e-6),
+            (200,  4.0, 0.1,    5.564288841e-5),
+            (500,  4.0, 0.1,    9.722534139e-7),
+            (100,  5.0, 0.1,    6.745093014e-4),
+            (500,  5.0, 0.1,    1.258283729e-5),
+            (1000, 5.0, 0.1,    4.137051481e-7),
+            (40,   7.0, 0.1,    3.198368332e-3),
+            (160,  7.0, 0.1,    6.698029091e-4),
+            (640,  7.0, 0.1,    5.063579159e-5),
+            (2560, 7.0, 0.1,    2.322138448e-7),
+            (100,  9.5, 0.1,    1.656736051e-3),
+            (1000, 9.5, 0.1,    6.425026440e-5),
+            (8000, 9.5, 0.1,    2.056455838e-8),
+            (100,  9.5, 0.01,   1.981917068e-4),
+            (1000, 9.5, 0.01,   1.624055198e-5),
+            (100,  9.5, 0.0012, 2.424143218e-5),
+            (1000, 9.5, 0.0012, 2.319090168e-6),
+            (5000, 9.5, 0.0012, 3.366698038e-8),
+        ];
 
-        let (n, a, eta) = (80, 2.0, 0.2);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 3.751480198e-6;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (160, 2.0, 0.2);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 6.842944878e-9;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (50, 3.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 5.090018978e-4;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (200, 3.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 3.504645316e-6;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (200, 4.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 5.564288841e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (500, 4.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 9.722534139e-7;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (100, 5.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 6.745093014e-4;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (500, 5.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 1.258283729e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (1000, 5.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 4.137051481e-7;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (40, 7.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 3.198368332e-3;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (160, 7.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 6.698029091e-4;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (640, 7.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 5.063579159e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (2560, 7.0, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 2.322138448e-7;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (100, 9.5, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 1.656736051e-3;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (1000, 9.5, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 6.425026440e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (8000, 9.5, 0.1);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 2.056455838e-8;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (100, 9.5, 0.01);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 1.981917068e-4;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (1000, 9.5, 0.01);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 1.624055198e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (2000, 9.5, 0.01);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 3.978922066e-6;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-3);
-
-        let (n, a, eta) = (100, 9.5, 0.0012);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 2.424143218e-5;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (1000, 9.5, 0.0012);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 2.319090168e-6;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
-
-        let (n, a, eta) = (5000, 9.5, 0.0012);
-        let rate = integrated_spectrum(n, a, eta);
-        let target = 3.366698038e-8;
-        let error = ((rate - target) / target).abs();
-        println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, rate, error);
-        assert!(error < 1.0e-6);
+        for (n, a, eta, target) in &pts {
+            let result = integrated_spectrum(*n, *a, *eta);
+            let error = (target - result).abs() / target;
+            println!("n = {}, a = {:.2e}, eta = {:.2e} => rate = (alpha/eta) {:.6e}, err = {:.3e}", n, a, eta, result, error);
+            assert!(error < max_error);
+        }
     }
 
     #[test]
     fn total_rate() {
-        // nmax = 10 (1 + a^3)
-        let (nmax, a, eta) = (10, 0.5, 0.2);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
+        let max_error = 1.0e-3;
 
-        let (nmax, a, eta) = (20, 1.0, 0.2);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
+        // nmax = 10 (1 + a^3), a, eta
+        let pts = [
+            (10,    0.5,  0.2),
+            (20,    1.0,  0.2),
+            (280,   3.0,  0.12),
+            (650,   4.0,  0.12),
+            (1260,  5.0,  0.12),
+            (20,    1.0,  0.75),
+            (280,   3.0,  0.75),
+            (3440,  7.0,  0.1),
+            (6151,  8.5,  0.6),
+            (10010, 10.0, 0.0012),
+            (10010, 10.0, 0.04),
+            (10010, 10.0, 0.08),
+            (10010, 10.0, 0.16),
+        ];
 
-        let (nmax, a, eta) = (280, 3.0, 0.12);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (650, 4.0, 0.12);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (1260, 5.0, 0.12);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (20, 1.0, 0.75);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (280, 3.0, 0.75);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (3440, 7.0, 0.1);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (6151, 8.5, 0.6);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (10010, 10.0, 0.0012);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (10010, 10.0, 0.04);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (10010, 10.0, 0.08);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
-
-        let (nmax, a, eta) = (10010, 10.0, 0.16);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).collect();
-        let total: f64 = rates.iter().sum();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
+        for (nmax, a, eta) in &pts {
+            let rates: Vec<f64> = (1..=*nmax).map(|n| integrated_spectrum(n, *a, *eta)).collect();
+            let total: f64 = rates.iter().sum();
+            let target = sum_integrated_spectra(*a, *eta);
+            let error = ((total - target) / target).abs();
+            println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+            assert!(error < max_error);
+        }
     }
 
     #[test]
     fn total_rate_low_eta() {
-        let (nmax, a, eta) = (280, 3.0, 0.0005);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum_low_eta(n, a)).collect();
-        let total = eta * rates.iter().sum::<f64>();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
+        let max_error = 1.0e-3;
 
-        let (nmax, a, eta) = (10010, 10.0, 0.0005);
-        let rates: Vec<f64> = (1..=nmax).map(|n| integrated_spectrum_low_eta(n, a)).collect();
-        let total = eta * rates.iter().sum::<f64>();
-        let target = sum_integrated_spectra(a, eta);
-        let error = ((total - target) / target).abs();
-        println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
-        assert!(error < 1.0e-3);
+        let pts = [
+            (280, 3.0, 0.0005),
+            (10010, 10.0, 0.0005),
+        ];
+
+        for (nmax, a, eta) in &pts {
+            let rates: Vec<f64> = (1..=*nmax).map(|n| integrated_spectrum_low_eta(n, *a)).collect();
+            let total: f64 = eta * rates.iter().sum::<f64>();
+            let target = sum_integrated_spectra(*a, *eta);
+            let error = ((total - target) / target).abs();
+            println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
+            assert!(error < max_error);
+        }
     }
 
     #[test]
