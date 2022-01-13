@@ -7,6 +7,7 @@ use crate::geometry::*;
 use crate::field::Polarization;
 
 mod cp;
+mod lp;
 
 /// The total probability that a photon is emitted
 /// by an electron with normalized quasimomentum `q`
