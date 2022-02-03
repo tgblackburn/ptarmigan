@@ -142,13 +142,13 @@ impl ThetaBound {
 }
 
 /// `double_diff_partial_rate` integrated over 0 < theta < 2 pi
-fn single_diff_partial_rate(a: f64, eta: f64, s: f64, dj: &mut DoubleBessel, nodes: &[f64], weights: &[f64]) -> f64 {
+fn single_diff_partial_rate(a: f64, eta: f64, s: f64, theta_max: f64, dj: &mut DoubleBessel, nodes: &[f64], weights: &[f64]) -> f64 {
     nodes.iter()
         // integrate over 0 to pi/2, then multiply by 4
-        .map(|x| 0.5 * (x + 1.0) * consts::FRAC_PI_2)
+        .map(|x| 0.5 * (x + 1.0) * theta_max)
         .zip(weights.iter())
         .map(|(theta, w)|
-            4.0 * (0.5 * consts::FRAC_PI_2) * w * double_diff_partial_rate(a, eta, s, theta, dj)
+            4.0 * (0.5 * theta_max) * w * double_diff_partial_rate(a, eta, s, theta, dj)
         )
         .sum()
 }
@@ -163,6 +163,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
 
     // allocate once and reuse
     let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+    let theta_max = ThetaBound::for_harmonic(n, a, eta);
 
     let integral: f64 = if sn < 1.0 {
         // if s_peak < 2/3 * smax
@@ -171,7 +172,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
             .map(|x| 0.5 * (x + 1.0) * s_peak)
             .zip(weights.iter())
             .map(|(s, w)|
-                w * (0.5 * s_peak) * single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)
+                w * (0.5 * s_peak) * single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)
             )
             .sum();
 
@@ -180,7 +181,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
             .map(|x| s_peak + 0.5 * (smax - s_peak) * (x + 1.0))
             .zip(weights.iter())
             .map(|(s, w)|
-                w * 0.5 * (smax - s_peak) * single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)
+                w * 0.5 * (smax - s_peak) * single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)
             )
             .sum();
 
@@ -193,7 +194,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
             .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
             .zip(weights.iter())
             .map(|(s, w)|
-                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)
+                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)
             )
             .sum();
 
@@ -202,7 +203,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
             .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
             .zip(weights.iter())
             .map(|(s, w)|
-                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)
+                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)
             )
             .sum();
 
@@ -211,7 +212,7 @@ fn partial_rate(n: i32, a: f64, eta: f64, nodes: &[f64], weights: &[f64]) -> f64
             .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
             .zip(weights.iter())
             .map(|(s, w)|
-                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)
+                w * 0.5 * (s1 - s0) * single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)
             )
             .sum();
 
@@ -274,6 +275,7 @@ mod tests {
         let s_peak = sn / (2.0 + sn);
         let smax = sn / (1.0 + sn);
         let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+        let theta_max = ThetaBound::for_harmonic(n, a, eta);
         let nodes = &GAUSS_128_NODES;
         let weights = &GAUSS_128_WEIGHTS;
 
@@ -282,13 +284,13 @@ mod tests {
             // split integral in two: 0 to s_peak
             let mut lower: Vec<(f64, f64)> = nodes.iter()
                 .map(|x| 0.5 * (x + 1.0) * s_peak)
-                .map(|s| (s, single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)))
+                .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)))
                 .collect();
 
             // and then s_peak to s_max:
             let mut upper = nodes.iter()
                 .map(|x| s_peak + 0.5 * (smax - s_peak) * (x + 1.0))
-                .map(|s| (s, single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)))
+                .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)))
                 .collect();
 
             lower.append(&mut upper);
@@ -299,19 +301,19 @@ mod tests {
             let (s0, s1) = (0.0, smax - 2.0 * (smax - s_peak));
             let mut lower: Vec<(f64, f64)> = nodes.iter()
                 .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
-                .map(|s| (s, single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)))
+                .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)))
                 .collect();
 
             let (s0, s1) = (smax - 2.0 * (smax - s_peak), s_peak);
             let mut mid = nodes.iter()
                 .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
-                .map(|s| (s, single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)))
+                .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)))
                 .collect();
 
             let (s0, s1) = (s_peak, smax);
             let mut upper = nodes.iter()
                 .map(|x| s0 + 0.5 * (s1 - s0) * (x + 1.0))
-                .map(|s| (s, single_diff_partial_rate(a, eta, s, &mut dj, nodes, weights)))
+                .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj, nodes, weights)))
                 .collect();
 
             lower.append(&mut mid);
@@ -338,6 +340,21 @@ mod tests {
         //     writeln!(file, "{:.6e}", rate).unwrap();
         // }
 
+        let (a, eta): (f64, f64) = (0.1, 0.1);
+        for n in [1, 2, 5, 10] {
+            let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
+            let rate32 = partial_rate(n, a, eta, &GAUSS_32_NODES, &GAUSS_32_WEIGHTS);
+            let rate64 = partial_rate(n, a, eta, &GAUSS_64_NODES, &GAUSS_64_WEIGHTS);
+            let rate128 = partial_rate(n, a, eta, &GAUSS_128_NODES, &GAUSS_128_WEIGHTS);
+            println!(
+                "a = {}, n = {}: rate = {:.3e} [128], error = {:.3e} [16], {:.3e} [32], {:.3e} [64]",
+                a, n, rate128,
+                (rate16 - rate128).abs() / rate128,
+                (rate32 - rate128).abs() / rate128,
+                (rate64 - rate128).abs() / rate128,
+            );
+        }
+
         let (a, eta): (f64, f64) = (1.0, 0.1);
         for n in [1, 5, 10, 20] {
             let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
@@ -354,6 +371,51 @@ mod tests {
         }
 
         let (a, eta): (f64, f64) = (10.0, 0.1);
+        for n in [1, 10, 100, 1000] {
+            let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
+            let rate32 = partial_rate(n, a, eta, &GAUSS_32_NODES, &GAUSS_32_WEIGHTS);
+            let rate64 = partial_rate(n, a, eta, &GAUSS_64_NODES, &GAUSS_64_WEIGHTS);
+            let rate128 = partial_rate(n, a, eta, &GAUSS_128_NODES, &GAUSS_128_WEIGHTS);
+            println!(
+                "a = {}, n = {}: rate = {:.3e} [128], error = {:.3e} [16], {:.3e} [32], {:.3e} [64]",
+                a, n, rate128,
+                (rate16 - rate128).abs() / rate128,
+                (rate32 - rate128).abs() / rate128,
+                (rate64 - rate128).abs() / rate128,
+            );
+        }
+
+        let (a, eta): (f64, f64) = (0.1, 0.01);
+        for n in [1, 5, 10, 20] {
+            let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
+            let rate32 = partial_rate(n, a, eta, &GAUSS_32_NODES, &GAUSS_32_WEIGHTS);
+            let rate64 = partial_rate(n, a, eta, &GAUSS_64_NODES, &GAUSS_64_WEIGHTS);
+            let rate128 = partial_rate(n, a, eta, &GAUSS_128_NODES, &GAUSS_128_WEIGHTS);
+            println!(
+                "a = {}, n = {}: rate = {:.3e} [128], error = {:.3e} [16], {:.3e} [32], {:.3e} [64]",
+                a, n, rate128,
+                (rate16 - rate128).abs() / rate128,
+                (rate32 - rate128).abs() / rate128,
+                (rate64 - rate128).abs() / rate128,
+            );
+        }
+
+        let (a, eta): (f64, f64) = (1.0, 0.01);
+        for n in [1, 5, 10, 20] {
+            let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
+            let rate32 = partial_rate(n, a, eta, &GAUSS_32_NODES, &GAUSS_32_WEIGHTS);
+            let rate64 = partial_rate(n, a, eta, &GAUSS_64_NODES, &GAUSS_64_WEIGHTS);
+            let rate128 = partial_rate(n, a, eta, &GAUSS_128_NODES, &GAUSS_128_WEIGHTS);
+            println!(
+                "a = {}, n = {}: rate = {:.3e} [128], error = {:.3e} [16], {:.3e} [32], {:.3e} [64]",
+                a, n, rate128,
+                (rate16 - rate128).abs() / rate128,
+                (rate32 - rate128).abs() / rate128,
+                (rate64 - rate128).abs() / rate128,
+            );
+        }
+
+        let (a, eta): (f64, f64) = (10.0, 0.01);
         for n in [1, 10, 100, 1000] {
             let rate16 = partial_rate(n, a, eta, &GAUSS_16_NODES, &GAUSS_16_WEIGHTS);
             let rate32 = partial_rate(n, a, eta, &GAUSS_32_NODES, &GAUSS_32_WEIGHTS);
