@@ -1,5 +1,6 @@
 //! Rates and spectra for circularly polarized backgrounds
 use std::f64::consts;
+use num_complex::Complex;
 use crate::special_functions::*;
 use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
@@ -36,6 +37,108 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
     };
 
     (-gamma[0] * gamma[0] - a * a * (1.0 + 0.5 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])) / (2.0 * consts::PI)
+}
+
+#[derive(Debug)]
+struct ThetaBound {
+    s: [f64; 16],
+    f: [f64; 16],
+}
+
+impl ThetaBound {
+    fn for_harmonic(n: i32, a: f64, eta: f64) -> Self {
+        let mut s = [0.0; 16];
+        let mut f = [0.0; 16];
+
+        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+
+        for i in 0..16 {
+            let z = (consts::PI * (i as f64) / 15.0).cos();
+            s[i] = 0.5 * (z + 1.0) * sn / (1.0 + sn);
+
+            // Coordinates in (x,y) space where integration over theta begins
+            let x = {
+                let wn = s[i] / (sn * (1.0 - s[i]));
+                let wn = wn.min(1.0);
+                2.0 * (n as f64) * a * (wn * (1.0 - wn)).sqrt() / (1.0 + 0.5 * a * a).sqrt()
+            };
+
+            let y = a * a * s[i] / (8.0 * eta * (1.0 - s[i]));
+
+            // At fixed y, J(n,x,y) is maximised at
+            let x_crit = if y > (n as f64) / 6.0 {
+                4.0 * y.sqrt() * ((n as f64) - 2.0 * y).sqrt()
+            } else {
+                (n as f64) + 2.0 * y
+            };
+
+            // with value approx J_n(n) ~ 0.443/n^(1/3), here log-scaled
+            let ln_j_crit = 0.443f64.ln() - (n as f64).ln() / 3.0;
+
+            // The value of J(n,0,y) is approximately
+            let ln_j_bdy = if n % 2 == 0 {
+                Self::ln_double_bessel_x_zero(n, y)
+            } else {
+                Self::ln_double_bessel_x_zero(n + 1, y)
+            };
+            let ln_j_bdy = ln_j_bdy.min(ln_j_crit);
+
+            // Exponential fit between x = 0 and x = x_crit, looking for the
+            // x which is 100x smaller than at the starting point
+            let cos_theta = 1.0 - x_crit * 0.01f64.ln() / (x * (ln_j_bdy - ln_j_crit));
+            let cos_theta = cos_theta.max(-1.0);
+
+            f[i] = cos_theta.acos();
+            if f[i].is_nan() {
+                f[i] = consts::PI;
+            }
+
+            //println!("(x, y) = ({:.3e}, {:.3e}), (x_crit, j_crit) = ({:.3e}, {:.3e}), j_bdy = {:.3e}, cos_theta = {:.3e}, theta = {:.3e}", x, y, x_crit, ln_j_crit.exp(), ln_j_bdy.exp(), cos_theta, f[i]);
+        }
+
+        let mut f_min = f[0];
+        for i in 1..16 {
+            if f[i] < f_min {
+                f_min = f[i];
+            } else {
+                f[i] = f_min;
+            }
+        }
+
+        Self {s, f}
+    }
+
+    /// Approximate value for the double Bessel function J(n,0,y)
+    /// along x = 0, using a saddle point approximation for small y
+    /// and a Taylor series for y near n/2.
+    fn ln_double_bessel_x_zero(n: i32, y: f64) -> f64 {
+        let n = n as f64;
+        let z = (n / (4.0 * y) - 0.5).sqrt();
+        let theta = Complex::new(
+            consts::FRAC_PI_2,
+            ((1.0 + z * z).sqrt() - z).ln()
+        );
+        let f = Complex::<f64>::i() * (-n * theta - y * (2.0 * theta).sin());
+        let f2 = Complex::<f64>::i() * 4.0 * y * (2.0 * theta).sin();
+        let e = 0.5 * (consts::PI - f2.arg());
+        let phase = f + Complex::i() * e;
+        (2.0 / (consts::PI * f2.norm())).sqrt().ln() + phase.re + Complex::new(phase.im, 0.0).cos().ln().re
+    }
+
+    fn at(&self, s: f64) -> f64 {
+        let mut val = self.f[15];
+
+        for i in 1..16 {
+            // s[i] is stored backwards, decreasing from s_max
+            if s > self.s[i] {
+                let weight = (s - self.s[i-1]) / (self.s[i] - self.s[i-1]);
+                val = weight * self.f[i] + (1.0 - weight) * self.f[i-1];
+                break;
+            }
+        }
+
+        val.min(consts::FRAC_PI_2)
+    }
 }
 
 /// `double_diff_partial_rate` integrated over 0 < theta < 2 pi
@@ -134,13 +237,33 @@ mod tests {
         let nodes: Vec<f64> = (0..=1000).map(|i| (i as f64) / 1000.0).collect();
         let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
 
+        let max_theta = ThetaBound::for_harmonic(n, a, eta);
+
         let filename = format!("output/nlc_lp_dd_rate_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
         for s in nodes.iter().map(|x| x * smax) {//.filter(|&s| s > 0.5) {
             for theta in nodes.iter().map(|x| x * consts::FRAC_PI_2) {//.filter(|&theta| theta < 0.3) {
+                if theta > max_theta.at(s) {
+                    continue;
+                }
                 let rate = double_diff_partial_rate(a, eta, s, theta, &mut dj);
                 writeln!(file, "{:.6e} {:.6e} {:.6e}", s, theta, rate).unwrap();
             }
+        }
+    }
+
+    #[test]
+    fn theta_bounds() {
+        let (n, a, eta) = (1, 10.0, 0.1);
+        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+        let smax = sn / (1.0 + sn);
+        let bound = ThetaBound::for_harmonic(n, a, eta);
+        println!("{:?}", bound);
+
+        for i in 0..10 {
+            let s = (i as f64) * smax / 10.0;
+            let theta = bound.at(s);
+            println!("{} {}", s, theta);
         }
     }
 
