@@ -353,6 +353,7 @@ mod tests {
     use std::io::Write;
     use rand::prelude::*;
     use rand_xoshiro::*;
+    use rayon::prelude::*;
     use super::*;
 
     #[test]
@@ -545,15 +546,39 @@ mod tests {
         const N_ROWS: usize = 15; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        println!("Running on {:?}", pool);
+
+        let mut pts: Vec<(usize, usize, f64, f64, i32)> = Vec::new();
         for i in 0..N_ROWS {
             let eta = LOW_ETA_LIMIT * 10.0f64.powf((i as f64) / (ETA_DENSITY as f64));
             for j in 0..N_COLS {
                 let a = LOW_A_LIMIT * 10.0f64.powf((j as f64) / (A_DENSITY as f64));
                 let n_max = (5.0 * (1.0 + 2.0 * a * a)).ceil() as i32;
-                let rate = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum();
-                table[i][j] = rate;
-                println!("LP NLC: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, table[i][j].ln());
+                pts.push((i, j, a, eta, n_max));
             }
+        }
+
+        let pts: Vec<(usize, usize, f64)> = pool.install(|| {
+            pts.into_par_iter()
+            .map(|(i, j, a, eta, n_max)| {
+                let rate = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
+                println!("LP NLC [{:>3}]: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", rayon::current_thread_index().unwrap_or(1),eta, a, rate.ln());
+                (i, j, rate)
+            })
+            .collect()
+        });
+
+        for (i, j, rate) in pts {
+            table[i][j] = rate;
         }
 
         let mut file = File::create("output/rate_table.rs").unwrap();

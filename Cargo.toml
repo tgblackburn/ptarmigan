@@ -33,3 +33,6 @@ leading-order-only = []
 
 [build-dependencies]
 vergen = "4.0.3"
+
+[dev-dependencies]
+rayon = "1.5.1"
