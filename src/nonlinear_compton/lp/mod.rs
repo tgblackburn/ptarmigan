@@ -540,10 +540,10 @@ mod tests {
         const LOW_ETA_LIMIT: f64 = 0.001;
         const LOW_A_LIMIT: f64 = 0.2;
         // 20, 20, 40, 60
-        const A_DENSITY: usize = 5; // points per order of magnitude
-        const ETA_DENSITY: usize = 5;
-        const N_COLS: usize = 10; // pts in a0 direction
-        const N_ROWS: usize = 15; // pts in eta direction
+        const A_DENSITY: usize = 10; // points per order of magnitude
+        const ETA_DENSITY: usize = 10;
+        const N_COLS: usize = 20; // pts in a0 direction
+        const N_ROWS: usize = 30; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
