@@ -260,7 +260,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
 /// but implemented as a table lookup.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase).
 #[allow(unused_parens)]
-fn rate(a: f64, eta: f64) -> f64 {
+fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());
 
     if x < rate_table::MIN[0] {
@@ -280,9 +280,10 @@ fn rate(a: f64, eta: f64) -> f64 {
                 + (1.0 - dx) * dy * rate_table::TABLE[iy+1][ix]
                 + dx * dy * rate_table::TABLE[iy+1][ix+1]
             );
-            f.exp()
+            Some(f.exp())
         } else {
-            panic!("NLC (LP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+            eprintln!("NLC (LP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+            None
         }
     }
 }
@@ -293,7 +294,7 @@ fn rate(a: f64, eta: f64) -> f64 {
 fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
     let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
     let frac = rng.gen::<f64>();
-    let target = frac * rate(a, eta);
+    let target = frac * rate(a, eta).unwrap();
     let mut cumsum: f64 = 0.0;
     let mut n: Option<i32> = None;
     let mut max = 0.0;
@@ -466,19 +467,39 @@ mod tests {
     fn total_rate_accuracy() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
-        for _i in 0..10 {
-            let a = (rate_table::MIN[0] + rng.gen::<f64>() * rate_table::STEP[0] * ((rate_table::N_COLS - 1) as f64)).exp();
-            let eta = (rate_table::MIN[1] + rng.gen::<f64>() * rate_table::STEP[1] * ((rate_table::N_ROWS - 1) as f64)).exp();
-            let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
-            let target = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
-            let value = rate(a, eta);
-            let error = (target - value).abs() / target;
-            println!(
-                "a = {:>9.3e}, eta = {:>9.3e}: target = {:>9.3e}, lookup = {:>9.3e}, diff = {:.3e}",
-                a, eta, target, value, error,
-            );
-            // assert!(error < 1.0e-3);
-        }
+        let pts: Vec<(f64, f64)> = (0..10)
+            .map(|_| {
+                let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
+                let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
+                (a, eta)
+            })
+            .collect();
+
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        println!("Running on {:?}", pool);
+
+        pool.install(|| {
+            pts.into_par_iter().for_each(|(a, eta)| {
+                if let Some(value) =  rate(a, eta) {
+                    let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+                    let target = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
+                    let error = (target - value).abs() / target;
+                    println!(
+                        "[{:>2}]: a = {:>9.3e}, eta = {:>9.3e}: target = {:>9.3e}, lookup = {:>9.3e}, diff = {:.3e}",
+                        rayon::current_thread_index().unwrap_or(0), a, eta, target, value, error,
+                    );
+                    // assert!(error < 1.0e-3);
+                }
+            })
+        });
     }
 
     #[test]
