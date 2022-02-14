@@ -384,20 +384,27 @@ impl DoubleBessel {
     /// workspace `dj`.
     #[allow(unused)]
     pub fn evaluate(&mut self, x: f64, y: f64) -> [f64; 5] {
-        // critical point
-        let n = self.n as f64;
-        let x_crit = if y < n / 6.0 {
-            n + 2.0 * y
-        } else {
-            4.0 * (n * y - 2.0 * y * y).sqrt()
-        };
-
-        // if n is 'small' or x is close to the critical line where the
-        // saddle points merge, use the recurrence method
-        if self.n < 1000 || x == 0.0 || x > x_crit - 2.0 * n.cbrt() {
-            self.around(x, y)
-        } else {
+        if self.use_saddle_point(x, y) {
             self.around_asymptotic(x, y)
+        } else {
+            self.around(x, y)
+        }
+    }
+
+    /// Returns true if the relative error of the saddle point
+    /// approximation is less than 1% for given x and y.
+    fn use_saddle_point(&self, x: f64, y: f64) -> bool {
+        if self.n <= 10 {
+            false
+        } else {
+            let n_eff = self.n as f64;
+            let n_eff = n_eff * (1.0 - (10.0 / n_eff).sqrt());
+            let x_crit = if y > n_eff / 6.0 {
+                4.0 * (y * (n_eff - 2.0 * y)).sqrt()
+            } else {
+                n_eff + 2.0 * y
+            };
+            x < x_crit
         }
     }
 }
@@ -585,6 +592,43 @@ mod test {
                 n, x, y, result, error
             );
             assert!(error < MAX_ERROR);
+        }
+    }
+
+    #[test]
+    fn saddle_point_accuracy() {
+        use rand::prelude::*;
+        use rand_xoshiro::*;
+
+        let n = 100;
+        let mut j = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, 0.5 * (n as f64));
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _i in 0..100 {
+            let x = (n as f64) * consts::SQRT_2 * rng.gen::<f64>();
+            let y = 0.5 * (n as f64) * rng.gen::<f64>();
+
+            // skip points outside the [x(s), y(s)] curve
+            // if y > (n as f64) / 6.0 && x > 4.0 * y.sqrt() * ((n as f64) - 2.0 * y).sqrt() {
+            //     continue;
+            // } else if y <= (n as f64) / 6.0 && x > (n as f64) + 2.0 * y {
+            //     continue;
+            // }
+            if !j.use_saddle_point(x, y) {
+                continue;
+            }
+
+            let target = j.at(x, y);
+            let value = j.at_asymptotic(x, y);
+            let error = if target != 0.0 {
+                let error = ((target - value) / target).abs();
+                println!("{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", x, y, target, value, error);
+                error
+            } else {
+                0.0
+            };
+
+            assert!(target.abs() < 1.0e-9 || error < 1.0e-2);
         }
     }
 }
