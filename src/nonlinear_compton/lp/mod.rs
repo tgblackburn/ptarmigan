@@ -6,6 +6,7 @@ use crate::special_functions::*;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 mod rate_table;
+mod linear;
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
 /// and theta (polar angle).
@@ -264,7 +265,7 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());
 
     if x < rate_table::MIN[0] {
-        todo!()
+        Some(linear::rate(a, eta))
     } else if y < rate_table::MIN[1] {
         todo!()
     } else {
@@ -476,7 +477,7 @@ mod tests {
 
         let pts: Vec<(f64, f64)> = (0..10)
             .map(|_| {
-                let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
+                let a = (0.02_f64.ln() + (20_f64.ln() - 0.02_f64.ln()) * rng.gen::<f64>()).exp();
                 let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
                 (a, eta)
             })
@@ -569,11 +570,11 @@ mod tests {
     #[test]
     fn create_rate_table() {
         const LOW_ETA_LIMIT: f64 = 0.001;
-        const LOW_A_LIMIT: f64 = 0.2;
-        // 20, 20, 40, 60
+        const LOW_A_LIMIT: f64 = 0.02;
+        // 20, 20, 60, 60
         const A_DENSITY: usize = 10; // points per order of magnitude
         const ETA_DENSITY: usize = 10;
-        const N_COLS: usize = 20; // pts in a0 direction
+        const N_COLS: usize = 30; // pts in a0 direction
         const N_ROWS: usize = 30; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
