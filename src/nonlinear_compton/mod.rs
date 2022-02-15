@@ -27,8 +27,8 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
     let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
     let f = match pol {
-        Polarization::Circular => cp::sum_integrated_spectra(a, eta),
-        Polarization::Linear => lp::rate(a, eta).unwrap(),
+        Polarization::Circular => cp::rate(a, eta).unwrap(),
+        Polarization::Linear => lp::rate(a * consts::SQRT_2, eta).unwrap(),
     };
 
     Some(ALPHA_FINE * f * dphi / eta)

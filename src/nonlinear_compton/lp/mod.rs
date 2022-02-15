@@ -546,6 +546,7 @@ mod tests {
             writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
         }
     }
+
     #[test]
     fn harmonic_limit() {
         let a_s: [f64; 9] = [0.1, 0.2, 0.5, 0.7, 1.0, 2.0, 5.0, 7.0, 10.0];

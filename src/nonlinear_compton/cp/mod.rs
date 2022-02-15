@@ -14,21 +14,26 @@ mod total;
 /// let rate = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
-pub fn sum_integrated_spectra(a: f64, eta: f64) -> f64 {
+pub fn rate(a: f64, eta: f64) -> Option<f64> {
     let f = if a < total::LOW_A_LIMIT && eta < total::LOW_ETA_LIMIT {
         // linear Thomson
-        2.0 * a  * a * eta / 3.0
+        Some(2.0 * a  * a * eta / 3.0)
     } else if a < total::LOW_A_LIMIT {
         // linear Compton rate for arbitrary eta
-        a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
-            - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta)
+        Some(a * a * (2.0 + 8.0 * eta + 9.0 * eta * eta + eta * eta * eta) / (2.0 * eta * (1.0 + 2.0 * eta).powi(2))
+            - a * a * (2.0 + 2.0 * eta - eta * eta) * (1.0 + 2.0 * eta).ln() / (4.0 * eta * eta))
     } else if eta < total::LOW_ETA_LIMIT {
-        eta *  total::LOW_ETA_RATE_TABLE.at(a).unwrap_or_else(|| {
-            panic!("NLC rate lookup out of bounds (low eta table): a = {:.3e}, eta = {:.3e}", a, eta);
-        })
+        total::LOW_ETA_RATE_TABLE.at(a).map_or_else(
+            || {
+                eprintln!("NLC (CP) rate lookup out of bounds (low eta table): a = {:.3e}, eta = {:.3e}", a, eta);
+                None
+            },
+            |f| Some(eta * f)
+        )
     } else {
-        total::RATE_TABLE.at(a, eta).unwrap_or_else(|| {
-            panic!("NLC rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+        total::RATE_TABLE.at(a, eta).or_else(|| {
+            eprintln!("NLC rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+            None
         })
     };
     f
@@ -40,7 +45,7 @@ pub fn sum_integrated_spectra(a: f64, eta: f64) -> f64 {
 /// or
 ///   `dP/(dv dt) = ⍺ m f(n, a, η, v) / γ`
 /// over the domain `0 < v < 1`
-pub fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
+fn integrated_spectrum(n: i32, a: f64, eta: f64) -> f64 {
     let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
     // approx harmonic index when sigma / mu < 0.25
     let n_switch = (32.3 * (1.0 + 0.476 * a.powf(1.56))) as i32;
@@ -110,7 +115,7 @@ fn integrated_spectrum_low_eta(n: i32, a: f64) -> f64 {
 /// or
 ///   `dP/(dv dt) = ⍺ m f(n, a, η, v) / γ`
 /// where `0 < v < 1`
-pub fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
+fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     if v < 0.0 || v >= 1.0 {
         return 0.0;
     }
@@ -152,7 +157,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
     let n = fixed_n.unwrap_or_else(|| {
         let nmax = (10.0 * (1.0 + a * a * a)) as i32;
         let frac = rng.gen::<f64>();
-        let target = frac * sum_integrated_spectra(a, eta);
+        let target = frac * rate(a, eta).unwrap();
         let mut cumsum: f64 = 0.0;
         let mut n: Option<i32> = None;
         for k in 1..=nmax {
@@ -273,7 +278,7 @@ mod tests {
     #[ignore]
     fn partial_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let n = 4;
+        let n = 100;
         let a = 1.0;
         let eta = 0.1;
 
@@ -356,7 +361,7 @@ mod tests {
         for (nmax, a, eta) in &pts {
             let rates: Vec<f64> = (1..=*nmax).map(|n| integrated_spectrum(n, *a, *eta)).collect();
             let total: f64 = rates.iter().sum();
-            let target = sum_integrated_spectra(*a, *eta);
+            let target = rate(*a, *eta).unwrap();
             let error = ((total - target) / target).abs();
             println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
             assert!(error < max_error);
@@ -375,7 +380,7 @@ mod tests {
         for (nmax, a, eta) in &pts {
             let rates: Vec<f64> = (1..=*nmax).map(|n| integrated_spectrum_low_eta(n, *a)).collect();
             let total: f64 = eta * rates.iter().sum::<f64>();
-            let target = sum_integrated_spectra(*a, *eta);
+            let target = rate(*a, *eta).unwrap();
             let error = ((total - target) / target).abs();
             println!("a = {:.2e}, eta = {:.2e} => sum_{{n=1}}^{{{}}} rate_n = (alpha/eta) {:.6e}, err = {:.3e}", a, eta, nmax, total, error);
             assert!(error < max_error);
