@@ -260,7 +260,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
 /// but implemented as a table lookup.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase).
 #[allow(unused_parens)]
-fn rate(a: f64, eta: f64) -> Option<f64> {
+pub fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());
 
     if x < rate_table::MIN[0] {
@@ -291,33 +291,40 @@ fn rate(a: f64, eta: f64) -> Option<f64> {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
-    let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
-    let frac = rng.gen::<f64>();
-    let target = frac * rate(a, eta).unwrap();
-    let mut cumsum: f64 = 0.0;
-    let mut n: Option<i32> = None;
-    let mut max = 0.0;
-    for k in 1..=nmax {
-        let tmp = partial_rate(k, a, eta);
-        cumsum += tmp.0;
-        if cumsum > target {
-            n = Some(k);
-            max = tmp.1;
-            break;
-        }
-    }
+pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
+    let (n, max) = match fixed_n {
+        None => {
+            let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let frac = rng.gen::<f64>();
+            let target = frac * rate(a, eta).unwrap();
+            let mut cumsum: f64 = 0.0;
+            let mut n: Option<i32> = None;
+            let mut max = 0.0;
+            for k in 1..=nmax {
+                let tmp = partial_rate(k, a, eta);
+                cumsum += tmp.0;
+                if cumsum > target {
+                    n = Some(k);
+                    max = tmp.1;
+                    break;
+                }
+            }
 
-    // interpolation errors mean that even after the sum, cumsum could be < target
-    let n = n.unwrap_or_else(|| {
-        eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
-        nmax - 1
-    });
+            // interpolation errors mean that even after the sum, cumsum could be < target
+            let n = n.unwrap_or_else(|| {
+                eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
+                nmax - 1
+            });
+
+            (n, max)
+        },
+        Some(n) => (n, partial_rate(n, a, eta).1),
+    };
 
     let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
     let theta_max = ThetaBound::for_harmonic(n, a, eta);
 
-    let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
+    let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
     let smax = sn / (1.0 + sn);
     let max = 1.1 * max;
 
@@ -518,25 +525,27 @@ mod tests {
     }
 
     #[test]
-    fn partial_spectra() {
-        let (n, a, eta): (i32, f64, f64) = (15, 10.0, 0.1);
-        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
-        let smax = sn / (1.0 + sn);
-        let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
-        let theta_max = ThetaBound::for_harmonic(n, a, eta);
+    fn partial_spectrum() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let n = 100;
+        let a = 10.0;
+        let eta = 0.1;
 
-        let pts: Vec<(f64, f64)> = (0..100)
-            .map(|i| (i as f64) * smax / 100.0)
-            .map(|s| (s, single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj).0))
+        let rt = std::time::Instant::now();
+        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+            .map(|_n| {
+                sample(a, eta, &mut rng, Some(n))
+            })
             .collect();
+        let rt = rt.elapsed();
 
-        let filename = format!("output/nlc_lp_sd_rate_{}_{}_{}.dat", n, a, eta);
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
+        let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
-        for pt in &pts {
-            writeln!(file, "{:.6e} {:.6e}", pt.0, pt.1).unwrap();
+        for (_, s, phi) in vs {
+            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
         }
     }
-
     #[test]
     fn harmonic_limit() {
         let a_s: [f64; 9] = [0.1, 0.2, 0.5, 0.7, 1.0, 2.0, 5.0, 7.0, 10.0];

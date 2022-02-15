@@ -196,7 +196,7 @@ impl Field for FocusedLaser {
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * width;
         let prob = nonlinear_compton::probability(kappa, u, dt, self.pol).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (n, k) = nonlinear_compton::generate(kappa, u, self.pol, rng, None);
+            let (n, k) = nonlinear_compton::generate(kappa, u, self.pol, rng);
             Some((k, u + (n as f64) * kappa - k, a))
         } else {
             None

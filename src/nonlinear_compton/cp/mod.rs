@@ -1,4 +1,6 @@
 //! Rates and spectra for circularly polarized backgrounds
+use std::f64::consts;
+use rand::prelude::*;
 use crate::special_functions::*;
 use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
@@ -143,10 +145,66 @@ fn spectrum_low_eta(n: i32, a: f64, v: f64) -> f64 {
     (n as f64) * (a * a * j_nm1.powi(2) - 2.0 * (1.0 + a * a) * j_n.powi(2) + a * a * j_np1.powi(2)) / (1.0 + a * a)
 }
 
+/// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
+/// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
+/// occurs at normalized amplitude a and energy parameter eta.
+pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
+    let n = fixed_n.unwrap_or_else(|| {
+        let nmax = (10.0 * (1.0 + a * a * a)) as i32;
+        let frac = rng.gen::<f64>();
+        let target = frac * sum_integrated_spectra(a, eta);
+        let mut cumsum: f64 = 0.0;
+        let mut n: Option<i32> = None;
+        for k in 1..=nmax {
+            cumsum += integrated_spectrum(k, a, eta);
+            if cumsum > target {
+                n = Some(k);
+                break;
+            }
+        }
+
+        // interpolation errors mean that even after the sum, cumsum could be < target
+        n.unwrap_or_else(|| {
+            eprintln!("cp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
+            nmax - 1
+        })
+    });
+
+    // Approximate maximum value of the probability density:
+    let max: f64 = GAUSS_32_NODES.iter()
+        .map(|x| spectrum(n, a, eta, 0.5 * (x + 1.0)))
+        .fold(0.0f64 / 0.0f64, |a: f64, b: f64| a.max(b));
+    let max = 1.5 * max;
+
+    // Rejection sampling
+    let v = loop {
+        let v = rng.gen::<f64>();
+        let u = rng.gen::<f64>();
+        let f = spectrum(n, a, eta, v);
+        if u <= f / max {
+            break v;
+        }
+    };
+
+    // Four-momentum transfer s = k.l / k.q
+    let s = {
+        let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
+        let smax = sn / (1.0 + sn);
+        v * smax
+    };
+
+    // Azimuthal angle in ZMF
+    let theta = 2.0 * consts::PI * rng.gen::<f64>();
+
+    (n, s, theta)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
     use std::io::Write;
+    use rand::prelude::*;
+    use rand_xoshiro::*;
     use super::*;
 
     #[test]
@@ -209,6 +267,30 @@ mod tests {
 
         writeln!(file, "\n\t],").unwrap();
         writeln!(file, "}};").unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn partial_spectrum() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let n = 4;
+        let a = 1.0;
+        let eta = 0.1;
+
+        let rt = std::time::Instant::now();
+        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+            .map(|_n| {
+                sample(a, eta, &mut rng, Some(n))
+            })
+            .collect();
+        let rt = rt.elapsed();
+
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
+        let filename = format!("output/nlc_cp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
+        let mut file = File::create(&filename).unwrap();
+        for (_, s, phi) in vs {
+            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
+        }
     }
 
     #[test]

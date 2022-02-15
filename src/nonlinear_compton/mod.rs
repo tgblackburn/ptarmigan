@@ -28,7 +28,7 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 
     let f = match pol {
         Polarization::Circular => cp::sum_integrated_spectra(a, eta),
-        Polarization::Linear => unimplemented!(),
+        Polarization::Linear => lp::rate(a, eta).unwrap(),
     };
 
     Some(ALPHA_FINE * f * dphi / eta)
@@ -42,68 +42,13 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 ///
 /// Returns the harmonic index of the photon and the
 /// normalized momentum.
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R, fixed_n: Option<i32>) -> (i32, FourVector) {
-    let a = (q * q - 1.0).sqrt();
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+    let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
-    let (sum_integrated_spectra, integrated_spectrum, spectrum) = match pol {
-        Polarization::Circular => (cp::sum_integrated_spectra, cp::integrated_spectrum, cp::spectrum),
-        Polarization::Linear => unimplemented!(),
-    };
-
-    // From the partial rates, pick a harmonic number
-    // or use one specified
-    // let n = fixed_n.unwrap_or_else(|| {
-    //     let nmax = (10.0 * (1.0 + a * a * a)) as i32;
-    //     let mut cumsum: f64 = 0.0;
-    //     let mut rates: Vec<f64> = Vec::with_capacity(nmax as usize);
-    //     for k in 1..=nmax {
-    //         cumsum += integrated_spectrum(k, a, eta);
-    //         rates.push(cumsum);
-    //     }
-    //     let total = rates.last().unwrap();
-    //     let target = total * rng.gen::<f64>();
-    //     let (index, _) = rates.iter().enumerate().find(|(_i, &cs)| cs > target).unwrap();
-    //     (index + 1) as i32
-    // });
-    let n = fixed_n.unwrap_or_else(|| {
-        let nmax = (10.0 * (1.0 + a * a * a)) as i32;
-        let target = sum_integrated_spectra(a, eta) * rng.gen::<f64>();
-        let mut cumsum: f64 = 0.0;
-        let mut index: i32 = 1;
-        for k in 1..=nmax {
-            cumsum += integrated_spectrum(k, a, eta);
-            if cumsum > target {
-                index = k;
-                break;
-            }
-        };
-        index
-    });
-
-    assert!(n >= 1);
-
-    // Approximate maximum value of the probability density:
-    let max: f64 = GAUSS_32_NODES.iter()
-        .map(|x| spectrum(n, a, eta, 0.5 * (x + 1.0)))
-        .fold(0.0f64 / 0.0f64, |a: f64, b: f64| a.max(b));
-    let max = 1.5 * max;
-
-    // Rejection sampling
-    let v = loop {
-        let v = rng.gen::<f64>();
-        let u = rng.gen::<f64>();
-        let f = spectrum(n, a, eta, v);
-        if u <= f / max {
-            break v;
-        }
-    };
-
-    // Four-momentum transfer s = k.l / k.q
-    let s = {
-        let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
-        let smax = sn / (1.0 + sn);
-        v * smax
+    let (n, s, cphi_zmf) = match pol {
+        Polarization::Circular => cp::sample(a, eta, rng, None),
+        Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng, None),
     };
 
     let ell = n as f64;
@@ -111,7 +56,6 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     // Scattering momentum (/m) and angles in zero momentum frame
     let p_zmf = ell * eta / (1.0 + a * a + 2.0 * ell * eta).sqrt();
     let cos_theta_zmf = 1.0 - s * (1.0 + a * a + 2.0 * ell * eta) / (ell * eta);
-    let cphi_zmf = 2.0 * consts::PI * rng.gen::<f64>();
 
     assert!(cos_theta_zmf <= 1.0);
     assert!(cos_theta_zmf >= -1.0);
@@ -146,33 +90,6 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn partial_spectrum() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let n = 250;
-        let a = 1.0;
-        let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
-        let u = 10.0 * 1000.0 / 0.511;
-        let u = FourVector::new(0.0, 0.0, 0.0, -u).unitize();
-        let q = u + a * a * k / (2.0 * k * u);
-
-        let rt = std::time::Instant::now();
-        let vs: Vec<(f64,f64,f64)> = (0..10000)
-            .map(|_n| {
-                let (_, k_prime) = generate(k, q, Polarization::Circular, &mut rng, Some(n));
-                (k * k_prime / (k * q), k_prime[1], k_prime[2])
-            })
-            .collect();
-        let rt = rt.elapsed();
-
-        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", (q * q - 1.0).sqrt(), k * q, vs.len(), rt);
-        let mut file = File::create("output/partial_spectrum.dat").unwrap();
-        for v in vs {
-            writeln!(file, "{:.6e} {:.6e} {:.6e}", v.0, v.1, v.2).unwrap();
-        }
-    }
-
-    #[test]
-    #[ignore]
     fn spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let a = 2.0;
@@ -184,7 +101,7 @@ mod tests {
         let rt = std::time::Instant::now();
         let vs: Vec<(f64,f64,f64,i32)> = (0..100_000)
             .map(|_i| {
-                let (n, k_prime) = generate(k, q, Polarization::Circular, &mut rng, None);
+                let (n, k_prime) = generate(k, q, Polarization::Circular, &mut rng);
                 (k * k_prime / (k * q), k_prime[1], k_prime[2], n)
             })
             .collect();
