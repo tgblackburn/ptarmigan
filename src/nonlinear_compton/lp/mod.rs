@@ -366,6 +366,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore]
     fn integration_domain() {
         let (n, a, eta) = (100, 10.0, 0.1);
         // bounds on s
@@ -504,13 +505,14 @@ mod tests {
                         "[{:>2}]: a = {:>9.3e}, eta = {:>9.3e}: target = {:>9.3e}, lookup = {:>9.3e}, diff = {:.3e}",
                         rayon::current_thread_index().unwrap_or(0), a, eta, target, value, error,
                     );
-                    // assert!(error < 1.0e-3);
+                    assert!(error < 1.0e-3);
                 }
             })
         });
     }
 
     #[test]
+    #[ignore]
     fn theta_bounds() {
         let (n, a, eta) = (1, 10.0, 0.1);
         let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
@@ -526,6 +528,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn partial_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let n = 100;
@@ -549,6 +552,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn harmonic_limit() {
         let a_s: [f64; 9] = [0.1, 0.2, 0.5, 0.7, 1.0, 2.0, 5.0, 7.0, 10.0];
         let eta = 0.001;
@@ -568,14 +572,15 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn create_rate_table() {
         const LOW_ETA_LIMIT: f64 = 0.001;
         const LOW_A_LIMIT: f64 = 0.02;
         // 20, 20, 60, 60
-        const A_DENSITY: usize = 10; // points per order of magnitude
-        const ETA_DENSITY: usize = 10;
-        const N_COLS: usize = 30; // pts in a0 direction
-        const N_ROWS: usize = 30; // pts in eta direction
+        const A_DENSITY: usize = 20; // points per order of magnitude
+        const ETA_DENSITY: usize = 20;
+        const N_COLS: usize = 60; // pts in a0 direction
+        const N_ROWS: usize = 60; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")

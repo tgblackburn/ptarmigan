@@ -5,14 +5,20 @@
 #[inline]
 pub fn rate(a: f64, eta: f64) -> f64 {
     let eta2 = eta * eta;
-    //let eta3 = eta2 * eta;
+    let eta3 = eta2 * eta;
     //let eta4 = eta3 * eta;
-    let first = (a * a / 8.0) * (
-        0.5
-        + 4.0 / eta
-        - 0.5 / ((1.0 + 2.0 * eta) * (1.0 + 2.0 * eta))
-        + (1.0 - 2.0 / eta - 2.0 / eta2) * (1.0 + 2.0 * eta).ln()
-    );
+    let first = if eta > 1.0e-3 {
+        (a * a / 8.0) * (
+            0.5
+            + 4.0 / eta
+            - 0.5 / ((1.0 + 2.0 * eta) * (1.0 + 2.0 * eta))
+            + (1.0 - 2.0 / eta - 2.0 / eta2) * (1.0 + 2.0 * eta).ln()
+        )
+    } else {
+        (a * a / 8.0) * (
+            8.0 * eta / 3.0 - 16.0 * eta2 / 3.0 + 208.0 * eta3 / 15.0
+        )
+    };
     // let first_corr = -(a.powi(4) / 64.0) * (
     //     6.0
     //     - 10.0 / eta

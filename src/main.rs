@@ -208,12 +208,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pol = match input.read::<String,_>("laser:polarization") {
         Ok(s) if s == "linear" => Polarization::Linear,
         Ok(s) if s == "circular" => Polarization::Circular,
-        _ => Polarization::Circular
+        _ => {
+            if id == 0 {
+                println!(concat!(
+                    "Warning: laser polarisation has not been specified.\n",
+                    "         This will be an error in the next version of Ptarmigan.\n",
+                    "         Continuing with default value of 'circular'..."
+                ));
+            }
+            Polarization::Circular
+        }
     };
 
-    if !using_lcfa && pol == Polarization::Linear {
-        panic!("LMA rates are implemented for circularly polarized waves only!");
-    }
+    let tracking_photons = if !using_lcfa && pol == Polarization::Linear {
+        if id == 0 {
+            println!(concat!(
+                "Warning: in LP mode, LMA rates are available only for photon emission.\n",
+                "         Pair creation will be disabled."
+            ));
+        }
+        false
+    } else {
+        tracking_photons
+    };
 
     let (focusing, waist) = input
         .read("laser:waist")

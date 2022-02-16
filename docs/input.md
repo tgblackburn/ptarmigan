@@ -22,7 +22,7 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 * `fwhm_duration` (if `waist` is specified): if focusing, the laser pulse has a Gaussian temporal profile in intensity, with the specified duration (full width at half max) in seconds.
 * `n_cycles` (if `waist` is not specified): if not focusing, the laser pulse has a cos^2 envelope in electric field, with total duration equal to the given number of wavelengths.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
-* `polarization` (optional, default = `circular`): the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
+* `polarization` (optional, default = `circular`, but compulsory in future versions): the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
 
 ## beam
 
