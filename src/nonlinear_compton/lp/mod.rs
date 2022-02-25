@@ -298,6 +298,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
             let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
             let frac = rng.gen::<f64>();
             let target = frac * rate(a, eta).unwrap();
+            println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
             let mut cumsum: f64 = 0.0;
             let mut n: Option<i32> = None;
             let mut max = 0.0;
@@ -317,6 +318,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
                 nmax - 1
             });
 
+            println!("\t... got n = {}, max = {}", n, nmax);
             (n, max)
         },
         Some(n) => (n, partial_rate(n, a, eta).1),
@@ -342,6 +344,8 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
             break (s, theta);
         }
     };
+
+    println!("\t... got s = {:.3e}, theta = {:.3e}", s, theta);
 
     // Fix range of theta, which is [0, pi/2] at the moment
     let quadrant = rng.gen_range(0, 4);
@@ -545,6 +549,71 @@ mod tests {
 
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
+        let mut file = File::create(&filename).unwrap();
+        for (_, s, phi) in vs {
+            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
+        }
+    }
+
+    #[test]
+    fn sampling_index() {
+        let pts = {
+            let a_min = 2.0 * 10_f64.powf(13.0 / 20.0);
+            let a_max = 2.0 * 10_f64.powf(14.0 / 20.0);
+            let eta_min = 0.1;
+            let eta_max = 0.1 * 10_f64.powf(1.0 / 20.0);
+            [
+                (a_min, eta_min),
+                (a_max, eta_min),
+                (a_min, eta_max),
+                (a_max, eta_max),
+                ((a_min * a_max).sqrt(), (eta_min * eta_max).sqrt()),
+            ]
+        };
+
+        let rates: Vec<Vec<f64>> = pts.iter()
+            .map(|(a, eta): &(f64, f64)| -> Vec<f64>{
+                println!("working on a = {:.3e}, eta = {:.3e}", a, eta);
+                let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+                (1..=nmax).map(|n| partial_rate(n, *a, *eta).0).collect()
+            })
+            .collect();
+
+        println!("done!");
+
+        let filename = format!("output/sampling_index.dat");
+        let mut file = File::create(&filename).unwrap();
+        let len = rates.iter().map(|v| v.len()).max().unwrap();
+
+        for i in 0..len {
+            writeln!(
+                file,
+                "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}",
+                rates[0].get(i).unwrap_or(&0.0),
+                rates[1].get(i).unwrap_or(&0.0),
+                rates[2].get(i).unwrap_or(&0.0),
+                rates[3].get(i).unwrap_or(&0.0),
+                rates[4].get(i).unwrap_or(&0.0),
+            ).unwrap();
+        }
+    }
+
+    #[test]
+    fn total_spectrum() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let a = 10.0;
+        let eta = 0.1;
+
+        let rt = std::time::Instant::now();
+        let vs: Vec<(i32,f64,f64)> = (0..100)
+            .map(|_n| {
+                sample(a, eta, &mut rng, None)
+            })
+            .collect();
+        let rt = rt.elapsed();
+
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
+        let filename = format!("output/nlc_lp_spectrum_{}_{}.dat", a, eta);
         let mut file = File::create(&filename).unwrap();
         for (_, s, phi) in vs {
             writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
