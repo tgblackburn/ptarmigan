@@ -828,7 +828,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Write particle data
                 let fs = file.create_group("final-state")?;
 
-                let mut photons = photons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -879,7 +878,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
 
-                let mut electrons = electrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -922,7 +920,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the electron")
                         .write(&p[..])?;
 
-                let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
