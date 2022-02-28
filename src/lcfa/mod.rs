@@ -3,5 +3,3 @@
 
 pub mod photon_emission;
 pub mod pair_creation;
-
-mod pwmci;

@@ -31,6 +31,7 @@ mod lcfa;
 mod special_functions;
 mod output;
 mod input;
+mod pwmci;
 
 use constants::*;
 use field::*;

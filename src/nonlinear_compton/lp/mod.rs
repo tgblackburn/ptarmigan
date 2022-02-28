@@ -3,9 +3,11 @@ use std::f64::consts;
 use num_complex::Complex;
 use rand::prelude::*;
 use crate::special_functions::*;
+use crate::pwmci;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 mod rate_table;
+mod cdf_table;
 mod linear;
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
@@ -319,6 +321,40 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
             });
 
             println!("\t... got n = {}, max = {}", n, nmax);
+
+            // via lookup of cdf
+            let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
+            let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
+            let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
+            let dy = (eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1] - (iy as f64);
+
+            let index = [
+                cdf_table::N_COLS * iy + ix,
+                cdf_table::N_COLS * iy + ix + 1,
+                cdf_table::N_COLS * (iy + 1) + ix,
+                cdf_table::N_COLS * (iy + 1) + (ix + 1),
+            ];
+
+            let weight = [
+                (1.0 - dx) * (1.0 - dy),
+                dx * (1.0 - dy),
+                (1.0 - dx) * dy,
+                dx * dy,
+            ];
+
+            let n_alt: f64 = index.iter()
+                .zip(weight.iter())
+                .map(|(i, w)| {
+                    let n = if frac <= cdf_table::TABLE[*i][0][1] {
+                        1.0
+                    } else {
+                        pwmci::invert(frac, &cdf_table::TABLE[*i]).unwrap().0
+                    };
+                    n * w
+                })
+                .sum();
+
+            println!("\t... got n = {} => {}", n_alt, n_alt.ceil());
             (n, max)
         },
         Some(n) => (n, partial_rate(n, a, eta).1),
@@ -601,8 +637,8 @@ mod tests {
     #[test]
     fn total_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let a = 10.0;
-        let eta = 0.1;
+        let a = 9.46303;
+        let eta = 0.105925;
 
         let rt = std::time::Instant::now();
         let vs: Vec<(i32,f64,f64)> = (0..100)
@@ -673,18 +709,60 @@ mod tests {
             }
         }
 
-        let pts: Vec<(usize, usize, f64)> = pool.install(|| {
+        let pts: Vec<(usize, usize, f64, [[f64; 2]; 16])> = pool.install(|| {
             pts.into_par_iter()
             .map(|(i, j, a, eta, n_max)| {
-                let rate = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
+                let mut cumsum = 0.0;
+                let rates: Vec<[f64; 2]> = (1..=n_max)
+                    .map(|n| {
+                        let (rate, _) = partial_rate(n, a, eta);
+                        cumsum = cumsum + rate;
+                        [n as f64, cumsum]
+                    })
+                    .collect();
+
+                // Total rate
+                let rate: f64 = rates.last().unwrap()[1];
+
+                let mut cdf: [[f64; 2]; 16] = [[0.0, 0.0]; 16];
+                cdf[0] = [rates[0][0], rates[0][1] / rate];
+                if n_max <= 16 {
+                    // Write all the rates
+                    for i in 1..=15 {
+                        cdf[i] = rates.get(i)
+                            .map(|r| [r[0], r[1] / rate])
+                            .unwrap_or_else(|| [(i+1) as f64, 1.0]);
+                    }
+                } else if n_max < 100 {
+                    // first 4 four harmonics
+                    for i in 1..=3 {
+                        cdf[i] = [rates[i][0], rates[i][1] / rate];
+                    }
+                    // log-spaced for n >= 5
+                    let delta = ((n_max as f64).ln() - 5_f64.ln()) / 11.0;
+                    for i in 4..=15 {
+                        let n = (5_f64.ln() + ((i - 4) as f64) * delta).exp();
+                        cdf[i][0] = n;
+                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                    }
+                } else {
+                    // Sample CDF at 16 log-spaced points
+                    let delta = (n_max as f64).ln() / 15.0;
+                    for i in 1..=15 {
+                        let n = ((i as f64) * delta).exp();
+                        cdf[i][0] = n;
+                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                    }
+                }
+
                 println!("LP NLC [{:>3}]: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", rayon::current_thread_index().unwrap_or(1),eta, a, rate.ln());
-                (i, j, rate)
+                (i, j, rate, cdf)
             })
             .collect()
         });
 
-        for (i, j, rate) in pts {
-            table[i][j] = rate;
+        for (i, j, rate, _) in &pts {
+            table[*i][*j] = *rate;
         }
 
         let mut file = File::create("output/rate_table.rs").unwrap();
@@ -710,6 +788,22 @@ mod tests {
                 }
             }
             writeln!(file, "],").unwrap();
+        }
+        writeln!(file, "];").unwrap();
+
+        let mut file = File::create("output/cdf_table.rs").unwrap();
+        writeln!(file, "pub const LENGTH: usize = {};", N_COLS * N_ROWS).unwrap();
+        writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+        writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+        writeln!(file, "pub const MIN: [f64; 2] = [{:.12e}, {:.12e}];", LOW_A_LIMIT.ln(), LOW_ETA_LIMIT.ln()).unwrap();
+        writeln!(file, "pub const STEP: [f64; 2] = [{:.12e}, {:.12e}];", consts::LN_10 / (A_DENSITY as f64), consts::LN_10 / (ETA_DENSITY as f64)).unwrap();
+        writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS * N_ROWS).unwrap();
+        for (_, _, _, cdf) in &pts {
+            write!(file, "\t[").unwrap();
+            for entry in cdf.iter().take(15) {
+                write!(file, "[{:>18.12e}, {:>18.12e}], ", entry[0], entry[1]).unwrap();
+            }
+            writeln!(file, "[{:>18.12e}, {:>18.12e}]],", cdf[15][0], cdf[15][1]).unwrap();
         }
         writeln!(file, "];").unwrap();
     }
