@@ -742,6 +742,8 @@ mod tests {
                     let delta = ((n_max as f64).ln() - 5_f64.ln()) / 11.0;
                     for i in 4..=15 {
                         let n = (5_f64.ln() + ((i - 4) as f64) * delta).exp();
+                        let limit = rates.last().unwrap()[0];
+                        let n = n.min(limit);
                         cdf[i][0] = n;
                         cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
                     }
@@ -750,6 +752,8 @@ mod tests {
                     let delta = (n_max as f64).ln() / 15.0;
                     for i in 1..=15 {
                         let n = ((i as f64) * delta).exp();
+                        let limit = rates.last().unwrap()[0];
+                        let n = n.min(limit);
                         cdf[i][0] = n;
                         cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
                     }
@@ -792,9 +796,9 @@ mod tests {
         writeln!(file, "];").unwrap();
 
         let mut file = File::create("output/cdf_table.rs").unwrap();
-        writeln!(file, "pub const LENGTH: usize = {};", N_COLS * N_ROWS).unwrap();
+        //writeln!(file, "pub const LENGTH: usize = {};", N_COLS * N_ROWS).unwrap();
         writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
-        writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+        //writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
         writeln!(file, "pub const MIN: [f64; 2] = [{:.12e}, {:.12e}];", LOW_A_LIMIT.ln(), LOW_ETA_LIMIT.ln()).unwrap();
         writeln!(file, "pub const STEP: [f64; 2] = [{:.12e}, {:.12e}];", consts::LN_10 / (A_DENSITY as f64), consts::LN_10 / (ETA_DENSITY as f64)).unwrap();
         writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS * N_ROWS).unwrap();
