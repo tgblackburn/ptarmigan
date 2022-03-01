@@ -297,70 +297,74 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
 pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
     let (n, max) = match fixed_n {
         None => {
-            let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            // let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
             let frac = rng.gen::<f64>();
-            let target = frac * rate(a, eta).unwrap();
-            println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
-            let mut cumsum: f64 = 0.0;
-            let mut n: Option<i32> = None;
-            let mut max = 0.0;
-            for k in 1..=nmax {
-                let tmp = partial_rate(k, a, eta);
-                cumsum += tmp.0;
-                if cumsum > target {
-                    n = Some(k);
-                    max = tmp.1;
-                    break;
-                }
-            }
+            // let target = frac * rate(a, eta).unwrap();
+            // println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
+            // let mut cumsum: f64 = 0.0;
+            // let mut n: Option<i32> = None;
+            // let mut max = 0.0;
+            // for k in 1..=nmax {
+            //     let tmp = partial_rate(k, a, eta);
+            //     cumsum += tmp.0;
+            //     if cumsum > target {
+            //         n = Some(k);
+            //         max = tmp.1;
+            //         break;
+            //     }
+            // }
 
             // interpolation errors mean that even after the sum, cumsum could be < target
-            let n = n.unwrap_or_else(|| {
-                eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
-                nmax - 1
-            });
-
-            println!("\t... got n = {}, max = {}", n, nmax);
+            // let n = n.unwrap_or_else(|| {
+            //     eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
+            //     nmax - 1
+            // });
 
             // via lookup of cdf
-            let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
-            let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
-            let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
-            let dy = (eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1] - (iy as f64);
+            let n = if a.ln() <= cdf_table::MIN[0] {
+                // first harmonic only
+               1
+            } else if eta.ln() <= cdf_table::MIN[1] {
+                todo!()
+            } else {
+                let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
+                let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
+                let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
+                let dy = (eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1] - (iy as f64);
 
-            let index = [
-                cdf_table::N_COLS * iy + ix,
-                cdf_table::N_COLS * iy + ix + 1,
-                cdf_table::N_COLS * (iy + 1) + ix,
-                cdf_table::N_COLS * (iy + 1) + (ix + 1),
-            ];
+                let index = [
+                    cdf_table::N_COLS * iy + ix,
+                    cdf_table::N_COLS * iy + ix + 1,
+                    cdf_table::N_COLS * (iy + 1) + ix,
+                    cdf_table::N_COLS * (iy + 1) + (ix + 1),
+                ];
 
-            let weight = [
-                (1.0 - dx) * (1.0 - dy),
-                dx * (1.0 - dy),
-                (1.0 - dx) * dy,
-                dx * dy,
-            ];
+                let weight = [
+                    (1.0 - dx) * (1.0 - dy),
+                    dx * (1.0 - dy),
+                    (1.0 - dx) * dy,
+                    dx * dy,
+                ];
 
-            let n_alt: f64 = index.iter()
-                .zip(weight.iter())
-                .map(|(i, w)| {
-                    // let mut table: [[f64; 2]; 16] = [[0.0, 0.0]; 16];
-                    // for j in 0..16 {
-                    //     table[j][0] = cdf_table::TABLE[*i][j][0].ln();
-                    //     table[j][1] = cdf_table::TABLE[*i][j][1];
-                    // }
-                    let table = &cdf_table::TABLE[*i];
-                    let n = if frac <= table[0][1] {
-                        1.0
-                    } else {
-                        pwmci::invert(frac, table).unwrap().0
-                    };
-                    n * w
-                })
-                .sum();
+                let n_alt: f64 = index.iter()
+                    .zip(weight.iter())
+                    .map(|(i, w)| {
+                        let table = &cdf_table::TABLE[*i];
+                        let n = if frac <= table[0][1] {
+                            0.9
+                        } else {
+                            pwmci::invert(frac, table).unwrap().0
+                        };
+                        n * w
+                    })
+                    .sum();
 
-            println!("\t... got n = {} => {}", n_alt, n_alt.ceil());
+                n_alt.ceil() as i32
+            };
+
+            let max = partial_rate(n, a, eta).1;
+
+            // println!("\t... got n = {}", n);
             (n, max)
         },
         Some(n) => (n, partial_rate(n, a, eta).1),
@@ -387,7 +391,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
         }
     };
 
-    println!("\t... got s = {:.3e}, theta = {:.3e}", s, theta);
+    // println!("\t... got s = {:.3e}, theta = {:.3e}", s, theta);
 
     // Fix range of theta, which is [0, pi/2] at the moment
     let quadrant = rng.gen_range(0, 4);
@@ -643,8 +647,8 @@ mod tests {
     #[test]
     fn total_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let a = 9.46303;
-        let eta = 0.105925;
+        let a = 10.0; // 0.946393; // 2.37700; // 4.74275; // 9.46303;
+        let eta = 0.1; // 0.105925;
 
         let rt = std::time::Instant::now();
         let vs: Vec<(i32,f64,f64)> = (0..100)
@@ -657,8 +661,8 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_spectrum_{}_{}.dat", a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (_, s, phi) in vs {
-            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
+        for (n, s, phi) in vs {
+            writeln!(file, "{} {:.6e} {:.6e}", n, s, phi).unwrap();
         }
     }
 
