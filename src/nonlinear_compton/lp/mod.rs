@@ -345,10 +345,16 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
             let n_alt: f64 = index.iter()
                 .zip(weight.iter())
                 .map(|(i, w)| {
-                    let n = if frac <= cdf_table::TABLE[*i][0][1] {
+                    // let mut table: [[f64; 2]; 16] = [[0.0, 0.0]; 16];
+                    // for j in 0..16 {
+                    //     table[j][0] = cdf_table::TABLE[*i][j][0].ln();
+                    //     table[j][1] = cdf_table::TABLE[*i][j][1];
+                    // }
+                    let table = &cdf_table::TABLE[*i];
+                    let n = if frac <= table[0][1] {
                         1.0
                     } else {
-                        pwmci::invert(frac, &cdf_table::TABLE[*i]).unwrap().0
+                        pwmci::invert(frac, table).unwrap().0
                     };
                     n * w
                 })
