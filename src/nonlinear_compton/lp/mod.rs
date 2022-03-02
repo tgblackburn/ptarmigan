@@ -1,4 +1,4 @@
-//! Rates and spectra for circularly polarized backgrounds
+//! Rates and spectra for linearly polarized backgrounds
 use std::f64::consts;
 use num_complex::Complex;
 use rand::prelude::*;
@@ -9,9 +9,10 @@ use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 mod rate_table;
 mod cdf_table;
 mod linear;
+mod classical;
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
-/// and theta (polar angle).
+/// and theta (azimuthal angle).
 /// Result valid only for 0 < s < s_max and 0 < theta < pi/2.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase)
 fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut DoubleBessel) -> f64 {
@@ -70,6 +71,62 @@ impl ThetaBound {
             };
 
             let y = a * a * s[i] / (8.0 * eta * (1.0 - s[i]));
+
+            // At fixed y, J(n,x,y) is maximised at
+            let x_crit = if y > (n as f64) / 6.0 {
+                4.0 * y.sqrt() * ((n as f64) - 2.0 * y).sqrt()
+            } else {
+                (n as f64) + 2.0 * y
+            };
+
+            // with value approx J_n(n) ~ 0.443/n^(1/3), here log-scaled
+            let ln_j_crit = 0.443f64.ln() - (n as f64).ln() / 3.0;
+
+            // The value of J(n,0,y) is approximately
+            let ln_j_bdy = if n % 2 == 0 {
+                Self::ln_double_bessel_x_zero(n, y)
+            } else {
+                Self::ln_double_bessel_x_zero(n + 1, y)
+            };
+            let ln_j_bdy = ln_j_bdy.min(ln_j_crit);
+
+            // Exponential fit between x = 0 and x = x_crit, looking for the
+            // x which is 100x smaller than at the starting point
+            let cos_theta = 1.0 - x_crit * 0.01f64.ln() / (x * (ln_j_bdy - ln_j_crit));
+            let cos_theta = cos_theta.max(-1.0);
+
+            f[i] = cos_theta.acos();
+            if f[i].is_nan() {
+                f[i] = consts::PI;
+            }
+
+            //println!("(x, y) = ({:.3e}, {:.3e}), (x_crit, j_crit) = ({:.3e}, {:.3e}), j_bdy = {:.3e}, cos_theta = {:.3e}, theta = {:.3e}", x, y, x_crit, ln_j_crit.exp(), ln_j_bdy.exp(), cos_theta, f[i]);
+        }
+
+        let mut f_min = f[0];
+        for i in 1..16 {
+            if f[i] < f_min {
+                f_min = f[i];
+            } else {
+                f[i] = f_min;
+            }
+        }
+
+        Self {s, f}
+    }
+
+    fn for_harmonic_low_eta(n: i32, a: f64) -> Self {
+        let mut s = [0.0; 16];
+        let mut f = [0.0; 16];
+
+        for i in 0..16 {
+            let z = (consts::PI * (i as f64) / 15.0).cos();
+            let v = 0.5 * (z + 1.0);
+            s[i] = v;
+
+            // Coordinates in (x,y) space where integration over theta begins
+            let x = 2.0 * (n as f64) * a * (v * (1.0 - v) / (1.0 + 0.5 * a * a)).sqrt();
+            let y = 0.25 * (n as f64) * a * a * v / (1.0 + 0.5 * a * a);
 
             // At fixed y, J(n,x,y) is maximised at
             let x_crit = if y > (n as f64) / 6.0 {
@@ -269,7 +326,14 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
     if x < rate_table::MIN[0] {
         Some(linear::rate(a, eta))
     } else if y < rate_table::MIN[1] {
-        todo!()
+        // rate is proportional to eta as eta -> 0
+        let ix = ((x - rate_table::MIN[0]) / rate_table::STEP[0]) as usize;
+        let dx = (x - rate_table::MIN[0]) / rate_table::STEP[0] - (ix as f64);
+        let f = (
+            (1.0 - dx) * rate_table::TABLE[0][ix]
+            + dx * rate_table::TABLE[0][ix+1]
+        );
+        Some((f - rate_table::MIN[1]).exp() * eta)
     } else {
         let ix = ((x - rate_table::MIN[0]) / rate_table::STEP[0]) as usize;
         let iy = ((y - rate_table::MIN[1]) / rate_table::STEP[1]) as usize;
@@ -293,12 +357,33 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
 
 /// Obtain harmonic index by inverting frac = cdf(n), where 0 <= frac < 1 and
 /// the cdf is tabulated.
+#[cfg(not(feature = "explicit-harmonic-summation"))]
 fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
     if a.ln() <= cdf_table::MIN[0] {
         // first harmonic only
        1
     } else if eta.ln() <= cdf_table::MIN[1] {
-        todo!()
+        // cdf(n) is independent of eta as eta -> 0
+        let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
+        let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
+
+        let index = [ix, ix + 1];
+        let weight = [1.0 - dx, dx];
+
+        let n: f64 = index.iter()
+            .zip(weight.iter())
+            .map(|(i, w)| {
+                let table = &cdf_table::TABLE[*i];
+                let n = if frac <= table[0][1] {
+                    0.9
+                } else {
+                    pwmci::invert(frac, table).unwrap().0
+                };
+                n * w
+            })
+            .sum();
+
+        n.ceil() as i32
     } else {
         let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
         let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
@@ -336,39 +421,43 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
     }
 }
 
+/// Obtain harmonic index by inverting frac = cdf(n), where 0 <= frac < 1 and
+/// the cdf is calculated by integrating and summing the double-differential rates.
+#[cfg(feature = "explicit-harmonic-summation")]
+fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
+    let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+    let target = frac * rate(a, eta).unwrap();
+    // println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
+    let mut cumsum: f64 = 0.0;
+    let mut n: Option<i32> = None;
+    let mut max = 0.0;
+    for k in 1..=nmax {
+        let tmp = partial_rate(k, a, eta);
+        cumsum += tmp.0;
+        if cumsum > target {
+            n = Some(k);
+            max = tmp.1;
+            break;
+        }
+    }
+
+    // interpolation errors mean that even after the sum, cumsum could be < target
+    n.unwrap_or_else(|| {
+        eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
+        nmax - 1
+    })
+}
+
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
 pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
     let (n, max) = match fixed_n {
         None => {
-            // let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
             let frac = rng.gen::<f64>();
-            // let target = frac * rate(a, eta).unwrap();
-            // println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
-            // let mut cumsum: f64 = 0.0;
-            // let mut n: Option<i32> = None;
-            // let mut max = 0.0;
-            // for k in 1..=nmax {
-            //     let tmp = partial_rate(k, a, eta);
-            //     cumsum += tmp.0;
-            //     if cumsum > target {
-            //         n = Some(k);
-            //         max = tmp.1;
-            //         break;
-            //     }
-            // }
-
-            // interpolation errors mean that even after the sum, cumsum could be < target
-            // let n = n.unwrap_or_else(|| {
-            //     eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
-            //     nmax - 1
-            // });
-
             // via lookup of cdf
             let n = get_harmonic_index(a, eta, frac);
             let max = partial_rate(n, a, eta).1;
-
             // println!("\t... got n = {}", n);
             (n, max)
         },
@@ -615,6 +704,9 @@ mod tests {
             (2.37700, 0.105925),
             (4.74275, 0.105925),
             //(9.46303, 0.105925),
+            (0.946303, 1.0e-4),
+            (2.37700, 1.0e-4),
+            (4.74275, 1.0e-4),
         ];
 
         for (a, eta) in &pts {
