@@ -291,6 +291,51 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
     }
 }
 
+/// Obtain harmonic index by inverting frac = cdf(n), where 0 <= frac < 1 and
+/// the cdf is tabulated.
+fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
+    if a.ln() <= cdf_table::MIN[0] {
+        // first harmonic only
+       1
+    } else if eta.ln() <= cdf_table::MIN[1] {
+        todo!()
+    } else {
+        let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
+        let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
+        let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
+        let dy = (eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1] - (iy as f64);
+
+        let index = [
+            cdf_table::N_COLS * iy + ix,
+            cdf_table::N_COLS * iy + ix + 1,
+            cdf_table::N_COLS * (iy + 1) + ix,
+            cdf_table::N_COLS * (iy + 1) + (ix + 1),
+        ];
+
+        let weight = [
+            (1.0 - dx) * (1.0 - dy),
+            dx * (1.0 - dy),
+            (1.0 - dx) * dy,
+            dx * dy,
+        ];
+
+        let n_alt: f64 = index.iter()
+            .zip(weight.iter())
+            .map(|(i, w)| {
+                let table = &cdf_table::TABLE[*i];
+                let n = if frac <= table[0][1] {
+                    0.9
+                } else {
+                    pwmci::invert(frac, table).unwrap().0
+                };
+                n * w
+            })
+            .sum();
+
+        n_alt.ceil() as i32
+    }
+}
+
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
@@ -321,47 +366,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
             // });
 
             // via lookup of cdf
-            let n = if a.ln() <= cdf_table::MIN[0] {
-                // first harmonic only
-               1
-            } else if eta.ln() <= cdf_table::MIN[1] {
-                todo!()
-            } else {
-                let ix = ((a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0]) as usize;
-                let iy = ((eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1]) as usize;
-                let dx = (a.ln() - cdf_table::MIN[0]) / cdf_table::STEP[0] - (ix as f64);
-                let dy = (eta.ln() - cdf_table::MIN[1]) / cdf_table::STEP[1] - (iy as f64);
-
-                let index = [
-                    cdf_table::N_COLS * iy + ix,
-                    cdf_table::N_COLS * iy + ix + 1,
-                    cdf_table::N_COLS * (iy + 1) + ix,
-                    cdf_table::N_COLS * (iy + 1) + (ix + 1),
-                ];
-
-                let weight = [
-                    (1.0 - dx) * (1.0 - dy),
-                    dx * (1.0 - dy),
-                    (1.0 - dx) * dy,
-                    dx * dy,
-                ];
-
-                let n_alt: f64 = index.iter()
-                    .zip(weight.iter())
-                    .map(|(i, w)| {
-                        let table = &cdf_table::TABLE[*i];
-                        let n = if frac <= table[0][1] {
-                            0.9
-                        } else {
-                            pwmci::invert(frac, table).unwrap().0
-                        };
-                        n * w
-                    })
-                    .sum();
-
-                n_alt.ceil() as i32
-            };
-
+            let n = get_harmonic_index(a, eta, frac);
             let max = partial_rate(n, a, eta).1;
 
             // println!("\t... got n = {}", n);
@@ -602,45 +607,62 @@ mod tests {
     }
 
     #[test]
-    fn sampling_index() {
-        let pts = {
-            let a_min = 2.0 * 10_f64.powf(13.0 / 20.0);
-            let a_max = 2.0 * 10_f64.powf(14.0 / 20.0);
-            let eta_min = 0.1;
-            let eta_max = 0.1 * 10_f64.powf(1.0 / 20.0);
-            [
-                (a_min, eta_min),
-                (a_max, eta_min),
-                (a_min, eta_max),
-                (a_max, eta_max),
-                ((a_min * a_max).sqrt(), (eta_min * eta_max).sqrt()),
-            ]
-        };
+    fn harmonic_index_sampling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
-        let rates: Vec<Vec<f64>> = pts.iter()
-            .map(|(a, eta): &(f64, f64)| -> Vec<f64>{
-                println!("working on a = {:.3e}, eta = {:.3e}", a, eta);
-                let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
-                (1..=nmax).map(|n| partial_rate(n, *a, *eta).0).collect()
-            })
-            .collect();
+        let pts = [
+            (0.946303, 0.105925),
+            (2.37700, 0.105925),
+            (4.74275, 0.105925),
+            //(9.46303, 0.105925),
+        ];
 
-        println!("done!");
+        for (a, eta) in &pts {
+            println!("At a = {}, eta = {}:", a, eta);
+            let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let nmax = nmax.max(19);
+            let rates: Vec<f64> = (1..=nmax).map(|n| partial_rate(n, *a, *eta).0).collect();
+            let total: f64 = rates.iter().sum();
+            println!("\t ... rates computed");
 
-        let filename = format!("output/sampling_index.dat");
-        let mut file = File::create(&filename).unwrap();
-        let len = rates.iter().map(|v| v.len()).max().unwrap();
+            let bins = [
+                1..=1,
+                2..=2,
+                3..=4,
+                5..=9,
+                10..=19,
+            ];
 
-        for i in 0..len {
-            writeln!(
-                file,
-                "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}",
-                rates[0].get(i).unwrap_or(&0.0),
-                rates[1].get(i).unwrap_or(&0.0),
-                rates[2].get(i).unwrap_or(&0.0),
-                rates[3].get(i).unwrap_or(&0.0),
-                rates[4].get(i).unwrap_or(&0.0),
-            ).unwrap();
+            let mut counts = [0.0; 5];
+
+            let expected = [
+                rates[0] / total,
+                rates[1] / total,
+                rates[2..=3].iter().sum::<f64>() / total,
+                rates[4..=8].iter().sum::<f64>() / total,
+                rates[9..=18].iter().sum::<f64>() / total,
+            ];
+
+            for _i in 0..1_000_000 {
+                //let (n, _, _) = sample(*a, *eta, &mut rng, None);
+                let frac = rng.gen::<f64>();
+                let n = get_harmonic_index(*a, *eta, frac);
+                for (j, bin) in bins.iter().enumerate() {
+                    if bin.contains(&n) {
+                        counts[j] += 1.0e-6;
+                        break;
+                    }
+                }
+            }
+
+            for (b, (c, e)) in bins.iter()
+                .zip(counts.iter()
+                .zip(expected.iter()))
+            {
+                let error = (c - e).abs() / e;
+                println!("\tExpected = {:.3e}, got {:.3e} [{:.1}%] for n in {:?}", e, c, 100.0 * error, b);
+                assert!(error < 5.0e-2);
+            }
         }
     }
 
