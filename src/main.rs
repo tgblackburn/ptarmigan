@@ -365,6 +365,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
 
+    let max_angle: f64 = input
+        .read("output:max_angle")
+        .unwrap_or(consts::PI);
+
     let eospec: Vec<String> = input.read("output:electron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
@@ -516,7 +520,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut current_id = num as u64;
 
     let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-        sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
+        let n0 = ThreeVector::from(sh.primary.momentum()).normalize();
+        sh.secondaries.retain(|&pt| {
+            let p = pt.momentum();
+            let n = ThreeVector::from(p).normalize();
+            let angle = (n * n0).acos();
+            p[0] > min_energy && angle < max_angle
+        });
         if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
             while let Some(pt) = sh.secondaries.pop() {
                 match pt.species() {

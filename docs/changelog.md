@@ -8,6 +8,7 @@ Added:
 
 * Nonlinear Compton scattering in linearly polarized backgrounds.
 * Data attributes (units and description) in HDF-formatted output.
+* Output specifiers `r_{x,y}` and option to filter out particles by angle.
 
 Removed:
 
