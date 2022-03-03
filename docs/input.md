@@ -64,7 +64,8 @@ The possible distributions are:
 * `gamma`: ratio of particle energy to electron mass, dimensionless
 * `p^-` and `p^+`: particle lightfront momenta, in MeV/c
 * `p_perp`: particle perpendicular momentum, i.e. `sqrt(px^2+py^2)`, in MeV/c
-* `r_perp`: ratio of perpendicular to lightfront momentum, i.e. `p_perp / p^-`, dimensionless
+* `r_x`, `r_y`: ratio of perpendicular to lightfront momenta, `px / p^-` and `py / p^-`, dimensionless
+* `r_perp`: `sqrt(r_x^2 + r_y^2)`, dimensionless
 * `angle_x`, `angle_y`: angle between particle momentum and the z-axis, in radians
 * `angle`: polar angle between particle momentum and the z-axis, in radians
 * `pi_minus_angle` (`theta` also accepted): polar angle between particle momentum and the *negative* z-axis, in radians
