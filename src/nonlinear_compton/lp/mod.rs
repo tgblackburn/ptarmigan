@@ -511,26 +511,27 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn integration_domain() {
+    fn integration() {
         let (n, a, eta) = (100, 10.0, 0.1);
         // bounds on s
         let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
         let smax = sn / (1.0 + sn);
 
-        let nodes: Vec<f64> = (0..=1000).map(|i| (i as f64) / 1000.0).collect();
+        let nodes: Vec<f64> = (1..300).map(|i| (i as f64) / 300.0).collect();
         let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
-
         let max_theta = ThetaBound::for_harmonic(n, a, eta);
 
         let filename = format!("output/nlc_lp_dd_rate_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
         let mut max = 0.0;
-        for s in nodes.iter().map(|x| x * smax) {//.filter(|&s| s > 0.5) {
-            for theta in nodes.iter().map(|x| x * consts::FRAC_PI_2) {//.filter(|&theta| theta < 0.3) {
-                if theta > max_theta.at(s) {
-                    continue;
-                }
-                let rate = double_diff_partial_rate(a, eta, s, theta, &mut dj);
+
+        for s in nodes.iter().map(|x| x * smax) {
+            for theta in nodes.iter().map(|x| x * consts::FRAC_PI_2) {
+                let rate = if theta > max_theta.at(s) {
+                    0.0
+                } else {
+                    double_diff_partial_rate(a, eta, s, theta, &mut dj)
+                };
                 if rate > max {
                     max = rate;
                 }
@@ -540,6 +541,33 @@ mod tests {
 
         let (integral, predicted_max) = partial_rate(n, a, eta);
         println!("integral = {:.6e}, max = {:.6e} [{:.6e} with finer resolution]", integral, predicted_max, max);
+
+        let filename = format!("output/nlc_lp_sd_rate_{}_{}_{}.dat", n, a, eta);
+        let mut file = File::create(&filename).unwrap();
+
+        let s_peak = sn / (2.0 + sn);
+        let pts: Box<dyn Iterator<Item = f64>> = if sn < 1.0 {
+            let lower = GAUSS_32_NODES.iter().map(|x| 0.5 * (x + 1.0) * s_peak);
+            let upper = GAUSS_32_NODES.iter().map(|x| s_peak + 0.5 * (smax - s_peak) * (x + 1.0));
+            Box::new(lower.chain(upper))
+        } else {
+            let (s0, s1) = (0.0, smax - 2.0 * (smax - s_peak));
+            let lower = GAUSS_16_NODES.iter().map(move |x| s0 + 0.5 * (s1 - s0) * (x + 1.0));
+
+            let (s0, s1) = (smax - 2.0 * (smax - s_peak), s_peak);
+            let mid = GAUSS_32_NODES.iter().map(move |x| s0 + 0.5 * (s1 - s0) * (x + 1.0));
+
+            let (s0, s1) = (s_peak, smax);
+            let upper = GAUSS_32_NODES.iter().map(move |x| s0 + 0.5 * (s1 - s0) * (x + 1.0));
+
+            Box::new(lower.chain(mid).chain(upper))
+        };
+
+        for s in pts {
+            let theta = max_theta.at(s);
+            let (rate, _) = single_diff_partial_rate(a, eta, s, theta, &mut dj);
+            writeln!(file, "{:.6e} {:.6e} {:.6e}", s, rate, theta).unwrap();
+        }
     }
 
     #[test]
@@ -656,46 +684,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn theta_bounds() {
-        let (n, a, eta) = (1, 10.0, 0.1);
-        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
-        let smax = sn / (1.0 + sn);
-        let bound = ThetaBound::for_harmonic(n, a, eta);
-        println!("{:?}", bound);
-
-        for i in 0..10 {
-            let s = (i as f64) * smax / 10.0;
-            let theta = bound.at(s);
-            println!("{} {}", s, theta);
-        }
-    }
-
-    #[test]
-    #[ignore]
-    fn partial_spectrum() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let n = 100;
-        let a = 10.0;
-        let eta = 0.1;
-
-        let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..10_000)
-            .map(|_n| {
-                sample(a, eta, &mut rng, Some(n))
-            })
-            .collect();
-        let rt = rt.elapsed();
-
-        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
-        let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
-        let mut file = File::create(&filename).unwrap();
-        for (_, s, phi) in vs {
-            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
-        }
-    }
-
-    #[test]
     fn harmonic_index_sampling() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
@@ -759,6 +747,31 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
+    fn partial_spectrum() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let n = 100;
+        let a = 10.0;
+        let eta = 0.1;
+
+        let rt = std::time::Instant::now();
+        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+            .map(|_n| {
+                sample(a, eta, &mut rng, Some(n))
+            })
+            .collect();
+        let rt = rt.elapsed();
+
+        println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
+        let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
+        let mut file = File::create(&filename).unwrap();
+        for (_, s, phi) in vs {
+            writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
+        }
+    }
+
+    #[test]
+    #[ignore]
     fn total_spectrum() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let a = 10.0; // 0.946393; // 2.37700; // 4.74275; // 9.46303;
