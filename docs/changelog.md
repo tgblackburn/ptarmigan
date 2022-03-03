@@ -9,6 +9,10 @@ Added:
 * Nonlinear Compton scattering in linearly polarized backgrounds.
 * Data attributes (units and description) in HDF-formatted output.
 
+Removed:
+
+* Plain-text output of complete particle data (re-enabled by compiling with feature `plain-text-output`).
+
 To be removed:
 
 * `circular` as default choice of polarization

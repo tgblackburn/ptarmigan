@@ -25,6 +25,7 @@ unzip-n = {version = "0.1.2", optional = true}
 default = []
 fits-output = ["fitsio"]
 hdf5-output = ["hdf5", "unzip-n"]
+plain-text-output = []
 with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 cos2-envelope-in-3d = []
