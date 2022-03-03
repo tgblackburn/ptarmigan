@@ -1,8 +1,21 @@
 # Changelog
 
-## v0.8.3
+## v0.9.0
 
 In progress.
+
+Added:
+
+* Nonlinear Compton scattering in linearly polarized backgrounds.
+* Data attributes (units and description) in HDF-formatted output.
+
+To be removed:
+
+* `circular` as default choice of polarization
+
+## v0.8.3
+
+2021-11-02
 
 Fixed:
 
