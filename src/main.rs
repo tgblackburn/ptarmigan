@@ -541,94 +541,47 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (mut electrons, mut photons, mut positrons) = if focusing && !using_lcfa {
+    let laser: Laser = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        //println!("total energy = {}", laser.total_energy());
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
-    } else if focusing { // and using LCFA rates
-        let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else if focusing {
+        FastFocusedLaser::new(a0, wavelength, waist, tau, pol).into()
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
-    } else { // plane wave and lcfa
-        let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else {
+        FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
     };
+
+    let (mut electrons, mut photons, mut positrons) = primaries
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!(
+                    "Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20))
+                );
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
+        );
 
     // Particle/parent ids are only unique within a single parallel process
     let mut id_offsets = vec![0u64; world.size() as usize];
