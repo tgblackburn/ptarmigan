@@ -31,6 +31,7 @@ mod lcfa;
 mod special_functions;
 mod output;
 mod input;
+mod pwmci;
 
 use constants::*;
 use field::*;
@@ -44,6 +45,7 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
+    #[cfg(feature = "plain-text-output")]
     PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
@@ -152,7 +154,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
     let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
-    let photon_rate = nonlinear_compton::probability(kappa, q, dt);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt, Polarization::Circular);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
     } else {
@@ -210,12 +212,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pol = match input.read::<String,_>("laser:polarization") {
         Ok(s) if s == "linear" => Polarization::Linear,
         Ok(s) if s == "circular" => Polarization::Circular,
-        _ => Polarization::Circular
+        _ => {
+            if id == 0 {
+                println!(concat!(
+                    "Warning: laser polarisation has not been specified.\n",
+                    "         This will be an error in the next version of Ptarmigan.\n",
+                    "         Continuing with default value of 'circular'..."
+                ));
+            }
+            Polarization::Circular
+        }
     };
 
-    if !using_lcfa && pol == Polarization::Linear {
-        panic!("LMA rates are implemented for circularly polarized waves only!");
-    }
+    let tracking_photons = if !using_lcfa && pol == Polarization::Linear {
+        if id == 0 {
+            println!(concat!(
+                "Warning: in LP mode, LMA rates are available only for photon emission.\n",
+                "         Pair creation will be disabled."
+            ));
+        }
+        false
+    } else {
+        tracking_photons
+    };
 
     let (focusing, waist) = input
         .read("laser:waist")
@@ -326,7 +345,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .unwrap_or_else(|_| "".to_owned());
 
-    let plain_text_output = match input.read::<String,_>("output:dump_all_particles") {
+    let output_mode = match input.read::<String,_>("output:dump_all_particles") {
+        #[cfg(feature = "plain-text-output")]
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
@@ -344,6 +364,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .read("output:min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
+
+    let max_angle: f64 = input
+        .read("output:max_angle")
+        .unwrap_or(consts::PI);
 
     let eospec: Vec<String> = input.read("output:electron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
@@ -496,7 +520,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut current_id = num as u64;
 
     let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-        sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
+        let n0 = ThreeVector::from(sh.primary.momentum()).normalize();
+        sh.secondaries.retain(|&pt| {
+            let p = pt.momentum();
+            let n = ThreeVector::from(p).normalize();
+            let angle = (n * n0).acos();
+            p[0] > min_energy && angle < max_angle
+        });
         if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
             while let Some(pt) = sh.secondaries.pop() {
                 match pt.species() {
@@ -511,94 +541,47 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (mut electrons, mut photons, mut positrons) = if focusing && !using_lcfa {
+    let laser: Laser = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        //println!("total energy = {}", laser.total_energy());
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
-    } else if focusing { // and using LCFA rates
-        let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else if focusing {
+        FastFocusedLaser::new(a0, wavelength, waist, tau, pol).into()
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
-    } else { // plane wave and lcfa
-        let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else {
+        FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
     };
+
+    let (mut electrons, mut photons, mut positrons) = primaries
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!(
+                    "Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20))
+                );
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
+        );
 
     // Particle/parent ids are only unique within a single parallel process
     let mut id_offsets = vec![0u64; world.size() as usize];
@@ -662,7 +645,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    match plain_text_output {
+    match output_mode {
+        #[cfg(feature = "plain-text-output")]
         OutputMode::PlainText => {
             #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
@@ -811,7 +795,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Write particle data
                 let fs = file.create_group("final-state")?;
 
-                let mut photons = photons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -862,7 +845,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
 
-                let mut electrons = electrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -905,7 +887,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the electron")
                         .write(&p[..])?;
 
-                let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;

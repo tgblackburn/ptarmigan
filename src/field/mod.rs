@@ -1,6 +1,7 @@
 //! Representation of the electromagnetic field in the simulation domain
 
 use rand::prelude::*;
+use enum_dispatch::enum_dispatch;
 use crate::geometry::FourVector;
 
 mod focused_laser;
@@ -23,7 +24,17 @@ pub enum Polarization {
     Circular = 1,
 }
 
+/// Specific field structures, i.e. types that implement `trait Field`.
+#[enum_dispatch]
+pub enum Laser {
+    PlaneWave,
+    FastPlaneWave,
+    FocusedLaser,
+    FastFocusedLaser,
+}
+
 /// Represents the electromagnetic field in a spatiotemporal domain.
+#[enum_dispatch(Laser)]
 pub trait Field {
     /// Returns the total electromagnetic energy in joules
     fn total_energy(&self) -> f64;

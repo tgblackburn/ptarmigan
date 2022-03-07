@@ -1,6 +1,6 @@
 use std::f64::consts;
 use rand::prelude::*;
-use num::complex::Complex;
+use num_complex::Complex;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;

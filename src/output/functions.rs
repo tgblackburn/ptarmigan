@@ -36,6 +36,12 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "r_perp" => Some(
             (r_perp as ParticleOutput, Dimensionless)
         ),
+        "r_x" | "rx" => Some(
+            (r_x as ParticleOutput, Dimensionless)
+        ),
+        "r_y" | "ry" => Some(
+            (r_y as ParticleOutput, Dimensionless)
+        ),
         "p^-" | "p-" => Some(
             (p_minus as ParticleOutput, Momentum)
         ),
@@ -126,6 +132,16 @@ pub fn p_plus(pt: &Particle) -> f64 {
 pub fn r_perp(pt: &Particle) -> f64 {
     let p = pt.momentum();
     p[1].hypot(p[2]) / (p[0] - p[3])
+}
+
+pub fn r_x(pt: &Particle) -> f64 {
+    let p = pt.momentum();
+    p[1] / (p[0] - p[3])
+}
+
+pub fn r_y(pt: &Particle) -> f64 {
+    let p = pt.momentum();
+    p[2] / (p[0] - p[3])
 }
 
 pub fn gamma(pt: &Particle) -> f64 {
