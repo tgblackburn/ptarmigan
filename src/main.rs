@@ -70,7 +70,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                         dt
                     );
 
-                    if let Some((k, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
+                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -78,6 +78,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
+                            .polarized_along(pol)
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 

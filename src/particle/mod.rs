@@ -57,6 +57,8 @@ pub struct Particle {
     species: Species,
     r: [FourVector; 2],
     u: [FourVector; 2],
+    has_pol: bool,
+    pol: FourVector, // Option<FourVector> would be better...
     optical_depth: f64,
     payload: f64,
     interaction_count: f64,
@@ -69,11 +71,13 @@ pub struct Particle {
 unsafe impl Equivalence for Particle {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1, 1];
+        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1];
         let displacements = [
             offset_of!(Particle, species) as mpi::Address,
             offset_of!(Particle, r) as mpi::Address,
             offset_of!(Particle, u) as mpi::Address,
+            offset_of!(Particle, has_pol) as mpi::Address,
+            offset_of!(Particle, pol) as mpi::Address,
             offset_of!(Particle, optical_depth) as mpi::Address,
             offset_of!(Particle, payload) as mpi::Address,
             offset_of!(Particle, interaction_count) as mpi::Address,
@@ -81,9 +85,11 @@ unsafe impl Equivalence for Particle {
             offset_of!(Particle, id) as mpi::Address,
             offset_of!(Particle, parent_id) as mpi::Address,
         ];
-        let types: [&dyn Datatype; 9] = [
+        let types: [&dyn Datatype; 11] = [
             &Species::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
+            &FourVector::equivalent_datatype(),
+            &bool::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
@@ -92,7 +98,7 @@ unsafe impl Equivalence for Particle {
             &u64::equivalent_datatype(),
             &u64::equivalent_datatype(),
         ];
-        UserDatatype::structured(9, &blocklengths, &displacements, &types)
+        UserDatatype::structured(11, &blocklengths, &displacements, &types)
     }
 }
 
@@ -142,6 +148,8 @@ impl Particle {
             species,
             r: [r; 2],
             u: [u; 2],
+            has_pol: false,
+            pol: FourVector::new(0.0, 0.0, 0.0, 0.0),
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
             interaction_count: 0.0,
@@ -270,10 +278,15 @@ impl Particle {
         let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
+        let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
+        let pol = FourVector::new(self.pol[0], pol[1], pol[2], pol[3]);
+
         Particle {
             species: self.species,
             r: [r0, r],
             u: [u0, u],
+            has_pol: self.has_pol,
+            pol: pol,
             optical_depth: self.optical_depth,
             payload: self.payload,
             interaction_count: self.interaction_count,
@@ -308,6 +321,25 @@ impl Particle {
     /// Photon, electron or positron
     pub fn species(&self) -> Species {
         self.species
+    }
+
+    /// Updates the particle polarization
+    pub fn polarized_along(&mut self, pol: Option<FourVector>) -> Self {
+        if let Some(eps) = pol {
+            self.has_pol = true;
+            self.pol = eps;
+        }
+        *self
+    }
+
+    /// Returns the particle polarization, if it exists
+    #[allow(unused)]
+    pub fn polarization(&self) -> Option<FourVector> {
+        if self.has_pol {
+            Some(self.pol)
+        } else {
+            None
+        }
     }
 }
 

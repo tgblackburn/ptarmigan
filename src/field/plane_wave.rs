@@ -131,7 +131,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, Option<FourVector> , FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -148,8 +148,8 @@ impl Field for PlaneWave {
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp * width;
         let prob = nonlinear_compton::probability(kappa, u, dt, self.pol).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (n, k) = nonlinear_compton::generate(kappa, u, self.pol, rng);
-            Some((k, u + (n as f64) * kappa - k, a))
+            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, rng);
+            Some((k, pol, u + (n as f64) * kappa - k, a))
         } else {
             None
         }

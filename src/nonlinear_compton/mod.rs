@@ -40,9 +40,10 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 /// in a plane EM wave with (local) wavector `k`
 /// and polarization `pol`.
 ///
-/// Returns the harmonic index of the photon and the
-/// normalized momentum.
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+/// Returns the harmonic index of the photon,
+/// the normalized momentum,
+/// and the polarization (if applicable).
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector, Option<FourVector>) {
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
@@ -79,7 +80,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
-    (n, k_prime)
+    (n, k_prime, None)
 }
 
 #[cfg(test)]
@@ -103,7 +104,7 @@ mod tests {
         let rt = std::time::Instant::now();
         let vs: Vec<(f64,f64,f64,i32)> = (0..100_000)
             .map(|_i| {
-                let (n, k_prime) = generate(k, q, Polarization::Linear, &mut rng);
+                let (n, k_prime, _) = generate(k, q, Polarization::Linear, &mut rng);
                 (k * k_prime / (k * q), k_prime[1], k_prime[2], n)
             })
             .collect();
