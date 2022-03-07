@@ -46,6 +46,48 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
     (-gamma[0] * gamma[0] - a * a * (1.0 + 0.5 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])) / (2.0 * consts::PI)
 }
 
+/// Returns the double-differential rate to emit E- and B-polarized photons, respectively.
+/// Result valid only for 0 < s < s_max and 0 < theta < pi/2.
+/// Multiply by alpha / eta to get dP/(ds dtheta dphase)
+#[allow(unused)]
+fn double_diff_partial_rate_pol_resolved(a: f64, eta: f64, s: f64, theta: f64, dj: &mut DoubleBessel) -> (f64, f64) {
+    let n = dj.n();
+
+    // opposite sign! cos theta > 0 in 0 < theta < pi/2
+    let x = {
+        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+        let wn = s / (sn * (1.0 - s));
+        let wn = wn.min(1.0);
+        2.0 * (n as f64) * a * theta.cos() * (wn * (1.0 - wn)).sqrt() / (1.0 + 0.5 * a * a).sqrt()
+    };
+
+    let y = a * a * s / (8.0 * eta * (1.0 - s));
+
+    let j = dj.evaluate(x, y);
+
+    let gamma = if n % 2 == 0 {
+        // j[1] and j[3] change sign
+        [j[2], -0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    } else {
+        // j[0], j[2] and j[4] change sign
+        [-j[2], 0.5 * (j[1] + j[3]), -0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    };
+
+    let parallel = a * a * (
+        (0.5 - (n as f64) / (4.0 * y) + (-x / (8.0 * y)).powi(2)) * gamma[0] * gamma[0]
+        - (1.0 + 0.25 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])
+    ) / (2.0 * consts::PI);
+
+    let perp = (
+        -gamma[0] * gamma[0] - a * a * (
+            (0.5 - (n as f64) / (4.0 * y) + (-x / (8.0 * y)).powi(2)) * gamma[0] * gamma[0]
+            + 0.25 * s * s / (1.0 - s) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])
+        )
+    ) / (2.0 * consts::PI);
+
+    (parallel, perp)
+}
+
 #[derive(Debug)]
 struct ThetaBound {
     s: [f64; 16],
@@ -534,6 +576,12 @@ mod tests {
                 };
                 if rate > max {
                     max = rate;
+                }
+                if rate > 0.0 {
+                    let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
+                    let error = (rate - (par + perp)).abs() / rate;
+                    assert!(error < 1.0e-9);
+                    assert!(par < rate);
                 }
                 writeln!(file, "{:.6e} {:.6e} {:.6e}", s, theta, rate).unwrap();
             }
