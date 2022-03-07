@@ -149,7 +149,7 @@ impl Particle {
             r: [r; 2],
             u: [u; 2],
             has_pol: false,
-            pol: FourVector::new(0.0, 0.0, 0.0, 0.0),
+            pol: FourVector::new(1.0, 0.0, 0.0, 0.0), // unpolarized by default
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
             interaction_count: 0.0,
@@ -279,7 +279,7 @@ impl Particle {
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
         let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
-        let pol = FourVector::new(self.pol[0], pol[1], pol[2], pol[3]);
+        let pol = FourVector::new(self.pol[0], pol[0], pol[1], pol[2]);
 
         Particle {
             species: self.species,
@@ -324,7 +324,7 @@ impl Particle {
     }
 
     /// Updates the particle polarization
-    pub fn polarized_along(&mut self, pol: Option<FourVector>) -> Self {
+    pub fn with_polarization(&mut self, pol: Option<FourVector>) -> Self {
         if let Some(eps) = pol {
             self.has_pol = true;
             self.pol = eps;
