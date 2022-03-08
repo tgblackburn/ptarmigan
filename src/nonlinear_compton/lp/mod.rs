@@ -5,6 +5,7 @@ use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
+use super::PhotonPolarization;
 
 mod rate_table;
 mod cdf_table;
@@ -49,7 +50,6 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
 /// Returns the double-differential rate to emit E- and B-polarized photons, respectively.
 /// Result valid only for 0 < s < s_max and 0 < theta < pi/2.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase)
-#[allow(unused)]
 fn double_diff_partial_rate_pol_resolved(a: f64, eta: f64, s: f64, theta: f64, dj: &mut DoubleBessel) -> (f64, f64) {
     let n = dj.n();
 
@@ -362,7 +362,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
 /// but implemented as a table lookup.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase).
 #[allow(unused_parens)]
-pub fn rate(a: f64, eta: f64) -> Option<f64> {
+pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());
 
     if x < rate_table::MIN[0] {
@@ -493,7 +493,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, PhotonPolarization) {
     let (n, max) = match fixed_n {
         None => {
             let frac = rng.gen::<f64>();
@@ -529,6 +529,14 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
 
     // println!("\t... got s = {:.3e}, theta = {:.3e}", s, theta);
 
+    // Pick photon polarization
+    let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
+    let pol = if rng.gen::<f64>() < par / (par + perp) {
+        PhotonPolarization::LinearE
+    } else {
+        PhotonPolarization::LinearB
+    };
+
     // Fix range of theta, which is [0, pi/2] at the moment
     let quadrant = rng.gen_range(0, 4);
     let theta = match quadrant {
@@ -539,7 +547,7 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
         _ => unreachable!(),
     };
 
-    (n, s, theta)
+    (n, s, theta, pol)
 }
 
 #[cfg(test)]
@@ -577,13 +585,13 @@ mod tests {
                 if rate > max {
                     max = rate;
                 }
+                let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
                 if rate > 0.0 {
-                    let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
                     let error = (rate - (par + perp)).abs() / rate;
                     assert!(error < 1.0e-9);
                     assert!(par < rate);
                 }
-                writeln!(file, "{:.6e} {:.6e} {:.6e}", s, theta, rate).unwrap();
+                writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", s, theta, rate, par, perp).unwrap();
             }
         }
 
@@ -803,7 +811,7 @@ mod tests {
         let eta = 0.1;
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+        let vs: Vec<(i32,f64,f64,_)> = (0..10_000)
             .map(|_n| {
                 sample(a, eta, &mut rng, Some(n))
             })
@@ -813,7 +821,7 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (_, s, phi) in vs {
+        for (_, s, phi, _) in vs {
             writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
         }
     }
@@ -826,7 +834,7 @@ mod tests {
         let eta = 0.1; // 0.105925;
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..100)
+        let vs: Vec<(i32,f64,f64,_)> = (0..100)
             .map(|_n| {
                 sample(a, eta, &mut rng, None)
             })
@@ -836,7 +844,7 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_spectrum_{}_{}.dat", a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (n, s, phi) in vs {
+        for (n, s, phi, _) in vs {
             writeln!(file, "{} {:.6e} {:.6e}", n, s, phi).unwrap();
         }
     }

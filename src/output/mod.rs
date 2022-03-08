@@ -114,6 +114,8 @@ impl FromStr for DistributionFunction {
         let weight_function = match weight {
             "energy" => Some(functions::weighted_by_energy as ParticleOutput),
             "weight" | "auto" => Some(functions::weighted_by_number as ParticleOutput),
+            "pol_x" => Some(functions::weighted_by_pol_x as ParticleOutput),
+            "pol_y" => Some(functions::weighted_by_pol_y as ParticleOutput),
             _ => None,
         };
 

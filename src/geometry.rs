@@ -205,6 +205,12 @@ impl std::fmt::Display for FourVector {
     }
 }
 
+impl std::convert::From<[f64; 4]> for FourVector {
+    fn from(item: [f64; 4]) -> Self {
+        FourVector::new(item[0], item[1], item[2], item[3])
+    }
+}
+
 /// A three-vector
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ThreeVector {

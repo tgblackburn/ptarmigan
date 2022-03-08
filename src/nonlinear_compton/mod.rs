@@ -9,6 +9,15 @@ use crate::field::Polarization;
 mod cp;
 mod lp;
 
+#[derive(Debug, PartialEq, Eq)]
+enum PhotonPolarization {
+    LinearE,
+    LinearB,
+    // CircularPlus,
+    // CircularMinus,
+    Unpolarized,
+}
+
 /// The total probability that a photon is emitted
 /// by an electron with normalized quasimomentum `q`
 /// in a plane EM wave with (local) wavector `k`
@@ -47,7 +56,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
-    let (n, s, cphi_zmf) = match pol {
+    let (n, s, cphi_zmf, photon_pol) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng, None),
         Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng, None),
     };
@@ -80,7 +89,14 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
-    (n, k_prime, None)
+    // Stokes vector
+    let sv: Option<FourVector> = match photon_pol {
+        PhotonPolarization::LinearE => Some([1.0, 1.0, 0.0, 0.0].into()),
+        PhotonPolarization::LinearB => Some([1.0, -1.0, 0.0, 0.0].into()),
+        PhotonPolarization::Unpolarized => None,
+    };
+
+    (n, k_prime, sv)
 }
 
 #[cfg(test)]
