@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::str::FromStr;
+use num_complex::Complex;
 
 #[cfg(feature = "with-mpi")]
 use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
@@ -328,6 +329,9 @@ impl Particle {
         if let Some(eps) = pol {
             self.has_pol = true;
             self.pol = eps;
+        } else {
+            self.has_pol = false;
+            self.pol = [1.0, 0.0, 0.0, 0.0].into();
         }
         *self
     }
@@ -341,10 +345,130 @@ impl Particle {
             None
         }
     }
+
+    /// Projects the particle polarization onto the given axis.
+    /// `polarization_along_x` and `polarization_along_y` are
+    /// provided for convenience
+    pub fn polarization_along<T: Into<ThreeVector>>(&self, axis: T) -> f64 {
+        let sv = self.polarization()
+            .unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into());
+
+        // Degree of polarization
+        let frac = sv[1].hypot(sv[2]).hypot(sv[3]) / sv[0];
+
+        // Convert Stokes vector to Jones vector
+        let ex = (0.5 * (1.0 + sv[1])).sqrt();
+        let ey = if ex == 0.0 {
+            Complex::new(1.0, 0.0)
+        } else {
+            Complex::new(0.5 * sv[2] / ex, -0.5 * sv[3] / ex)
+        };
+        let ex = Complex::new(ex, 0.0);
+        //println!("\tJones vector = {}, {}", ex, ey);
+
+        // Construct axes of the ellipse
+        let (x, y) = {
+            let k = self.normalized_momentum();
+            let e1: FourVector = [0.0, 1.0, 0.0, 0.0].into();
+            let e2: FourVector = [0.0, 0.0, 1.0, 0.0].into();
+            let n: FourVector = [1.0, 0.0, 0.0, 1.0].into();
+            (
+                ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize(),
+                ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize(),
+            )
+        };
+        //println!("\tx = {}, y = {}, x.y = {}", x, y, x * y);
+
+        // Project intensities
+        let axis = axis.into().normalize();
+        //println!("|ex|^2 = {:.2e}, ex.axis = {:.2e}, |ey|^2 = {:.2e}, ey.axis = {:.2e}", ex.norm_sqr(), x * axis, ey.norm_sqr(), y * axis);
+        frac * (ex * (x * axis) + ey * (y * axis)).norm_sqr() + (1.0 - frac) * 0.5
+    }
+
+    /// Projects the particle polarization onto the x axis.
+    pub fn polarization_along_x(&self) -> f64 {
+        self.polarization_along([1.0, 0.0, 0.0])
+    }
+    /// Projects the particle polarization onto the y axis.
+    pub fn polarization_along_y(&self) -> f64 {
+        self.polarization_along([0.0, 1.0, 0.0])
+    }
 }
 
 impl Shower {
     pub fn multiplicity(&self) -> usize {
         self.secondaries.len() - 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts;
+    use super::*;
+
+    #[test]
+    fn project_polarization() {
+        let mut photon = Particle::create(Species::Photon, [0.0; 4].into());
+        let angles = [
+            (consts::PI, 0.0_f64),
+            (0.75 * consts::PI, 0.0),
+            (0.6 * consts::PI, consts::FRAC_PI_2),
+            (0.8 * consts::PI, 1.0),
+            (0.2 * consts::PI, 4.0),
+        ];
+        let x_axis = ThreeVector::from([1.0, 0.0, 0.0]);
+        let y_axis = ThreeVector::from([0.0, 1.0, 0.0]);
+        let e1 = FourVector::new(0.0, 1.0, 0.0, 0.0);
+        let e2 = FourVector::new(0.0, 0.0, 1.0, 0.0);
+        let n = FourVector::new(1.0, 0.0, 0.0, 1.0);
+
+        for (theta, phi) in &angles{
+            let k = FourVector::lightlike(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos());
+            photon.with_normalized_momentum(k);
+            println!("photon k = {:.3} {:.3} {:.3}", k[1], k[2], k[3]);
+
+            // LP E
+            photon.with_polarization(Some([1.0, 1.0, 0.0, 0.0].into()));
+            let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize();
+
+            let pol = photon.polarization_along_x();
+            let target = (eps * x_axis).powi(2);
+            println!("\tLPx: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            let target = (eps * y_axis).powi(2);
+            println!("\tLPx: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            // LP B
+            photon.with_polarization(Some([1.0, -1.0, 0.0, 0.0].into()));
+            let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize();
+
+            let pol = photon.polarization_along_x();
+            let target = (eps * x_axis).powi(2);
+            println!("\tLPy: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            let target = (eps * y_axis).powi(2);
+            println!("\tLPy: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            // CP+
+            photon.with_polarization(Some([1.0, 0.0, 0.0, 1.0].into()));
+
+            let pol = photon.polarization_along_x();
+            let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (eps * x_axis).powi(2);
+            println!("\tCP+: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (eps * y_axis).powi(2);
+            println!("\tCP+: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+        }
     }
 }

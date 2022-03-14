@@ -397,6 +397,12 @@ impl std::ops::Div<f64> for ThreeVector {
     }
 }
 
+impl std::convert::From<[f64; 3]> for ThreeVector {
+    fn from(item: [f64; 3]) -> Self {
+        ThreeVector::new(item[0], item[1], item[2])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts;

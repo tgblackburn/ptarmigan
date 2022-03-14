@@ -192,19 +192,9 @@ pub fn weighted_by_number(pt: &Particle) -> f64 {
 }
 
 pub fn weighted_by_pol_x(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        // Mueller matrix for LP-x = 0.5 ((1 1 0 0) (1 1 0 0) (0 0 0 0) (0 0 0 0))
-        0.5 * (sv[0] + sv[1]) * pt.weight()
-    } else {
-        0.5 * pt.weight()
-    }
+    pt.polarization_along_x() * pt.weight()
 }
 
 pub fn weighted_by_pol_y(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        // Mueller matrix for LP-y = 0.5 ((1 -1 0 0) (-1 1 0 0) (0 0 0 0) (0 0 0 0))
-        0.5 * (sv[0] - sv[1]) * pt.weight()
-    } else {
-        0.5 * pt.weight()
-    }
+    pt.polarization_along_y() * pt.weight()
 }
