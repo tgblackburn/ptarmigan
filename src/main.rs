@@ -17,8 +17,6 @@ use rand_xoshiro::*;
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 7);
-#[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 8);
 
 mod constants;
@@ -801,11 +799,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w, a, n, id, pid) = photons
+                let (x, p, pol, w, a, n, id, pid) = photons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
+                        pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
                         pt.weight(),
                         pt.payload(),
                         pt.interaction_count(),
@@ -834,6 +833,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_data("parent_id")
                         .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")
                         .write(&pid[..])?
+                    .new_data("polarization")
+                        .with_desc("Stokes parameters of the photon: I, Q, U, V")
+                        .with_unit("1")
+                        .write(&pol[..])?
                     .new_data("position")
                         .with_unit(units.length.name())
                         .with_desc("four-position of the photon")
@@ -845,6 +848,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
+                fs.group("photon")?.link_soft("polarization", "polarisation")?;
 
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
