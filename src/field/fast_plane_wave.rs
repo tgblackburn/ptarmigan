@@ -111,7 +111,7 @@ impl Field for FastPlaneWave {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
-            .map(|k| (k, None, u - k, a))
+            .map(|(k, pol)| (k, Some(pol), u - k, a))
     }
 
     #[allow(non_snake_case)]

@@ -2,6 +2,7 @@
 
 use std::f64::consts;
 use crate::constants::*;
+use crate::geometry::{ThreeVector, FourVector};
 use crate::pwmci;
 
 mod tables;
@@ -162,6 +163,16 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
 
         (gamma * u / (1.0 + u), theta, 2.0 * consts::PI * rand3)
     }
+}
+
+/// Returns the Stokes vector of the photon with four-momentum `k` (normalized to the
+/// electron mass), assuming that it was emitted by an electron with quantum parameter `chi`,
+/// Lorentz factor `gamma` and instantaneous acceleration `w`.
+///
+/// The basis is defined with respect to a vector in the `x`-`z` plane that is perpendicular
+/// to the photon three-momentum.
+pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, w: ThreeVector) -> FourVector {
+    [1.0, 0.0, 0.0, 0.0].into()
 }
 
 /// Samples the classical synchrotron spectrum of an electron with

@@ -181,7 +181,7 @@ impl FastFocusedLaser {
     /// magnetic field `B`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
         let beta = ThreeVector::from(u) / u[0];
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
@@ -199,7 +199,11 @@ impl FastFocusedLaser {
                 let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
                 let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
                 let k = FourVector::lightlike(k[0], k[1], k[2]);
-                Some(k)
+                let pol = {
+                    let w = -(E + SPEED_OF_LIGHT * beta.cross(B)).normalize();
+                    lcfa::photon_emission::stokes_parameters(k, chi, u[0], w)
+                };
+                Some((k, pol))
             } else {
                 None
             }
@@ -276,7 +280,7 @@ impl Field for FastFocusedLaser {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
-            .map(|k| (k, None, u - k, a))
+            .map(|(k, pol)| (k, Some(pol), u - k, a))
     }
 
     #[allow(non_snake_case)]
