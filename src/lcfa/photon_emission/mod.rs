@@ -276,6 +276,7 @@ pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64
 mod tests {
     use rand::prelude::*;
     use rand_xoshiro::*;
+    use crate::{Particle, Species};
     use super::*;
 
     #[test]
@@ -349,6 +350,15 @@ mod tests {
 
         println!("Summed Stokes vector = [{:.3e} {:.3e} {:.3e} {:.3e}]", sv[0], sv[1], sv[2], sv[3]);
         assert!(sv[2].abs() < 1.0e-3 && sv[3].abs() < 1.0e-3);
+
+        let photon = Particle::create(Species::Photon, [0.0; 4].into())
+            .with_normalized_momentum([omega_mc2, 0.0, 0.0, omega_mc2].into())
+            .with_polarization(Some(sv));
+
+        let pol_x = photon.polarization_along_x();
+        let pol_y = photon.polarization_along_y();
+        println!("Projected onto x = {:.3e}, y = {:.3e}, total = {:.3e}", pol_x, pol_y, pol_x + pol_y);
+        assert!(pol_x + pol_y == 1.0);
     }
 
     // #[test]

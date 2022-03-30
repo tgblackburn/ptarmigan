@@ -356,6 +356,9 @@ impl Particle {
         // Degree of polarization
         let frac = sv[1].hypot(sv[2]).hypot(sv[3]) / sv[0];
 
+        // Fix normalisation! (sv[0] should be 1)
+        let sv = sv / (frac * sv[0]);
+
         // Convert Stokes vector to Jones vector
         let ex = (0.5 * (1.0 + sv[1])).sqrt();
         let ey = if ex == 0.0 {
