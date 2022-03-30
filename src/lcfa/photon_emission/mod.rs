@@ -4,6 +4,7 @@ use std::f64::consts;
 use crate::constants::*;
 use crate::geometry::{ThreeVector, FourVector};
 use crate::pwmci;
+use crate::special_functions::Airy;
 
 mod tables;
 
@@ -167,12 +168,63 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
 
 /// Returns the Stokes vector of the photon with four-momentum `k` (normalized to the
 /// electron mass), assuming that it was emitted by an electron with quantum parameter `chi`,
-/// Lorentz factor `gamma` and instantaneous acceleration `w`.
+/// Lorentz factor `gamma`, velocity `v` and instantaneous acceleration `w`.
 ///
 /// The basis is defined with respect to a vector in the `x`-`z` plane that is perpendicular
 /// to the photon three-momentum.
-pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, w: ThreeVector) -> FourVector {
-    [1.0, 0.0, 0.0, 0.0].into()
+pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w: ThreeVector) -> FourVector {
+    // belt and braces
+    let v = v.normalize();
+    let w = w.normalize();
+    let n = ThreeVector::from(k).normalize();
+
+    // u = omega / (e - omega)
+    let u = k[0] / (gamma - k[0]);
+
+    // angle b/t k and plane (v, w)
+    let beta = {
+        let q = v.cross(w).normalize();
+        (n * q).asin()
+    };
+    // println!("gamma beta = {:.3e}", gamma * beta);
+
+    let mu = (beta * beta + 1.0 / (gamma * gamma)).sqrt();
+    let eta = u * (gamma * mu).powi(3) / (3.0 * chi);
+
+    // K(1/3, eta) = pi (2 sqrt(3) / x)^(1/3) Ai[ (1.5 x)^(2/3) ]
+    let k1_3 = consts::PI * (2.0 * 3.0f64.sqrt() / eta).cbrt() * (1.5 * eta).powf(2.0 / 3.0).ai().unwrap_or(0.0);
+
+    // K(2/3, eta) = -pi / 3^(1/6) (2 / x)^(2/3) Ai'[ (1.5 x)^(2/3) ]
+    let k2_3 = -consts::PI * 3.0f64.powf(-1.0/6.0) * (2.0 / eta).powf(2.0 / 3.0) * (1.5 * eta).powf(2.0 / 3.0).ai_prime().unwrap_or(0.0);
+
+    // println!("eta = {:.3e}, K(1/3, eta) = {:.3e}, K(2/3, eta) = {:.3e}", eta, k1_3, k2_3);
+
+    let g = 0.5 * (u * mu).powi(2) * (k1_3 * k1_3 + k2_3 * k2_3) / (1.0 + u) + (mu * k2_3).powi(2) + (beta * k1_3).powi(2);
+
+    let xi = ThreeVector::new(
+        ((mu * k2_3).powi(2) - (beta * k1_3).powi(2)) / g,
+        0.0,
+        2.0 * (1.0 + 0.5 * u * u / (1.0 + u)) * beta * mu * k1_3 * k2_3 / g,
+    );
+
+    // println!("before rotation: |xi| = {:.3e}, xi = [{:.3e} {:.3e} {:.3e}]", xi.norm_sqr().sqrt(), xi[0], xi[1], xi[2]);
+
+    // xi is defined w.r.t. the basis [w - (n.w) n, n, w x n], whereas
+    // we want [e, n, e x n], where e is in the x-z plane.
+    // phi rotates w - (n.w)n down to the x-z plane - we don't care which
+    // direction in the x-z plane, because this is fixed by k
+    let phi = ((w - (n * w) * n) * ThreeVector::new(0.0, 1.0, 0.0)).asin();
+    // println!("rotating w by {:.3e}", phi);
+
+    // which rotates the Stokes parameters through 2 phi
+    let xi = ThreeVector::new(
+        (2.0 * phi).cos() * xi[0] + (2.0 * phi).sin() * xi[1],
+        -(2.0 * phi).sin() * xi[0] + (2.0 * phi).cos() * xi[1],
+        xi[2],
+    );
+
+    // println!("after rotation: |xi| = {:.3e}, xi = [{:.3e} {:.3e} {:.3e}]", xi.norm_sqr().sqrt(), xi[0], xi[1], xi[2]);
+    [1.0, xi[0], xi[1], xi[2]].into()
 }
 
 /// Samples the classical synchrotron spectrum of an electron with
@@ -222,6 +274,8 @@ pub fn classical_sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64
 
 #[cfg(test)]
 mod tests {
+    use rand::prelude::*;
+    use rand_xoshiro::*;
     use super::*;
 
     #[test]
@@ -262,6 +316,39 @@ mod tests {
         let target = 4.46834e17;
         println!("rate(chi = 403, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
         assert!( ((value - target) / target).abs() < 1.0e-3 );
+    }
+
+    #[test]
+    fn stokes_vector() {
+        let (chi, gamma) = (1.0, 1000.0);
+        let w: ThreeVector = [1.0, 0.0, 0.0].into();
+        let long: ThreeVector = [0.0, 0.0, 1.0].into();
+        let perp: ThreeVector = [1.0, 0.0, 0.0].into();
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        let (omega_mc2, _, _) = sample(chi, gamma, 0.98, rng.gen(), rng.gen());
+        println!("Sampling at omega/(m gamma) = {:.3e}...", omega_mc2 / gamma);
+
+        // integrating over all angles is expected to yield a Stokes vector
+        // [1.0, (W_11 - W_22) / (W_11 + W_22), 0, 0]
+        let sv: FourVector = (0..10_000)
+            .map(|_| {
+                // sample at fixed energy
+                let (omega_mc2, theta, cphi) = sample(chi, gamma, 0.8, rng.gen(), rng.gen());
+                let theta = theta.unwrap();
+                //println!("omega/(m gamma) = {:.2e}, gamma theta = {:.3e}, phi = {:.3e}", omega_mc2 / gamma, gamma * theta, cphi);
+
+                // photon four-momentum
+                let perp = perp.rotate_around(long, cphi);
+                let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
+                let k = FourVector::lightlike(k[0], k[1], k[2]);
+
+                stokes_parameters(k, chi, gamma, long, w) / 10_000_f64
+            })
+            .fold([0.0; 4].into(), |a, b| a + b);
+
+        println!("Summed Stokes vector = [{:.3e} {:.3e} {:.3e} {:.3e}]", sv[0], sv[1], sv[2], sv[3]);
+        assert!(sv[2].abs() < 1.0e-3 && sv[3].abs() < 1.0e-3);
     }
 
     // #[test]

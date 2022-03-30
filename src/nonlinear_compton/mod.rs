@@ -96,6 +96,26 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
         PhotonPolarization::Unpolarized => None,
     };
 
+    // This is defined w.r.t. to the orthonormal basis
+    // e_1 = x - k_x (k - omega z) / (omega * (omega - k_z))
+    // e_2 = y - k_y (k - omega z) / (omega * (omega - k_z))
+    // which are perpendicular to k.
+
+    // The global basis requires one vector to be in the x-z plane,
+    // so e_1 gets rotated by
+    let theta = {
+        let cos_theta = -k_prime[1] * k_prime[2] / (k_prime[0] * (k_prime[0] - k_prime[3]));
+        cos_theta.acos()
+    };
+
+    // and the Stokes parameters by
+    let sv = sv.map(|xi| FourVector::new(
+        xi[0],
+        (2.0 * theta).cos() * xi[1] + (2.0 * theta).sin() * xi[2],
+        -(2.0 * theta).sin() * xi[1] + (2.0 * theta).cos() * xi[2],
+        xi[3],
+    ));
+
     (n, k_prime, sv)
 }
 

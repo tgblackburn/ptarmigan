@@ -196,13 +196,11 @@ impl FastFocusedLaser {
             );
             if let Some(theta) = theta {
                 let long: ThreeVector = beta.normalize();
-                let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
+                let w = -(E - (long * E) * long / E.norm_sqr().sqrt() + SPEED_OF_LIGHT * beta.cross(B)).normalize();
+                let perp: ThreeVector = w.rotate_around(long, cphi);
                 let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
                 let k = FourVector::lightlike(k[0], k[1], k[2]);
-                let pol = {
-                    let w = -(E + SPEED_OF_LIGHT * beta.cross(B)).normalize();
-                    lcfa::photon_emission::stokes_parameters(k, chi, u[0], w)
-                };
+                let pol = lcfa::photon_emission::stokes_parameters(k, chi, u[0], beta, w);
                 Some((k, pol))
             } else {
                 None

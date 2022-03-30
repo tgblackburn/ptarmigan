@@ -368,21 +368,28 @@ impl Particle {
 
         // Construct axes of the ellipse
         let (x, y) = {
-            let k = self.normalized_momentum();
-            let e1: FourVector = [0.0, 1.0, 0.0, 0.0].into();
-            let e2: FourVector = [0.0, 0.0, 1.0, 0.0].into();
-            let n: FourVector = [1.0, 0.0, 0.0, 1.0].into();
-            (
-                ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize(),
-                ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize(),
-            )
+            let n = ThreeVector::from(self.normalized_momentum()).normalize();
+            let mag = n[0].hypot(n[2]);
+            let x: ThreeVector = if mag == 0.0 {
+                // so photon pointed along y
+                [1.0, 0.0, 0.0].into()
+            } else {
+                [n[2] / mag, 0.0, -n[0] / mag].into()
+            };
+            let y = x.cross(n);
+            (x, y)
         };
         //println!("\tx = {}, y = {}, x.y = {}", x, y, x * y);
 
         // Project intensities
         let axis = axis.into().normalize();
         //println!("|ex|^2 = {:.2e}, ex.axis = {:.2e}, |ey|^2 = {:.2e}, ey.axis = {:.2e}", ex.norm_sqr(), x * axis, ey.norm_sqr(), y * axis);
-        frac * (ex * (x * axis) + ey * (y * axis)).norm_sqr() + (1.0 - frac) * 0.5
+
+        // Polarized and unpolarized contributions
+        let pol_contr = (ex * (x * axis) + ey * (y * axis)).norm_sqr();
+        let unpol_contr = 0.5 * ((x * axis).powi(2) + (y * axis).powi(2));
+
+        frac * pol_contr + (1.0 - frac) * unpol_contr
     }
 
     /// Projects the particle polarization onto the x axis.
@@ -418,9 +425,6 @@ mod tests {
         ];
         let x_axis = ThreeVector::from([1.0, 0.0, 0.0]);
         let y_axis = ThreeVector::from([0.0, 1.0, 0.0]);
-        let e1 = FourVector::new(0.0, 1.0, 0.0, 0.0);
-        let e2 = FourVector::new(0.0, 0.0, 1.0, 0.0);
-        let n = FourVector::new(1.0, 0.0, 0.0, 1.0);
 
         for (theta, phi) in &angles{
             let k = FourVector::lightlike(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos());
@@ -429,7 +433,8 @@ mod tests {
 
             // LP E
             photon.with_polarization(Some([1.0, 1.0, 0.0, 0.0].into()));
-            let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize();
+            //let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize();
+            let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
 
             let pol = photon.polarization_along_x();
             let target = (eps * x_axis).powi(2);
@@ -443,7 +448,9 @@ mod tests {
 
             // LP B
             photon.with_polarization(Some([1.0, -1.0, 0.0, 0.0].into()));
-            let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize();
+            let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
+            let eps = eps.cross(k.into()).normalize();
+            //let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize();
 
             let pol = photon.polarization_along_x();
             let target = (eps * x_axis).powi(2);
@@ -457,16 +464,19 @@ mod tests {
 
             // CP+
             photon.with_polarization(Some([1.0, 0.0, 0.0, 1.0].into()));
+            let e1: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
+            let e1 = e1 / consts::SQRT_2;
+            let e2 = e1.cross(k.into()).normalize() / consts::SQRT_2;
 
             let pol = photon.polarization_along_x();
-            let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize() / consts::SQRT_2;
-            let target = (eps * x_axis).powi(2);
+            //let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (e1 * x_axis).powi(2) + (e2 * x_axis).powi(2);
             println!("\tCP+: got pol_x = {:.3}, expected = {:.3}", pol, target);
             assert!(pol == target || (pol - target).abs() < 1.0e-6);
 
             let pol = photon.polarization_along_y();
-            let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize() / consts::SQRT_2;
-            let target = (eps * y_axis).powi(2);
+            //let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (e1 * y_axis).powi(2) + (e2 * y_axis).powi(2);
             println!("\tCP+: got pol_y = {:.3}, expected = {:.3}", pol, target);
             assert!(pol == target || (pol - target).abs() < 1.0e-6);
         }
