@@ -327,7 +327,8 @@ mod tests {
         let perp: ThreeVector = [1.0, 0.0, 0.0].into();
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
-        let (omega_mc2, _, _) = sample(chi, gamma, 0.98, rng.gen(), rng.gen());
+        let rand1 = 0.98;
+        let (omega_mc2, _, _) = sample(chi, gamma, rand1, rng.gen(), rng.gen());
         println!("Sampling at omega/(m gamma) = {:.3e}...", omega_mc2 / gamma);
 
         // integrating over all angles is expected to yield a Stokes vector
@@ -335,7 +336,7 @@ mod tests {
         let sv: FourVector = (0..10_000)
             .map(|_| {
                 // sample at fixed energy
-                let (omega_mc2, theta, cphi) = sample(chi, gamma, 0.8, rng.gen(), rng.gen());
+                let (omega_mc2, theta, cphi) = sample(chi, gamma, rand1, rng.gen(), rng.gen());
                 let theta = theta.unwrap();
                 //println!("omega/(m gamma) = {:.2e}, gamma theta = {:.3e}, phi = {:.3e}", omega_mc2 / gamma, gamma * theta, cphi);
 
@@ -351,6 +352,33 @@ mod tests {
         println!("Summed Stokes vector = [{:.3e} {:.3e} {:.3e} {:.3e}]", sv[0], sv[1], sv[2], sv[3]);
         assert!(sv[2].abs() < 1.0e-3 && sv[3].abs() < 1.0e-3);
 
+        // Check whether sv[1] = (W_11 - W_22) / (W_11 + W_22)
+        let u = omega_mc2 / (gamma - omega_mc2);
+
+        // K(2/3, xi)
+        let k2_3: f64 = GL_NODES.iter()
+            .zip(GL_WEIGHTS.iter())
+            .map(|(t, w)| {
+                let xi = 2.0 * u / (3.0 * chi);
+                w * (-xi * t.cosh() + t).exp() * (2.0 * t / 3.0).cosh()
+            })
+            .sum();
+
+        // int_xi^infty K(5/3, y) dy
+        let int_k5_3: f64 = GL_NODES.iter()
+            .zip(GL_WEIGHTS.iter())
+            .map(|(t, w)| {
+                let xi = 2.0 * u / (3.0 * chi);
+                w * (-xi * t.cosh() + t).exp() * (5.0 * t / 3.0).cosh() / t.cosh()
+            })
+            .sum();
+
+        let target = k2_3 / (u * u * k2_3 / (1.0 + u) + int_k5_3);
+        let error = (sv[1] - target).abs() / target;
+        println!("Got sv[1] = {:.3e}, expected {:.3e}, error = {:.2}%", sv[1], target, 100.0 * error);
+        assert!(error < 0.01);
+
+        // Finally, project Stokes parameters onto detector in the x-y plane
         let photon = Particle::create(Species::Photon, [0.0; 4].into())
             .with_normalized_momentum([omega_mc2, 0.0, 0.0, omega_mc2].into())
             .with_polarization(Some(sv));
@@ -435,3 +463,75 @@ mod tests {
     //     hgram.write_fits("!QuantumSpectrumTest.fits").unwrap();
     // }
 }
+
+#[allow(unused)]
+static GL_NODES: [f64; 32] = [
+	4.448936583326702e-2,
+	2.345261095196185e-1,
+	5.768846293018864e-1,
+	1.072448753817818e+0,
+	1.722408776444645e+0,
+	2.528336706425795e+0,
+	3.492213273021994e+0,
+	4.616456769749767e+0,
+	5.903958504174244e+0,
+	7.358126733186241e+0,
+	8.982940924212596e+0,
+	1.078301863253997e+1,
+	1.276369798674273e+1,
+	1.493113975552256e+1,
+	1.729245433671531e+1,
+	1.985586094033605e+1,
+	2.263088901319677e+1,
+	2.562863602245925e+1,
+	2.886210181632347e+1,
+	3.234662915396474e+1,
+	3.610049480575197e+1,
+	4.014571977153944e+1,
+	4.450920799575494e+1,
+	4.922439498730864e+1,
+	5.433372133339691e+1,
+	5.989250916213402e+1,
+	6.597537728793505e+1,
+	7.268762809066271e+1,
+	8.018744697791352e+1,
+	8.873534041789240e+1,
+	9.882954286828397e+1,
+	1.117513980979377e+2,
+];
+
+#[allow(unused)]
+static GL_WEIGHTS: [f64; 32] = [
+	1.092183419523850e-1,
+	2.104431079388132e-1,
+	2.352132296698480e-1,
+	1.959033359728810e-1,
+	1.299837862860718e-1,
+	7.057862386571744e-2,
+	3.176091250917507e-2,
+	1.191821483483856e-2,
+	3.738816294611525e-3,
+	9.808033066149551e-4,
+	2.148649188013642e-4,
+	3.920341967987947e-5,
+	5.934541612868633e-6,
+	7.416404578667552e-7,
+	7.604567879120781e-8,
+	6.350602226625807e-9,
+	4.281382971040929e-10,
+	2.305899491891336e-11,
+	9.799379288727094e-13,
+	3.237801657729266e-14,
+	8.171823443420719e-16,
+	1.542133833393823e-17,
+	2.119792290163619e-19,
+	2.054429673788045e-21,
+	1.346982586637395e-23,
+	5.661294130397359e-26,
+	1.418560545463037e-28,
+	1.913375494454224e-31,
+	1.192248760098222e-34,
+	2.671511219240137e-38,
+	1.338616942106256e-42,
+	4.510536193898974e-48,
+];
