@@ -104,8 +104,8 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     // The global basis requires one vector to be in the x-z plane,
     // so e_1 gets rotated by
     let theta = {
-        let cos_theta = -k_prime[1] * k_prime[2] / (k_prime[0] * (k_prime[0] - k_prime[3]));
-        cos_theta.acos()
+        let sin_theta = -k_prime[1] * k_prime[2] / (k_prime[0] * (k_prime[0] - k_prime[3]));
+        sin_theta.asin()
     };
 
     // and the Stokes parameters by

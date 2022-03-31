@@ -392,7 +392,11 @@ impl Particle {
         let pol_contr = (ex * (x * axis) + ey * (y * axis)).norm_sqr();
         let unpol_contr = 0.5 * ((x * axis).powi(2) + (y * axis).powi(2));
 
-        frac * pol_contr + (1.0 - frac) * unpol_contr
+        if frac > 0.0 {
+            frac * pol_contr + (1.0 - frac) * unpol_contr
+        } else {
+            unpol_contr
+        }
     }
 
     /// Projects the particle polarization onto the x axis.
