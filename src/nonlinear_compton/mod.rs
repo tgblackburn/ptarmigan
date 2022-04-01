@@ -52,7 +52,7 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 /// Returns the harmonic index of the photon,
 /// the normalized momentum,
 /// and the polarization (if applicable).
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector, Option<FourVector>) {
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector, StokesVector) {
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
@@ -90,10 +90,10 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     //println!("lab: k.k' = {}", k * k_prime);
 
     // Stokes vector
-    let sv: Option<FourVector> = match photon_pol {
-        PhotonPolarization::LinearE => Some([1.0, 1.0, 0.0, 0.0].into()),
-        PhotonPolarization::LinearB => Some([1.0, -1.0, 0.0, 0.0].into()),
-        PhotonPolarization::Unpolarized => None,
+    let sv: StokesVector = match photon_pol {
+        PhotonPolarization::LinearE => [1.0, 1.0, 0.0, 0.0].into(),
+        PhotonPolarization::LinearB => [1.0, -1.0, 0.0, 0.0].into(),
+        PhotonPolarization::Unpolarized => StokesVector::unpolarized(),
     };
 
     // This is defined w.r.t. to the orthonormal basis
@@ -109,12 +109,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     };
 
     // and the Stokes parameters by
-    let sv = sv.map(|xi| FourVector::new(
-        xi[0],
-        (2.0 * theta).cos() * xi[1] + (2.0 * theta).sin() * xi[2],
-        -(2.0 * theta).sin() * xi[1] + (2.0 * theta).cos() * xi[2],
-        xi[3],
-    ));
+    let sv = sv.rotate_by(theta);
 
     (n, k_prime, sv)
 }

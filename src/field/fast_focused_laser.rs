@@ -4,7 +4,7 @@ use num_complex::Complex;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
-use crate::geometry::{FourVector, ThreeVector};
+use crate::geometry::{FourVector, ThreeVector, StokesVector};
 use crate::lcfa;
 
 /// Represents a focusing laser pulse, including
@@ -181,7 +181,7 @@ impl FastFocusedLaser {
     /// magnetic field `B`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector)> {
+    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector)> {
         let beta = ThreeVector::from(u) / u[0];
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
@@ -274,11 +274,11 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, Option<FourVector>, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
-            .map(|(k, pol)| (k, Some(pol), u - k, a))
+            .map(|(k, pol)| (k, pol, u - k, a))
     }
 
     #[allow(non_snake_case)]

@@ -4,7 +4,7 @@ use rand_distr::StandardNormal;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
-use crate::geometry::FourVector;
+use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
@@ -189,7 +189,7 @@ impl Field for FocusedLaser {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, Option<FourVector>, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);

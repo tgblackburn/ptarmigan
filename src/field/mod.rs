@@ -2,7 +2,7 @@
 
 use rand::prelude::*;
 use enum_dispatch::enum_dispatch;
-use crate::geometry::FourVector;
+use crate::geometry::{FourVector, StokesVector};
 
 mod focused_laser;
 mod fast_focused_laser;
@@ -57,10 +57,10 @@ pub trait Field {
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
     /// returns the momentum of that photon,
-    /// its polarization (if applicable),
+    /// its polarization,
     /// the new momentum of the electron,
     /// and the effective a0 of the interaction.
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, Option<FourVector>, FourVector, f64)>;
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`), returning the

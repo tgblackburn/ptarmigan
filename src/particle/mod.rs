@@ -2,7 +2,6 @@
 
 use std::fmt;
 use std::str::FromStr;
-use num_complex::Complex;
 
 #[cfg(feature = "with-mpi")]
 use {mpi::traits::*, mpi::datatype::{UserDatatype, SystemDatatype}, memoffset::*};
@@ -59,7 +58,7 @@ pub struct Particle {
     r: [FourVector; 2],
     u: [FourVector; 2],
     has_pol: bool,
-    pol: FourVector, // Option<FourVector> would be better...
+    pol: StokesVector,
     optical_depth: f64,
     payload: f64,
     interaction_count: f64,
@@ -91,7 +90,7 @@ unsafe impl Equivalence for Particle {
             &FourVector::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &bool::equivalent_datatype(),
-            &FourVector::equivalent_datatype(),
+            &StokesVector::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
@@ -150,7 +149,7 @@ impl Particle {
             r: [r; 2],
             u: [u; 2],
             has_pol: false,
-            pol: FourVector::new(1.0, 0.0, 0.0, 0.0), // unpolarized by default
+            pol: StokesVector::unpolarized(),
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
             interaction_count: 0.0,
@@ -279,15 +278,15 @@ impl Particle {
         let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
-        let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
-        let pol = FourVector::new(self.pol[0], pol[0], pol[1], pol[2]);
+        // let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
+        // let pol = FourVector::new(self.pol[0], pol[0], pol[1], pol[2]);
 
         Particle {
             species: self.species,
             r: [r0, r],
             u: [u0, u],
             has_pol: self.has_pol,
-            pol: pol,
+            pol: self.pol,
             optical_depth: self.optical_depth,
             payload: self.payload,
             interaction_count: self.interaction_count,
@@ -325,20 +324,15 @@ impl Particle {
     }
 
     /// Updates the particle polarization
-    pub fn with_polarization(&mut self, pol: Option<FourVector>) -> Self {
-        if let Some(eps) = pol {
-            self.has_pol = true;
-            self.pol = eps;
-        } else {
-            self.has_pol = false;
-            self.pol = [1.0, 0.0, 0.0, 0.0].into();
-        }
+    pub fn with_polarization(&mut self, pol: StokesVector) -> Self {
+        self.has_pol = true;
+        self.pol = pol;
         *self
     }
 
     /// Returns the particle polarization, if it exists
     #[allow(unused)]
-    pub fn polarization(&self) -> Option<FourVector> {
+    pub fn polarization(&self) -> Option<StokesVector> {
         if self.has_pol {
             Some(self.pol)
         } else {
@@ -353,50 +347,8 @@ impl Particle {
         let sv = self.polarization()
             .unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into());
 
-        // Degree of polarization
-        let frac = sv[1].hypot(sv[2]).hypot(sv[3]) / sv[0];
-
-        // Fix normalisation! (sv[0] should be 1)
-        let sv = sv / (frac * sv[0]);
-
-        // Convert Stokes vector to Jones vector
-        let ex = (0.5 * (1.0 + sv[1])).sqrt();
-        let ey = if ex == 0.0 {
-            Complex::new(1.0, 0.0)
-        } else {
-            Complex::new(0.5 * sv[2] / ex, -0.5 * sv[3] / ex)
-        };
-        let ex = Complex::new(ex, 0.0);
-        //println!("\tJones vector = {}, {}", ex, ey);
-
-        // Construct axes of the ellipse
-        let (x, y) = {
-            let n = ThreeVector::from(self.normalized_momentum()).normalize();
-            let mag = n[0].hypot(n[2]);
-            let x: ThreeVector = if mag == 0.0 {
-                // so photon pointed along y
-                [1.0, 0.0, 0.0].into()
-            } else {
-                [n[2] / mag, 0.0, -n[0] / mag].into()
-            };
-            let y = x.cross(n);
-            (x, y)
-        };
-        //println!("\tx = {}, y = {}, x.y = {}", x, y, x * y);
-
-        // Project intensities
-        let axis = axis.into().normalize();
-        //println!("|ex|^2 = {:.2e}, ex.axis = {:.2e}, |ey|^2 = {:.2e}, ey.axis = {:.2e}", ex.norm_sqr(), x * axis, ey.norm_sqr(), y * axis);
-
-        // Polarized and unpolarized contributions
-        let pol_contr = (ex * (x * axis) + ey * (y * axis)).norm_sqr();
-        let unpol_contr = 0.5 * ((x * axis).powi(2) + (y * axis).powi(2));
-
-        if frac > 0.0 {
-            frac * pol_contr + (1.0 - frac) * unpol_contr
-        } else {
-            unpol_contr
-        }
+        let n = ThreeVector::from(self.normalized_momentum()).normalize();
+        sv.project_onto(n, axis.into())
     }
 
     /// Projects the particle polarization onto the x axis.
@@ -439,7 +391,7 @@ mod tests {
             println!("photon k = {:.3} {:.3} {:.3}", k[1], k[2], k[3]);
 
             // LP E
-            photon.with_polarization(Some([1.0, 1.0, 0.0, 0.0].into()));
+            photon.with_polarization([1.0, 1.0, 0.0, 0.0].into());
             //let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize();
             let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
 
@@ -454,7 +406,7 @@ mod tests {
             assert!(pol == target || (pol - target).abs() < 1.0e-6);
 
             // LP B
-            photon.with_polarization(Some([1.0, -1.0, 0.0, 0.0].into()));
+            photon.with_polarization([1.0, -1.0, 0.0, 0.0].into());
             let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
             let eps = eps.cross(k.into()).normalize();
             //let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize();
@@ -470,7 +422,7 @@ mod tests {
             assert!(pol == target || (pol - target).abs() < 1.0e-6);
 
             // CP+
-            photon.with_polarization(Some([1.0, 0.0, 0.0, 1.0].into()));
+            photon.with_polarization([1.0, 0.0, 0.0, 1.0].into());
             let e1: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
             let e1 = e1 / consts::SQRT_2;
             let e2 = e1.cross(k.into()).normalize() / consts::SQRT_2;

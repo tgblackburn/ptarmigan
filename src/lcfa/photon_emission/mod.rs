@@ -2,7 +2,7 @@
 
 use std::f64::consts;
 use crate::constants::*;
-use crate::geometry::{ThreeVector, FourVector};
+use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use crate::pwmci;
 use crate::special_functions::Airy;
 
@@ -172,7 +172,7 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
 ///
 /// The basis is defined with respect to a vector in the `x`-`z` plane that is perpendicular
 /// to the photon three-momentum.
-pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w: ThreeVector) -> FourVector {
+pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w: ThreeVector) -> StokesVector {
     // belt and braces
     let v = v.normalize();
     let w = w.normalize();
@@ -333,7 +333,7 @@ mod tests {
 
         // integrating over all angles is expected to yield a Stokes vector
         // [1.0, (W_11 - W_22) / (W_11 + W_22), 0, 0]
-        let sv: FourVector = (0..10_000)
+        let sv: StokesVector = (0..10_000)
             .map(|_| {
                 // sample at fixed energy
                 let (omega_mc2, theta, cphi) = sample(chi, gamma, rand1, rng.gen(), rng.gen());
@@ -381,7 +381,7 @@ mod tests {
         // Finally, project Stokes parameters onto detector in the x-y plane
         let photon = Particle::create(Species::Photon, [0.0; 4].into())
             .with_normalized_momentum([omega_mc2, 0.0, 0.0, omega_mc2].into())
-            .with_polarization(Some(sv));
+            .with_polarization(sv);
 
         let pol_x = photon.polarization_along_x();
         let pol_y = photon.polarization_along_y();
