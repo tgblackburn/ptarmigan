@@ -46,6 +46,7 @@ The offsets are defined with respect to the beam coordinate system, where `z` po
 All output is written to the directory where the input file is found.
 
 * `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output. Uses the name of the input file if `auto` is specified.
+* `file_format`: select how to output particle distribution functions. Possible formats are: `plain_text` or `fits`.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `max_angle` (optional, default = `pi`): if specified, discard secondary particles that are moving, with respect to the shower's primary particle, at angles greater than the given limit.
 * `electron` (optional): list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.

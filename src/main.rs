@@ -354,13 +354,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let file_format = match input.read::<String,_>("output:file_format") {
-        Ok(s) if s == "plain_text" || s == "plain-text" || s == "ascii" => Ok(FileFormat::PlainText),
-        Ok(s) if s == "fits" => Ok(FileFormat::Fits),
+        Ok(s) if s == "plain_text" || s == "plain-text" || s == "ascii" => FileFormat::PlainText,
+        Ok(s) if s == "fits" => FileFormat::Fits,
         _ => {
             eprintln!("File format for distribution output must be one of 'plain_text' or 'fits'.");
-            Err(InputError::conversion("output", "file_format"))
+            //Err(InputError::conversion("output", "file_format"))
+            FileFormat::PlainText
         }
-    }?;
+    };
 
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
@@ -478,9 +479,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
         #[cfg(feature = "with-mpi")] {
             println!("\t* with MPI support enabled");
-        }
-        #[cfg(feature = "fits-output")] {
-            println!("\t* writing FITS output");
         }
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
