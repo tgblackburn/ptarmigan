@@ -30,6 +30,12 @@ mod binary;
 #[cfg(feature = "hdf5-output")]
 pub use binary::*;
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FileFormat {
+    PlainText,
+    Fits,
+}
+
 //type ParticleOutput = Box<dyn Fn(&Particle) -> f64>;
 type ParticleOutput = fn(&Particle) -> f64;
 
@@ -137,7 +143,7 @@ impl FromStr for DistributionFunction {
 }
 
 impl DistributionFunction {
-    pub fn write(&self, world: &impl Communicator, pt: &[Particle], us: &UnitSystem, prefix: &str) -> Result<(),OutputError> {
+    pub fn write(&self, world: &impl Communicator, pt: &[Particle], us: &UnitSystem, prefix: &str, file_format: FileFormat) -> Result<(),OutputError> {
         let units: Vec<Unit> = self.func_types.iter()
             .map(|t| match t {
                     ParticleOutputType::Dimensionless => Unit::new(1.0, "1"),
@@ -197,7 +203,11 @@ impl DistributionFunction {
 
         if world.rank() == 0 && hgram.is_some() {
             let filename = prefix.to_owned() + &suffix;
-            hgram.unwrap().write(&filename).map_err(|_e| OutputError::Write(filename.to_owned()))
+            let res = match file_format {
+                FileFormat::PlainText => hgram.unwrap().write_plain_text(&filename),
+                FileFormat::Fits => hgram.unwrap().write_fits(&filename),
+            };
+            res.map_err(|_e| OutputError::Write(filename.to_owned()))
         } else {
             Ok(())
         }

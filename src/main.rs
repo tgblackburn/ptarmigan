@@ -45,7 +45,7 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
-    #[cfg(feature = "plain-text-output")]
+    #[cfg(feature = "plain-text-particle-dump")]
     PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
@@ -353,6 +353,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => OutputMode::None,
     };
 
+    let file_format = match input.read::<String,_>("output:file_format") {
+        Ok(s) if s == "plain_text" || s == "plain-text" || s == "ascii" => Ok(FileFormat::PlainText),
+        Ok(s) if s == "fits" => Ok(FileFormat::Fits),
+        _ => {
+            eprintln!("File format for distribution output must be one of 'plain_text' or 'fits'.");
+            Err(InputError::conversion("output", "file_format"))
+        }
+    }?;
+
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
         _ => true,
@@ -602,17 +611,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &electrons, &units, &prefix)?;
+        dstr.write(&world, &electrons, &units, &prefix, file_format)?;
     }
 
     for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &units, &prefix)?;
+        dstr.write(&world, &photons, &units, &prefix, file_format)?;
     }
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &positrons, &units, &prefix)?;
+        dstr.write(&world, &positrons, &units, &prefix, file_format)?;
     }
 
     for stat in estats.iter_mut() {
@@ -646,7 +655,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     match output_mode {
-        #[cfg(feature = "plain-text-output")]
+        #[cfg(feature = "plain-text-particle-dump")]
         OutputMode::PlainText => {
             #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
