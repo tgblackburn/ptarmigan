@@ -28,7 +28,7 @@ with-mpi = ["mpi", "memoffset"]
 compensating-chirp = []
 cos2-envelope-in-3d = []
 leading-order-only = []
-plain-text-particle-dump = []
+enable-plain-text-dump = []
 
 [build-dependencies]
 vergen = "4.0.3"
