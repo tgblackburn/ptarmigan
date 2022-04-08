@@ -10,6 +10,7 @@ Added:
 * Data attributes (units and description) in HDF-formatted output.
 * Output specifiers `r_{x,y}` and option to filter out particles by angle.
 * Runtime choice of file format for distribution output (plain text or FITS).
+* More example input files.
 
 Removed:
 

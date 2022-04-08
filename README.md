@@ -1,6 +1,8 @@
 # ptarmigan
 
-Ponderomotive trajectories and radiation emission
+![example workflow](https://github.com/tgblackburn/ptarmigan/actions/workflows/mpich.yml/badge.svg) ![version](https://img.shields.io/github/v/release/tgblackburn/ptarmigan?include_prereleases) ![license](https://img.shields.io/github/license/tgblackburn/ptarmigan)
+
+Simulate the interaction between a high-energy particle beam and an intense laser pulse, including the classical dynamics and strong-field QED processes.
 
 ## Build
 

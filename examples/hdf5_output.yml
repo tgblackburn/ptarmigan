@@ -7,6 +7,7 @@ laser:
   wavelength: 0.8 * micro
   waist: 3.0 * micro
   fwhm_duration: 30.0 * femto
+  polarization: circular
 
 beam:
   ne: 100000
@@ -17,6 +18,5 @@ beam:
 output:
   dump_all_particles: hdf5
   coordinate_system: beam
-  electron: [energy]
-  photon: [energy]
+
 

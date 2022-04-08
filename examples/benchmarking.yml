@@ -1,12 +1,14 @@
 ---
 control:
   dt_multiplier: 0.1
-  select_multiplicity: 1
+  radiation_reaction: false
+  pair_creation: false
 
 laser:
   a0: 2.5
   omega: omega * eV
   n_cycles: 16.0
+  polarization: circular
 
 beam:
   ne: 1000000
@@ -14,7 +16,8 @@ beam:
   radius: 2.0 * micro
 
 output:
-  ident: 2.5x16ss
+  ident: 2.5x16
+  file_format: fits
   electron: [p^-, p^-:p_perp]
   photon: [p^-, p^-:(log;auto), p^-:r_perp:(log;auto), p^-:p_perp:(log;auto)]
 

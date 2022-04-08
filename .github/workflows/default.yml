@@ -1,25 +1,11 @@
+name: build
 on:
   push:
     branches: master
   workflow_dispatch:
 
 jobs:
-  with-fits-output:
-
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v1
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install libcfitsio-dev
-    - name: Build
-      run: cargo build --release --verbose --features fits-output
-    - name: Run tests
-      run: cargo test --release --verbose --features fits-output -- --test-threads=1
-
-  no-fits-output:
+  no-hdf5-output:
 
     runs-on: ubuntu-latest
 
