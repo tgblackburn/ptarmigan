@@ -137,6 +137,7 @@ impl FastFocusedLaser {
     /// Returns the position and momentum of a particle with charge-to-mass ratio `rqm`,
     /// which has been accelerated in an electric field `E` and magnetic field `B`
     /// over a time interval `dt`.
+    /// Assumes that ui is defined at t = 0, and r, E, B are defined at t = dt/2.
     #[allow(non_snake_case)]
     #[inline]
     pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
@@ -171,7 +172,7 @@ impl FastFocusedLaser {
         let gamma = (1.0 + u_new * u_new).sqrt();
 
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
-        let r_new = r + SPEED_OF_LIGHT * u_new * dt / gamma;
+        let r_new = r + 0.5 * SPEED_OF_LIGHT * u_new * dt / gamma;
 
         (r_new, u_new, dt)
     }
@@ -269,6 +270,7 @@ impl Field for FastFocusedLaser {
 
     #[allow(non_snake_case)]
     fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+        let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
     }
