@@ -4,25 +4,37 @@ use std::{fmt, io::BufWriter};
 use std::fs::File;
 use std::io::Write;
 
-/// Writer that keeps track of how many bytes it's written
+/// Writer that keeps track of how many bytes it's written.
+/// A single write! call will never write more than `limit` bytes.
 struct WriteCounter<W: Write> {
     inner: W,
+    limit: usize,
     count: usize,
 }
 
 impl<W> WriteCounter<W> where W: Write {
-    fn new(inner: W) -> Self {
-        Self {inner, count: 0}
+    fn new(inner: W, limit: usize) -> Self {
+        Self {inner, limit, count: 0}
     }
 
     fn bytes_written(&self) -> usize {
         self.count
     }
+
+    /// Writes the given bytes, ignoring the limit set.
+    fn write_unchecked(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let res = self.inner.write(buf);
+        if let Ok(count) = res {
+            self.count += count;
+        }
+        res
+    }
 }
 
 impl<W> Write for WriteCounter<W> where W: Write {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let res = self.inner.write(buf);
+        let end = buf.len().min(self.limit);
+        let res = self.inner.write(&buf[..end]);
         if let Ok(count) = res {
             self.count += count;
         }
@@ -424,14 +436,12 @@ impl Histogram {
     }
 
     /// Writes the histogram to file.
-    /// The format of that file will be FITS if the "fits-output"
-    /// feature is enabled, otherwise it will be plain-text data.
     /// The relevant extension is added to `filename`.
     pub fn write_fits(&self, filename: &str) -> std::io::Result<()> {
         let filename = filename.to_owned() + ".fits";
         let file = File::create(&filename)?;
         let file = BufWriter::new(file);
-        let mut file = WriteCounter::new(file);
+        let mut file = WriteCounter::new(file, 80);
         let naxis = self.dim;
 
         // Write header information
@@ -481,29 +491,30 @@ impl Histogram {
         // Header padding
         let count = file.bytes_written();
         assert_eq!(count % 80, 0);
-        write!(file, "{:1$}", "", 2880 - count)?;
+        if count < 2880 {
+            let padding = vec![b' '; 2880 - count];
+            file.write_unchecked(&padding)?;
+        }
         assert_eq!(file.bytes_written(), 2880);
 
         for elem in self.cts.iter() {
             // FITS standard requires big-endian
             let raw = elem.to_be_bytes();
-            file.write(&raw)?;
+            file.write_unchecked(&raw)?;
         }
 
         // Padding
         let count = file.bytes_written();
         let excess = count % 2880; // how far we wrote into the next block
         if excess > 0 {
-            let padding = 2880 - excess;
-            write!(file, "{:\u{0}>1$}", "", padding)?;
+            let padding = vec![0; 2880 - excess];
+            file.write_unchecked(&padding)?;
         }
 
         Ok(())
     }
 
     /// Writes the histogram to file.
-    /// The format of that file will be FITS if the "fits-output"
-    /// feature is enabled, otherwise it will be plain-text data.
     /// The relevant extension is added to `filename`.
     pub fn write_plain_text(&self, filename: &str) -> std::io::Result<()> {
         let filename = format!("{}.dat", filename);
