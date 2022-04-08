@@ -45,7 +45,7 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
-    #[cfg(feature = "plain-text-output")]
+    #[cfg(feature = "enable-plain-text-dump")]
     PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
@@ -346,7 +346,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "".to_owned());
 
     let output_mode = match input.read::<String,_>("output:dump_all_particles") {
-        #[cfg(feature = "plain-text-output")]
+        #[cfg(feature = "enable-plain-text-dump")]
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
@@ -389,6 +389,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
+
+    let file_format = input.read::<String,_>("output:file_format")
+        .and_then(|s| match s.as_str() {
+            "plain_text" | "plain-text" | "ascii" => Ok(FileFormat::PlainText),
+            "fits" => Ok(FileFormat::Fits),
+            _ => Err(InputError::conversion("output", "file_format")),
+        })
+        .unwrap_or_else(|_| {
+            // Error only if dstr output is requested
+            let writing_dstrs = eospec.len() + gospec.len() + pospec.len() > 0;
+            if id == 0 && writing_dstrs {
+                println!(concat!(
+                    "Warning: file format for distribution output invalid ('plain_text' | 'fits').\n",
+                    "         Continuing with default 'plain_text'."
+                ));
+            }
+            FileFormat::PlainText
+        });
 
     // Choose the system of units
     let units = input.read::<String,_>("output:units")
@@ -469,9 +487,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
         #[cfg(feature = "with-mpi")] {
             println!("\t* with MPI support enabled");
-        }
-        #[cfg(feature = "fits-output")] {
-            println!("\t* writing FITS output");
         }
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
@@ -602,17 +617,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &electrons, &units, &prefix)?;
+        dstr.write(&world, &electrons, &units, &prefix, file_format)?;
     }
 
     for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &units, &prefix)?;
+        dstr.write(&world, &photons, &units, &prefix, file_format)?;
     }
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &positrons, &units, &prefix)?;
+        dstr.write(&world, &positrons, &units, &prefix, file_format)?;
     }
 
     for stat in estats.iter_mut() {
@@ -646,7 +661,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     match output_mode {
-        #[cfg(feature = "plain-text-output")]
+        #[cfg(feature = "enable-plain-text-dump")]
         OutputMode::PlainText => {
             #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
