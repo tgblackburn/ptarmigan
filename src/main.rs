@@ -353,16 +353,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => OutputMode::None,
     };
 
-    let file_format = match input.read::<String,_>("output:file_format") {
-        Ok(s) if s == "plain_text" || s == "plain-text" || s == "ascii" => FileFormat::PlainText,
-        Ok(s) if s == "fits" => FileFormat::Fits,
-        _ => {
-            eprintln!("File format for distribution output must be one of 'plain_text' or 'fits'.");
-            //Err(InputError::conversion("output", "file_format"))
-            FileFormat::PlainText
-        }
-    };
-
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
         _ => true,
@@ -399,6 +389,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
+
+    let file_format = input.read::<String,_>("output:file_format")
+        .and_then(|s| match s.as_str() {
+            "plain_text" | "plain-text" | "ascii" => Ok(FileFormat::PlainText),
+            "fits" => Ok(FileFormat::Fits),
+            _ => Err(InputError::conversion("output", "file_format")),
+        })
+        .unwrap_or_else(|_| {
+            // Error only if dstr output is requested
+            let writing_dstrs = eospec.len() + gospec.len() + pospec.len() > 0;
+            if id == 0 && writing_dstrs {
+                println!(concat!(
+                    "Warning: file format for distribution output invalid ('plain_text' | 'fits').\n",
+                    "         Continuing with default 'plain_text'."
+                ));
+            }
+            FileFormat::PlainText
+        });
 
     // Choose the system of units
     let units = input.read::<String,_>("output:units")
