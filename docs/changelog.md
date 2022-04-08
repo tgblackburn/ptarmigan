@@ -1,8 +1,29 @@
 # Changelog
 
-## v0.8.3
+## v0.9.0
 
 In progress.
+
+Added:
+
+* Nonlinear Compton scattering in linearly polarized backgrounds.
+* Data attributes (units and description) in HDF-formatted output.
+* Output specifiers `r_{x,y}` and option to filter out particles by angle.
+* Runtime choice of file format for distribution output (plain text or FITS).
+* More example input files.
+
+Removed:
+
+* Plain-text output of complete particle data (re-enabled by compiling with feature `enable-plain-text-dump`).
+* `fits-output` feature. FITS output can be selected via the input file.
+
+To be removed:
+
+* `circular` as default choice of polarization
+
+## v0.8.3
+
+2021-11-02
 
 Fixed:
 

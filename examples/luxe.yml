@@ -1,0 +1,42 @@
+---
+# Example of a simulated bunch crossing for the LUXE experiment.
+# See Abramowicz et al, EPJST 230, 2445 (2021), arXiv:2102.02032
+
+control:
+  dt_multiplier: 0.5
+  radiation_reaction: true
+  pair_creation: true
+  rng_seed: 0
+  increase_pair_rate_by: 1.0e4
+
+laser:
+  a0: a0
+  wavelength: wavelength
+  fwhm_duration: tau * femto
+  waist: 147.839 * sqrt(laser_energy) * wavelength / (a0 * sqrt(tau))
+  polarization: circular
+
+beam:
+  n: 100000
+  species: electron
+  charge: 1.5e9 * e
+  gamma: initial_gamma
+  sigma: 0.001 * initial_gamma
+  radius: [5.0 * micro, normally_distributed]
+  length: 24.0 * micro
+  collision_angle: -17.2 * degree
+  rms_divergence: 8.672 * micro
+
+output:
+  ident: auto
+  dump_all_particles: hdf5
+  discard_background_e: true
+  coordinate_system: beam
+  units: hep
+
+constants:
+  a0: 5.0
+  laser_energy: 1.2 # joules
+  wavelength: 0.8 * micro
+  tau: 30.0 # fs
+  initial_gamma: 16.5 * GeV / (me * c^2)

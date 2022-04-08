@@ -18,6 +18,8 @@ use rand_xoshiro::*;
 unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 7);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 8);
 
 mod constants;
 mod field;
@@ -29,6 +31,7 @@ mod lcfa;
 mod special_functions;
 mod output;
 mod input;
+mod pwmci;
 
 use constants::*;
 use field::*;
@@ -42,6 +45,7 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
+    #[cfg(feature = "enable-plain-text-dump")]
     PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
@@ -150,7 +154,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
     let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
-    let photon_rate = nonlinear_compton::probability(kappa, q, dt);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt, Polarization::Circular);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
     } else {
@@ -208,12 +212,29 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pol = match input.read::<String,_>("laser:polarization") {
         Ok(s) if s == "linear" => Polarization::Linear,
         Ok(s) if s == "circular" => Polarization::Circular,
-        _ => Polarization::Circular
+        _ => {
+            if id == 0 {
+                println!(concat!(
+                    "Warning: laser polarisation has not been specified.\n",
+                    "         This will be an error in the next version of Ptarmigan.\n",
+                    "         Continuing with default value of 'circular'..."
+                ));
+            }
+            Polarization::Circular
+        }
     };
 
-    if !using_lcfa && pol == Polarization::Linear {
-        panic!("LMA rates are implemented for circularly polarized waves only!");
-    }
+    let tracking_photons = if !using_lcfa && pol == Polarization::Linear {
+        if id == 0 {
+            println!(concat!(
+                "Warning: in LP mode, LMA rates are available only for photon emission.\n",
+                "         Pair creation will be disabled."
+            ));
+        }
+        false
+    } else {
+        tracking_photons
+    };
 
     let (focusing, waist) = input
         .read("laser:waist")
@@ -324,7 +345,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .unwrap_or_else(|_| "".to_owned());
 
-    let plain_text_output = match input.read::<String,_>("output:dump_all_particles") {
+    let output_mode = match input.read::<String,_>("output:dump_all_particles") {
+        #[cfg(feature = "enable-plain-text-dump")]
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
@@ -342,6 +364,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         .read("output:min_energy")
         .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE) // convert from J to MeV
         .unwrap_or(0.0);
+
+    let max_angle: f64 = input
+        .read("output:max_angle")
+        .unwrap_or(consts::PI);
 
     let eospec: Vec<String> = input.read("output:electron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
@@ -363,6 +389,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .map(|s| s.parse())
         .collect::<Result<Vec<_>,_>>()?;
+
+    let file_format = input.read::<String,_>("output:file_format")
+        .and_then(|s| match s.as_str() {
+            "plain_text" | "plain-text" | "ascii" => Ok(FileFormat::PlainText),
+            "fits" => Ok(FileFormat::Fits),
+            _ => Err(InputError::conversion("output", "file_format")),
+        })
+        .unwrap_or_else(|_| {
+            // Error only if dstr output is requested
+            let writing_dstrs = eospec.len() + gospec.len() + pospec.len() > 0;
+            if id == 0 && writing_dstrs {
+                println!(concat!(
+                    "Warning: file format for distribution output invalid ('plain_text' | 'fits').\n",
+                    "         Continuing with default 'plain_text'."
+                ));
+            }
+            FileFormat::PlainText
+        });
 
     // Choose the system of units
     let units = input.read::<String,_>("output:units")
@@ -444,9 +488,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "with-mpi")] {
             println!("\t* with MPI support enabled");
         }
-        #[cfg(feature = "fits-output")] {
-            println!("\t* writing FITS output");
-        }
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
         }
@@ -494,7 +535,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut current_id = num as u64;
 
     let merge = |(mut e, mut g, mut p): (Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-        sh.secondaries.retain(|&pt| pt.momentum()[0] > min_energy);
+        let n0 = ThreeVector::from(sh.primary.momentum()).normalize();
+        sh.secondaries.retain(|&pt| {
+            let p = pt.momentum();
+            let n = ThreeVector::from(p).normalize();
+            let angle = (n * n0).acos();
+            p[0] > min_energy && angle < max_angle
+        });
         if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
             while let Some(pt) = sh.secondaries.pop() {
                 match pt.species() {
@@ -509,94 +556,47 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let (mut electrons, mut photons, mut positrons) = if focusing && !using_lcfa {
+    let laser: Laser = if focusing && !using_lcfa {
         let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        //println!("total energy = {}", laser.total_energy());
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
-    } else if focusing { // and using LCFA rates
-        let laser = FastFocusedLaser::new(a0, wavelength, waist, tau, pol);
-        primaries
-            .chunks(num / 20)
-            .enumerate()
-            .map(|(i, chk)| {
-                let tmp = chk.iter()
-                    .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-                if id == 0 {
-                    println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                    (i+1) * chk.len(), num,
-                    PrettyDuration::from(runtime.elapsed()),
-                    PrettyDuration::from(ettc(runtime, i+1, 20)));
-                }
-                tmp
-            })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-            )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else if focusing {
+        FastFocusedLaser::new(a0, wavelength, waist, tau, pol).into()
     } else if !using_lcfa {
         let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        let laser = if finite_bandwidth {laser.with_finite_bandwidth()} else {laser};
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
-    } else { // plane wave and lcfa
-        let laser = FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        primaries
-        .chunks(num / 20)
-        .enumerate()
-        .map(|(i, chk)| {
-            let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
-                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
-            if id == 0 {
-                println!("Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
-                (i+1) * chk.len(), num,
-                PrettyDuration::from(runtime.elapsed()),
-                PrettyDuration::from(ettc(runtime, i+1, 20)));
-            }
-            tmp
-        })
-        .fold(
-            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
-        )
+        if finite_bandwidth {
+            laser.with_finite_bandwidth()
+        } else {
+            laser
+        }.into()
+    } else {
+        FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
     };
+
+    let (mut electrons, mut photons, mut positrons) = primaries
+        .chunks(num / 20)
+        .enumerate()
+        .map(|(i, chk)| {
+            let tmp = chk.iter()
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
+                .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+            if id == 0 {
+                println!(
+                    "Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
+                    (i+1) * chk.len(), num,
+                    PrettyDuration::from(runtime.elapsed()),
+                    PrettyDuration::from(ettc(runtime, i+1, 20))
+                );
+            }
+            tmp
+        })
+        .fold(
+            (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
+            |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat())
+        );
 
     // Particle/parent ids are only unique within a single parallel process
     let mut id_offsets = vec![0u64; world.size() as usize];
@@ -617,17 +617,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for dstr in &eospec {
         let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &electrons, &units, &prefix)?;
+        dstr.write(&world, &electrons, &units, &prefix, file_format)?;
     }
 
     for dstr in &gospec {
         let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &photons, &units, &prefix)?;
+        dstr.write(&world, &photons, &units, &prefix, file_format)?;
     }
 
     for dstr in &pospec {
         let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-        dstr.write(&world, &positrons, &units, &prefix)?;
+        dstr.write(&world, &positrons, &units, &prefix, file_format)?;
     }
 
     for stat in estats.iter_mut() {
@@ -660,7 +660,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    match plain_text_output {
+    match output_mode {
+        #[cfg(feature = "enable-plain-text-dump")]
         OutputMode::PlainText => {
             #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
@@ -710,41 +711,66 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Build info
                 file.create_group("build")?
-                    .write("version", env!("CARGO_PKG_VERSION"))?
-                    .write("branch",env!("VERGEN_GIT_BRANCH"))?
-                    .write("commit-hash",env!("VERGEN_GIT_SHA"))?
-                    .write("features", env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+                    .new_data("version").write(env!("CARGO_PKG_VERSION"))?
+                    .new_data("branch").write(env!("VERGEN_GIT_BRANCH"))?
+                    .new_data("commit-hash").write(env!("VERGEN_GIT_SHA"))?
+                    .new_data("features").write(env!("PTARMIGAN_ACTIVE_FEATURES"))?;
 
                 // Top-level run information
                 let conf = file.create_group("config")?;
-                conf.write("mpi-tasks", &ntasks)?
-                    .write("input-file", raw_input.as_str())?;
+                conf.new_data("mpi-tasks").write(&ntasks)?
+                    .new_data("input-file").write(raw_input.as_str())?;
 
                 conf.create_group("unit")?
-                    .write("position", units.length.name())?
-                    .write("momentum", units.momentum.name())?;
+                    .new_data("position").write(units.length.name())?
+                    .new_data("momentum").write(units.momentum.name())?;
 
                 // Parsed input configuration
                 conf.create_group("control")?
-                    .write("dt_multiplier", &dt_multiplier)?
-                    .write("radiation_reaction", &rr)?
-                    .write("pair_creation", &tracking_photons)?
-                    .write("lcfa", &using_lcfa)?
-                    .write("rng_seed", &rng_seed)?
-                    .write("increase_pair_rate_by", &pair_rate_increase)?
-                    .write("bandwidth_correction", &finite_bandwidth)?
-                    .write_if(multiplicity.is_some(), "select_multiplicity", &multiplicity.unwrap_or(0))?
-                    .write_if(multiplicity.is_none(), "select_multiplicity", &false)?;
+                    .new_data("dt_multiplier").write(&dt_multiplier)?
+                    .new_data("radiation_reaction").write(&rr)?
+                    .new_data("pair_creation").write(&tracking_photons)?
+                    .new_data("lcfa").write(&using_lcfa)?
+                    .new_data("rng_seed").write(&rng_seed)?
+                    .new_data("increase_pair_rate_by").write(&pair_rate_increase)?
+                    .new_data("bandwidth_correction").write(&finite_bandwidth)?
+                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
+                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_none()).write(&false)?;
 
                 conf.create_group("laser")?
-                    .write("a0", &a0)?
-                    .write("wavelength", &wavelength.convert(&units.length))?
-                    .write("polarization", &pol)?
-                    .write("focusing", &focusing)?
-                    .write("chirp_b", &chirp_b)?
-                    .write_if(focusing, "waist", &waist.convert(&units.length))?
-                    .write_if(focusing && !cfg!(feature = "cos2-envelope-in-3d"), "fwhm_duration", &tau)?
-                    .write_if(!focusing || cfg!(feature = "cos2-envelope-in-3d"), "n_cycles", &tau)?;
+                    .new_data("a0")
+                        .with_unit("1")
+                        .with_desc("peak value of the laser normalized amplitude")
+                        .write(&a0)?
+                    .new_data("wavelength")
+                        .with_unit(units.length.name())
+                        .with_desc("wavelength of the carrier")
+                        .write(&wavelength.convert(&units.length))?
+                    .new_data("polarization")
+                        .with_desc("linear/circular")
+                        .write(&pol)?
+                    .new_data("focusing")
+                        .with_desc("true/false => pulse is modelled in 1d/3d")
+                        .write(&focusing)?
+                    .new_data("chirp_b")
+                        .with_unit("1")
+                        .with_desc("parameter that appears in carrier phase = phi + b phi^2")
+                        .write(&chirp_b)?
+                    .new_data("waist")
+                        .with_unit(units.length.name())
+                        .with_desc("radius in the focal plane at which intensity is 1/e^2 of its peak value")
+                        .with_condition(|| focusing)
+                        .write(&waist.convert(&units.length))?
+                    .new_data("fwhm_duration")
+                        .with_unit("s")
+                        .with_desc("full width at half maximum of the temporal intensity profile")
+                        .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
+                        .write(&tau)?
+                    .new_data("n_cycles")
+                        .with_unit("1")
+                        .with_desc("number of wavelengths corresponding to the total pulse duration")
+                        .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
+                        .write(&tau)?;
 
                 let charge = match species {
                     Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
@@ -753,32 +779,37 @@ fn main() -> Result<(), Box<dyn Error>> {
                 };
 
                 conf.create_group("beam")?
-                    .write("n", &npart)?
-                    .write("n_real", &((npart as f64) * weight))?
-                    .write("charge", &charge)?
-                    .write("species", species.to_string().as_str())?
-                    .write("gamma", &gamma)?
-                    .write("sigma", &sigma)?
-                    .write("bremsstrahlung_source", &use_brem_spec)?
-                    .write_if(use_brem_spec, "gamma_min", &gamma_min)?
-                    .write("radius", &radius.convert(&units.length))?
-                    .write("length", &length.convert(&units.length))?
-                    .write("collision_angle", &angle)?
-                    .write("rms_divergence", &rms_div)?
-                    .write("offset", &offset.convert(&units.length))?
-                    .write("transverse_distribution_is_normal", &normally_distributed)?
-                    .write("longitudinal_distribution_is_normal", &true)?;
+                    .new_data("n")
+                        .with_unit("1")
+                        .with_desc("number of primary macroparticles")
+                        .write(&npart)?
+                    .new_data("n_real")
+                        .with_unit("1")
+                        .with_desc("total number of real particles represented by the primary macroparticles")
+                        .write(&((npart as f64) * weight))?
+                    .new_data("charge").with_unit("C").write(&charge)?
+                    .new_data("species").write(species.to_string().as_str())?
+                    .new_data("gamma").with_unit("1").write(&gamma)?
+                    .new_data("sigma").with_unit("1").write(&sigma)?
+                    .new_data("bremsstrahlung_source").write(&use_brem_spec)?
+                    .new_data("gamma_min").with_unit("1").with_condition(|| use_brem_spec).write(&gamma_min)?
+                    .new_data("radius").with_unit(units.length.name()).write(&radius.convert(&units.length))?
+                    .new_data("length").with_unit(units.length.name()).write(&length.convert(&units.length))?
+                    .new_data("collision_angle").with_unit("rad").write(&angle)?
+                    .new_data("rms_divergence").with_unit("rad").write(&rms_div)?
+                    .new_data("offset").with_unit(units.length.name()).write(&offset.convert(&units.length))?
+                    .new_data("transverse_distribution_is_normal").write(&normally_distributed)?
+                    .new_data("longitudinal_distribution_is_normal").write(&true)?;
 
                 conf.create_group("output")?
-                    .write("laser_defines_positive_z", &laser_defines_z)?
-                    .write("beam_defines_positive_z", &!laser_defines_z)?
-                    .write("discard_background_e", &discard_bg_e)?
-                    .write("min_energy", &min_energy.convert(&units.energy))?;
+                    .new_data("laser_defines_positive_z").write(&laser_defines_z)?
+                    .new_data("beam_defines_positive_z").write(&!laser_defines_z)?
+                    .new_data("discard_background_e").write(&discard_bg_e)?
+                    .new_data("min_energy").with_unit(units.energy.name()).write(&min_energy.convert(&units.energy))?;
 
                 // Write particle data
                 let fs = file.create_group("final-state")?;
 
-                let mut photons = photons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -786,23 +817,49 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, a, n, id, pid) = photons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.payload(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.payload(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id()
+                    ))
                     .unzip_n_vec();
                 drop(photons);
 
                 fs.create_group("photon")?
-                    .write("weight", &w[..])?
-                    .write("a0_at_creation", &a[..])?
-                    .write("n_pos", &n[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("position", &x[..])?
-                    .write("momentum", &p[..])?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real photons each macrophoton represents")
+                        .write(&w[..])?
+                    .new_data("a0_at_creation")
+                        .with_unit("1")
+                        .with_desc("normalized amplitude at point of emission")
+                        .write(&a[..])?
+                    .new_data("n_pos")
+                        .with_unit("1")
+                        .with_desc("total probability of pair creation for the photon")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the photon")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the photon")
+                        .write(&x[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the photon")
+                        .write(&p[..])?;
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
 
-                let mut electrons = electrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
@@ -810,37 +867,94 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 let (x, p, w, n, id, pid) = electrons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id()
+                    ))
                     .unzip_n_vec();
                 drop(electrons);
 
                 fs.create_group("electron")?
-                    .write("weight", &w[..])?
-                    .write("n_gamma", &n[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("position", &x[..])?
-                    .write("momentum", &p[..])?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real electrons each macroelectron represents")
+                        .write(&w[..])?
+                    .new_data("n_gamma")
+                        .with_unit("1")
+                        .with_desc("total number of photons emitted by the electron")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the electron")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the electron")
+                        .write(&x[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the electron")
+                        .write(&p[..])?;
 
-                let mut positrons = positrons;
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     positrons.append(&mut recv);
                 }
-                let (x, p, w, n, id, pid) = positrons
+                let (x, x0, p, w, n, id, pid, a) = positrons
                     .iter()
-                    .map(|pt| (pt.position().convert(&units.length), pt.momentum().convert(&units.momentum), pt.weight(), pt.interaction_count(), pt.id(), pt.parent_id()))
+                    .map(|pt| (
+                        pt.position().convert(&units.length),
+                        pt.was_created_at().convert(&units.length),
+                        pt.momentum().convert(&units.momentum),
+                        pt.weight(),
+                        pt.interaction_count(),
+                        pt.id(),
+                        pt.parent_id(),
+                        pt.payload()
+                    ))
                     .unzip_n_vec();
                 drop(positrons);
 
                 fs.create_group("positron")?
-                    .write("weight", &w[..])?
-                    .write("n_gamma", &n[..])?
-                    .write("position", &x[..])?
-                    .write("id", &id[..])?
-                    .write("parent_id", &pid[..])?
-                    .write("momentum", &p[..])?;
+                    .new_data("weight")
+                        .with_unit("1")
+                        .with_desc("number of real positrons each macropositron represents")
+                        .write(&w[..])?
+                    .new_data("a0_at_creation")
+                        .with_unit("1")
+                        .with_desc("normalized amplitude at point of creation")
+                        .write(&a[..])?
+                    .new_data("n_gamma")
+                        .with_unit("1")
+                        .with_desc("total number of photons emitted by the positron")
+                        .write(&n[..])?
+                    .new_data("id")
+                        .with_desc("unique ID of the positron")
+                        .write(&id[..])?
+                    .new_data("parent_id")
+                        .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")
+                        .write(&pid[..])?
+                    .new_data("position")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position of the positron")
+                        .write(&x[..])?
+                    .new_data("position_at_creation")
+                        .with_unit(units.length.name())
+                        .with_desc("four-position at which the positron was created")
+                        .write(&x0[..])?
+                    .new_data("momentum")
+                        .with_unit(units.momentum.name())
+                        .with_desc("four-momentum of the positron")
+                        .write(&p[..])?;
+
+                fs.group("positron")?.link_soft("a0_at_creation", "xi")?;
             } else {
                 #[cfg(feature = "with-mpi")] {
                     world.process_at_rank(0).synchronous_send(&photons[..]);

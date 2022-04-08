@@ -2,7 +2,7 @@
 
 use std::f64::consts;
 use crate::constants::*;
-use super::pwmci;
+use crate::pwmci;
 
 mod tables;
 
