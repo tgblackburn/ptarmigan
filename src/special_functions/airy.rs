@@ -12,19 +12,29 @@
 //!   Numerical Algorithms 30, 11--23 (2002)
 
 #![allow(non_upper_case_globals)]
+#![allow(non_snake_case)]
 
+use std::f64::consts;
 use super::Series;
 
-pub trait Airy {
+pub trait Airy: Sized {
     /// Returns the value of the Airy function for real, positive argument.
     /// If `x` is negative, or the result would underflow, the
     /// return value is None.
-    fn ai(&self) -> Option<Self> where Self: Sized;
+    fn ai(&self) -> Option<Self>;
 
     /// Returns the derivative of the Airy function for real, positive argument.
     /// If `x` is negative, or the result would underflow, the
     /// return value is None.
-    fn ai_prime(&self) -> Option<Self> where Self: Sized;
+    fn ai_prime(&self) -> Option<Self>;
+
+    /// Returns the value of the modified Bessel function K_{1/3} for
+    /// real, positive argument.
+    fn bessel_K_1_3(&self) -> Option<Self>;
+
+    /// Returns the value of the modified Bessel function K_{2/3} for
+    /// real, positive argument.
+    fn bessel_K_2_3(&self) -> Option<Self>;
 }
 
 impl Airy for f64 {
@@ -105,6 +115,24 @@ impl Airy for f64 {
                 .sum();
             Some(b * integral)
         }
+    }
+
+    fn bessel_K_1_3(&self) -> Option<Self> {
+        // K(1/3, x) = pi (2 sqrt(3) / x)^(1/3) Ai[ (1.5 x)^(2/3) ]
+        let x = self;
+        (1.5 * x)
+            .powf(2.0 / 3.0)
+            .ai()
+            .map(|y| consts::PI * (2.0 * 3.0f64.sqrt() / x).cbrt() * y)
+    }
+
+    fn bessel_K_2_3(&self) -> Option<Self> {
+        // K(2/3, x) = -pi / 3^(1/6) (2 / x)^(2/3) Ai'[ (1.5 x)^(2/3) ]
+        let x = self;
+        (1.5 * x)
+            .powf(2.0 / 3.0)
+            .ai_prime()
+            .map(|y| -consts::PI * 3.0f64.powf(-1.0/6.0) * (2.0 / x).powf(2.0 / 3.0) * y)
     }
 }
 
@@ -201,6 +229,28 @@ mod tests {
         let target = -1.294632359221882e-819; // too small to represent
         println!("Ai'(200) = {:.15e}, calculated = {:.15e}", target, val);
         assert!( ((val - target)/target).abs() < MAX_REL_ERR );
+    }
+
+    #[test]
+    fn bessel_k() {
+        let pts = [
+            (1.0, 0.43843063344153436171, 0.49447506210420826699),
+            (2.0, 0.11654496129616524876, 0.12483892748812831057),
+            (10.0, 0.000017874608271055334883, 0.000018161187569530204281),
+            (20.0, 5.7568278247790870062e-10, 5.8038484271925806951e-10),
+        ];
+
+        for (x, k1_3, k2_3) in pts.iter() {
+            let value = x.bessel_K_1_3().unwrap();
+            let error = ((value - k1_3) / k1_3).abs();
+            println!("K(1/3, {}) = {:.15e}, error = {:.3e}", x, value, error);
+            assert!(error < MAX_REL_ERR);
+
+            let value = x.bessel_K_2_3().unwrap();
+            let error = ((value - k2_3) / k2_3).abs();
+            println!("K(2/3, {}) = {:.15e}, error = {:.3e}", x, value, error);
+            assert!(error < MAX_REL_ERR);
+        }
     }
 }
 

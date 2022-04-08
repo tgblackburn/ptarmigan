@@ -191,11 +191,8 @@ pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w:
     let mu = (beta * beta + 1.0 / (gamma * gamma)).sqrt();
     let eta = u * (gamma * mu).powi(3) / (3.0 * chi);
 
-    // K(1/3, eta) = pi (2 sqrt(3) / x)^(1/3) Ai[ (1.5 x)^(2/3) ]
-    let k1_3 = consts::PI * (2.0 * 3.0f64.sqrt() / eta).cbrt() * (1.5 * eta).powf(2.0 / 3.0).ai().unwrap_or(0.0);
-
-    // K(2/3, eta) = -pi / 3^(1/6) (2 / x)^(2/3) Ai'[ (1.5 x)^(2/3) ]
-    let k2_3 = -consts::PI * 3.0f64.powf(-1.0/6.0) * (2.0 / eta).powf(2.0 / 3.0) * (1.5 * eta).powf(2.0 / 3.0).ai_prime().unwrap_or(0.0);
+    let k1_3 = eta.bessel_K_1_3().unwrap_or(0.0);
+    let k2_3 = eta.bessel_K_2_3().unwrap_or(0.0);
 
     // println!("eta = {:.3e}, K(1/3, eta) = {:.3e}, K(2/3, eta) = {:.3e}", eta, k1_3, k2_3);
 

@@ -56,15 +56,10 @@ fn spectrum(s: f64, chi: f64) -> f64 {
 /// Range is 1 < z < infty, but dominated by 1 < z < 1 + 2 chi
 /// Tested and working.
 fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
-    use std::f64::consts;
     use crate::special_functions::*;
     let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
     let prefactor = (s * s + (1.0 - s) * (1.0 - s)) / (s * (1.0 - s));
-    // Ai(x) = 1/pi sqrt(x/3) K_{1/3}[2 x^(3/2)/3]
-    let x = (1.5 * xi * z).powf(2.0/3.0);
-    let bessel_k = consts::PI * x.ai().unwrap_or(0.0) / (x / 3.0).sqrt();
-    //println!("K_(1/3)(xi z = {:.3e}) = {:.3e}", xi * z, bessel_k);
-    (1.0 + prefactor * z.powf(2.0 / 3.0)) * bessel_k
+    (1.0 * prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
 }
 
 /// Samples the positron spectrum of an photon with
