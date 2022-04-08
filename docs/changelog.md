@@ -13,7 +13,7 @@ Added:
 
 Removed:
 
-* Plain-text output of complete particle data (re-enabled by compiling with feature `plain-text-output`).
+* Plain-text output of complete particle data (re-enabled by compiling with feature `enable-plain-text-dump`).
 * `fits-output` feature. FITS output can be selected via the input file.
 
 To be removed:

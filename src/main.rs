@@ -45,7 +45,7 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
-    #[cfg(feature = "plain-text-particle-dump")]
+    #[cfg(feature = "enable-plain-text-dump")]
     PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
@@ -346,7 +346,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "".to_owned());
 
     let output_mode = match input.read::<String,_>("output:dump_all_particles") {
-        #[cfg(feature = "plain-text-output")]
+        #[cfg(feature = "enable-plain-text-dump")]
         Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
         #[cfg(feature = "hdf5-output")]
         Ok(s) if s == "hdf5" => OutputMode::Hdf5,
@@ -661,7 +661,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     match output_mode {
-        #[cfg(feature = "plain-text-particle-dump")]
+        #[cfg(feature = "enable-plain-text-dump")]
         OutputMode::PlainText => {
             #[cfg(feature = "with-mpi")]
             let mut particles = [electrons, photons, positrons].concat();
