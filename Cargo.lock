@@ -261,26 +261,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fitsio"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39a04673e1e4dd97618032a1102693406226ed6522c9a906b309fa680fa99945"
-dependencies = [
- "fitsio-sys",
- "libc",
-]
-
-[[package]]
-name = "fitsio-sys"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3189ae01f4bcdb8e6b90ec9efe5575a1b12c3e63298bde9fc45694fcc488a595"
-dependencies = [
- "libc",
- "pkg-config",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -798,7 +778,6 @@ name = "ptarmigan"
 version = "0.9.0"
 dependencies = [
  "enum_dispatch",
- "fitsio",
  "hdf5",
  "memoffset 0.5.6",
  "meval",

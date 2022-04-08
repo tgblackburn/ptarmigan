@@ -1,6 +1,8 @@
 # ptarmigan
 
-Ponderomotive trajectories and radiation emission
+![example workflow](https://github.com/tgblackburn/ptarmigan/actions/workflows/mpich.yml/badge.svg) ![version](https://img.shields.io/github/v/release/tgblackburn/ptarmigan?include_prereleases) ![license](https://img.shields.io/github/license/tgblackburn/ptarmigan)
+
+Simulate the interaction between a high-energy particle beam and an intense laser pulse, including the classical dynamics and strong-field QED processes.
 
 ## Build
 
@@ -12,14 +14,15 @@ cargo build --release [-j NUM_THREADS]
 
 where `NUM_THREADS` is the number of separate threads that Cargo is allowed to spawn.
 
-There are three optional features: `with-mpi`, which enables parallel processing via MPI; `fits-output`, which switches the output format for distribution functions from text to FITS; and `hdf5-output`, which switches the output format for particle arrays to HDF5.
-Each requires some external libraries to be installed.
-`with-mpi` needs an MPI library (ptarmigan is tested against OpenMPI, versions <= 3.1, and MPICH) and the Clang compiler.
-`fits-output` and `hdf5-output` require [CFITSIO](https://heasarc.gsfc.nasa.gov/fitsio/) and [libhdf5](https://www.hdfgroup.org/solutions/hdf5/) respectively.
-To build with one or all of these, run:
+The following optional features are available:
+
+* `with-mpi`, which enables parallel processing via MPI. Requires an MPI library (ptarmigan is tested against OpenMPI, versions <= 3.1, and MPICH) and the Clang compiler.
+* `hdf5-output`, which enables output of complete particle data as an HDF5 file. Requires [libhdf5](https://www.hdfgroup.org/solutions/hdf5/).
+
+To build with a combination of these features, run:
 
 ```bash
-cargo build --release --features with-mpi,fits-output,hdf5-output [-j NUM_THREADS]
+cargo build --release --features with-mpi,hdf5-output [-j NUM_THREADS]
 ```
 
 The ptarmigan changelog can be found [here](docs/changelog.md).
@@ -35,6 +38,8 @@ ptarmigan takes as its single argument the path to a YAML file describing the in
 and optionally
 
 * constants
+* output
+* stats
 
 The structure of the input file is described in detail [here](docs/input.md).
 
@@ -48,3 +53,9 @@ cd ptarmigan
 ```
 
 will run the code, parallelized over `np` MPI tasks (if MPI support has been enabled).
+
+## Output
+
+The code bins the final-state particles to generate the distribution functions requested in the input file, which are written in plain-text or FITS format.
+
+If `hdf5-output` is enabled, complete data about all particles can be written as a single HDF5 file.
