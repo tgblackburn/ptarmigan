@@ -2,8 +2,8 @@
 use std::f64::consts;
 use rand::prelude::*;
 use crate::special_functions::*;
+use crate::geometry::StokesVector;
 use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
-use super::PhotonPolarization;
 
 // Lookup tables
 mod total;
@@ -154,7 +154,7 @@ fn spectrum_low_eta(n: i32, a: f64, v: f64) -> f64 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, PhotonPolarization) {
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
     let n = fixed_n.unwrap_or_else(|| {
         let nmax = (10.0 * (1.0 + a * a * a)) as i32;
         let frac = rng.gen::<f64>();
@@ -193,8 +193,8 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
     };
 
     // Four-momentum transfer s = k.l / k.q
+    let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
     let s = {
-        let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
         let smax = sn / (1.0 + sn);
         v * smax
     };
@@ -202,7 +202,31 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
     // Azimuthal angle in ZMF
     let theta = 2.0 * consts::PI * rng.gen::<f64>();
 
-    (n, s, theta, PhotonPolarization::Unpolarized)
+    // Stokes parameters
+    let z = (
+        ((4 * n * n) as f64)
+        * (a * a / (1.0 + a * a))
+        * (s / (sn * (1.0 - s)))
+        * (1.0 - s / (sn * (1.0 - s)))
+    ).sqrt();
+
+    let (j_nm1, j_n, j_np1) = z.j_pm(n);
+
+    // Defined w.r.t. rotated basis: x || k x k' and y || k'_perp
+    let sv: StokesVector = {
+        let xi_0 = (1.0 - s + 1.0 / (1.0 - s)) * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) - (2.0 * j_n / a).powi(2);
+        let xi_1 = 2.0 * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) + 8.0 * j_n * j_n * (1.0 - ((n as f64) / z).powi(2) - 0.5 / (a * a));
+        let xi_2 = 0.0;
+        let xi_3 = (1.0 - s + 1.0 / (1.0 - s)) * (1.0 - 2.0 * s / (sn * (1.0 - s))) * (j_nm1 * j_nm1 - j_np1 * j_np1); // +/-1 depending on wave handedness
+        [1.0, xi_1 / xi_0, xi_2 / xi_0, xi_3 / xi_0].into()
+    };
+
+    // assert!(sv.dop() <= 1.0);
+
+    // So that Stokes vector is defined w.r.t. to e_1 and e_2
+    let sv = sv.rotate_by(consts::FRAC_PI_2 + theta);
+
+    (n, s, theta, sv)
 }
 
 #[cfg(test)]

@@ -4,8 +4,8 @@ use num_complex::Complex;
 use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
+use crate::geometry::StokesVector;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
-use super::PhotonPolarization;
 
 mod rate_table;
 mod cdf_table;
@@ -493,7 +493,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, PhotonPolarization) {
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
     let (n, max) = match fixed_n {
         None => {
             let frac = rng.gen::<f64>();
@@ -532,9 +532,9 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
     // Pick photon polarization
     let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
     let pol = if rng.gen::<f64>() < par / (par + perp) {
-        PhotonPolarization::LinearE
+        [1.0, 1.0, 0.0, 0.0].into() // along E
     } else {
-        PhotonPolarization::LinearB
+        [1.0, -1.0, 0.0, 0.0].into() // along B
     };
 
     // Fix range of theta, which is [0, pi/2] at the moment

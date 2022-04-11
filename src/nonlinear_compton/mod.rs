@@ -9,15 +9,6 @@ use crate::field::Polarization;
 mod cp;
 mod lp;
 
-#[derive(Debug, PartialEq, Eq)]
-enum PhotonPolarization {
-    LinearE,
-    LinearB,
-    // CircularPlus,
-    // CircularMinus,
-    Unpolarized,
-}
-
 /// The total probability that a photon is emitted
 /// by an electron with normalized quasimomentum `q`
 /// in a plane EM wave with (local) wavector `k`
@@ -56,7 +47,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
-    let (n, s, cphi_zmf, photon_pol) = match pol {
+    let (n, s, cphi_zmf, sv) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng, None),
         Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng, None),
     };
@@ -89,14 +80,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
-    // Stokes vector
-    let sv: StokesVector = match photon_pol {
-        PhotonPolarization::LinearE => [1.0, 1.0, 0.0, 0.0].into(),
-        PhotonPolarization::LinearB => [1.0, -1.0, 0.0, 0.0].into(),
-        PhotonPolarization::Unpolarized => StokesVector::unpolarized(),
-    };
-
-    // This is defined w.r.t. to the orthonormal basis
+    // Stokes vector is defined w.r.t. to the orthonormal basis
     // e_1 = x - k_x (k - omega z) / (omega * (omega - k_z))
     // e_2 = y - k_y (k - omega z) / (omega * (omega - k_z))
     // which are perpendicular to k.
