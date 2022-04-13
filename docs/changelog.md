@@ -1,8 +1,8 @@
 # Changelog
 
-## v0.9.0
+## v0.9.1
 
-In progress.
+2022-04-13
 
 Added:
 
@@ -11,6 +11,10 @@ Added:
 * Output specifiers `r_{x,y}` and option to filter out particles by angle.
 * Runtime choice of file format for distribution output (plain text or FITS).
 * More example input files.
+
+Fixed:
+
+* LMA photon sampling for non-zero collision angle.
 
 Removed:
 

@@ -68,7 +68,11 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     //println!("ZMF: q = [{}], ell k = [{}], |q| = {}", q.boost_by(u_zmf), (ell * k).boost_by(u_zmf), p_zmf);
     let along = -ThreeVector::from(q.boost_by(u_zmf)).normalize();
     let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
-    //println!("ZMF: along = [{}], e_1 = [{}]", along, epsilon);
+    let epsilon = {
+        let k = -ThreeVector::from(q).normalize();
+        k.cross(epsilon.cross(k)).normalize()
+    };
+    //println!("ZMF: along.e_1 = {:.3e}, along = [{}], e_1 = [{}]", along * epsilon, along, epsilon);
     let perp = epsilon.rotate_around(along, cphi_zmf);
 
     // Construct photon momentum and transform back to lab frame
