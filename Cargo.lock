@@ -775,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "ptarmigan"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "enum_dispatch",
  "hdf5",
