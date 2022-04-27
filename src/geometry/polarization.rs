@@ -73,12 +73,21 @@ impl StokesVector {
         let sv = *self / (frac * self.i);
 
         // Convert Stokes vector to Jones vector
-        let ex = (0.5 * (1.0 + sv[1])).sqrt();
+        let ex = if 1.0 + sv[1] < 1.0e-12 {
+            // 1 + q ~= 0, use q^2 + u^2 + v^2 = 1 and u, v << 1
+            let x_sqd = sv[2] * sv[2] + sv[3] * sv[3];
+            let delta = 0.5 * x_sqd + 0.125 * x_sqd * x_sqd;
+            (0.5 * delta).sqrt()
+        } else {
+            (0.5 * (1.0 + sv[1])).sqrt()
+        };
+
         let ey = if ex == 0.0 {
             Complex::new(1.0, 0.0)
         } else {
             Complex::new(0.5 * sv[2] / ex, -0.5 * sv[3] / ex)
         };
+
         let ex = Complex::new(ex, 0.0);
         //println!("\tJones vector = {}, {}", ex, ey);
 
@@ -153,5 +162,26 @@ impl std::ops::Div<f64> for StokesVector {
 impl std::convert::From<[f64; 4]> for StokesVector {
     fn from(item: [f64; 4]) -> Self {
         Self::new(item[0], item[1], item[2], item[3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn projection_is_normalized() {
+        let err = 2.8e-8_f64;
+        let sv: StokesVector = [1.0, -(1.0 - err * err).sqrt(), err, 0.0].into();
+        let dir: ThreeVector = {
+            let x = 0.000126978;
+            let y = -0.000220558;
+            let z = -(1.0_f64 - x * x - y * y).sqrt();
+            [x, y, z].into()
+        };
+        let pol_x = sv.project_onto(dir, [1.0, 0.0, 0.0].into());
+        let pol_y = sv.project_onto(dir, [0.0, 1.0, 0.0].into());
+        println!("weight = {} + {} = {}, dir = {}", pol_x, pol_y, pol_x + pol_y, dir);
+        assert!(pol_x + pol_y <= 1.0);
     }
 }
