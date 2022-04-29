@@ -88,6 +88,92 @@ fn double_diff_partial_rate_pol_resolved(a: f64, eta: f64, s: f64, theta: f64, d
     (parallel, perp)
 }
 
+/// Returns the largest value of the double-differential rate, multiplied by a small safety factor.
+fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> f64 {
+    let n = dj.n();
+    let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+    let smax = sn / (1.0 + sn);
+
+    let max = if n == 1 {
+        let theta = consts::FRAC_PI_2;
+        f64::max(
+            double_diff_partial_rate(a, eta, 0.01 * smax, theta, dj),
+            double_diff_partial_rate(a, eta, 0.99 * smax, theta, dj)
+        )
+    } else if a <= 2.0 {
+        // we know that n > 1
+        let theta = 0.0;
+        // search 0.4 < s / s_max < 1
+        (1..=32)
+            .map(|i| {
+                let s = smax * (0.4 + 0.6 * (i as f64) / 32.0);
+                double_diff_partial_rate(a, eta, s, theta, dj)
+            })
+            .reduce(f64::max)
+            .unwrap()
+    } else if a <= 5.0 {
+        // n > 1, 2 < a < 5
+        let n_switch = (1.3 * a.powf(1.2)).ceil() as i32;
+        if n < n_switch {
+            // linear fit in theta_opt as a function of log(n)
+            let theta = consts::FRAC_PI_2 * (1.0 - (n as f64).ln() / (n_switch as f64).ln());
+            // search 0 < s / s_max < 1.0
+            (0..=32)
+                .map(|i| {
+                    let s = smax * (i as f64) / 32.0;
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        } else {
+            let theta = 0.0;
+            // search max(x_min, 0.4) < s / s_max < 1.0
+            let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.4);
+            (1..=32)
+                .map(|i| {
+                    let s = smax * (x_min + (1.0 - x_min) * (i as f64) / 32.0);
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        }
+    } else {
+        // n > 1, a > 5
+        let n_switch = (a * a).ceil() as i32;
+
+        if n < n_switch {
+            let theta = {
+                let n = n as f64;
+                let n_switch = n_switch as f64;
+                consts::FRAC_PI_2 * (n.powf(-0.7) - n_switch.powf(-0.7)) / (1.0 - n_switch.powf(-0.7))
+            };
+
+            // search in 0.3 < s / s_max < 1
+            (1..=64)
+                .map(|i| {
+                    let s = smax * (0.3 + 0.7 * (i as f64) / 64.0);
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        } else {
+            let theta = 0.0;
+            // search x_min < s < x_peak
+            let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.3);
+            let x_peak = (1.0 + sn) / (2.0 + sn);
+            (1..=32)
+                .map(|i| {
+                    let s = smax * (x_min + (x_peak - x_min) * (i as f64) / 32.0);
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        }
+    };
+
+    1.1 * max
+}
+
 #[derive(Debug)]
 struct ThetaBound {
     s: [f64; 16],
@@ -266,6 +352,7 @@ fn single_diff_partial_rate(a: f64, eta: f64, s: f64, theta_max: f64, dj: &mut D
 /// Integrates `double_diff_partial_rate` over s and theta, returning
 /// the value of the integral and the largest value of the integrand.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase)
+#[allow(unused)]
 fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
     let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
     let smax = sn / (1.0 + sn);
@@ -494,24 +581,20 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
 pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
-    let (n, max) = match fixed_n {
-        None => {
-            let frac = rng.gen::<f64>();
-            // via lookup of cdf
-            let n = get_harmonic_index(a, eta, frac);
-            let max = partial_rate(n, a, eta).1;
-            // println!("\t... got n = {}", n);
-            (n, max)
-        },
-        Some(n) => (n, partial_rate(n, a, eta).1),
-    };
+    let n = fixed_n.unwrap_or_else(|| {
+        let frac = rng.gen::<f64>();
+        get_harmonic_index(a, eta, frac) // via lookup of cdf
+    });
 
     let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
     let theta_max = ThetaBound::for_harmonic(n, a, eta);
 
     let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
     let smax = sn / (1.0 + sn);
-    let max = 1.1 * max;
+
+    let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+    // let (_, max) = partial_rate(n, a, eta);
+    // let max = 1.1 * max;
 
     // Rejection sampling
     let (s, theta) = loop {
@@ -558,6 +641,83 @@ mod tests {
     use rand_xoshiro::*;
     use rayon::prelude::*;
     use super::*;
+
+    #[test]
+    fn rate_ceiling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _i in 0..100 {
+            let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
+            let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
+            let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let harmonics: Vec<_> = if n_max > 200 {
+                (0..=10).map(|i| (2_f64.ln() + 0.1 * (i as f64) * ((n_max as f64).ln() - 2_f64.ln())).exp() as i32).collect()
+            } else if n_max > 10 {
+                let mut low = vec![1, 2, 3];
+                let mut high: Vec<_> = (0..=4).map(|i| (5_f64.ln() + 0.25 * (i as f64) * ((n_max as f64).ln() - 5_f64.ln())).exp() as i32).collect();
+                low.append(&mut high);
+                low
+            } else {
+                (1..n_max).collect()
+            };
+
+            for n in &harmonics {
+                let (_, true_max) = partial_rate(*n, a, eta);
+                let mut dj = DoubleBessel::at_index(*n, (*n as f64) * consts::SQRT_2, (*n as f64) * 0.5);
+                let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+                let err = (true_max - max) / true_max;
+                println!(
+                    "a = {:>9.3e}, eta = {:>9.3e}, n = {:>4} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                    a, eta, n, true_max, max, 100.0 * err,
+                );
+                assert!(err < 0.0);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn find_rate_max() {
+        let a = 15.0;
+        let eta = 1.0;
+        let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+        let nodes: Vec<f64> = (1..100).map(|i| (i as f64) / 100.0).collect();
+        let pts: Vec<_> =
+            //(1..n_max)
+            //(1..10).chain((10..100).step_by(2)).chain((100..n_max).step_by(5)) // 5
+            //(1..10).chain((10..100).step_by(5)).chain((100..n_max).step_by(10)) // 10
+            (1..10).chain((10..100).step_by(10)).chain((100..n_max).step_by(50)) // 20
+            .map(|n| {
+                let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+                let max_theta = ThetaBound::for_harmonic(n, a, eta);
+                let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+                let smax = sn / (1.0 + sn);
+
+                let mut max = 0.0;
+                let mut s0 = 0.0;
+                let mut theta0 = 0.0;
+
+                for s in nodes.iter().map(|x| x * smax) {
+                    for theta in nodes.iter().map(|x| x * max_theta.at(s)) {
+                        let val = double_diff_partial_rate(a, eta, s, theta, &mut dj);
+                        if val > max {
+                            max = val;
+                            s0 = s;
+                            theta0 = theta;
+                        }
+                    }
+                }
+
+                (n, s0 / smax, theta0, max)
+            })
+            .collect();
+
+        let filename = format!("output/nlc_lp_max_{}_{}.dat", a, eta);
+        let mut file = File::create(&filename).unwrap();
+        for (n, s, theta, max) in &pts {
+            writeln!(file, "{} {:.6e} {:.6e} {:.6e}", n, s, theta, max).unwrap();
+        }
+    }
 
     #[test]
     #[ignore]
