@@ -284,7 +284,7 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, _pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);

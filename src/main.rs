@@ -101,8 +101,9 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                 while field.contains(pt.position()) && !has_decayed && tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
+                    let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
 
-                    let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
@@ -152,7 +153,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let u: FourVector = FourVector::new(0.0, 0.0, 0.0, -gamma).unitize();
     let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
+    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a0, dt, Polarization::Circular);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, Polarization::Circular);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
