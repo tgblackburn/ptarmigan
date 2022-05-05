@@ -313,6 +313,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         1.0
     };
 
+    let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
+        .and_then(|rho| {
+            if use_brem_spec {
+                eprintln!("Energy chirp ignored for bremsstrahlung photons.");
+                Ok(0.0)
+            } else if rho.abs() > 1.0 {
+                eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
+                Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
+            } else {
+                Ok(rho)
+            }
+        })
+        ?;
+
     let offset = input.read::<Vec<f64>,_>("beam:offset")
         // if missing, assume to be (0,0,0)
         .or_else(|e| match e.kind() {
@@ -516,6 +530,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_divergence(rms_div)
         .with_collision_angle(angle)
         .with_offset(offset)
+        .with_energy_chirp(energy_chirp)
         .with_length(length);
 
     let builder = if normally_distributed {
