@@ -6,14 +6,25 @@ use crate::special_functions::*;
 use crate::pwmci;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
+mod tables;
+
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Breit-Wheeler rates. Equivalent to calling
 /// ```
 /// let rate = (n_min..=n_max).map(|n| partial_rate(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
-pub(super) fn rate(_a: f64, _eta: f64) -> Option<f64> {
-    Some(0.0)
+#[allow(unused_parens)]
+pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
+    if rate_too_small(a, eta) {
+        println!("rate too small at {} {}", a, eta);
+        Some(0.0)
+    } else if tables::mid_range::contains(a, eta) {
+        Some(tables::mid_range::interpolate(a, eta))
+    } else {
+        println!("out of bounds at {} {}", a, eta);
+        Some(0.0)
+    }
 }
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
@@ -23,9 +34,12 @@ pub(super) fn rate(_a: f64, _eta: f64) -> Option<f64> {
 fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut DoubleBessel) -> f64 {
     let n = dj.n();
 
-    let x = {
-        let r_n = (2.0 * (n as f64) * eta * s * (1.0 - s) - (1.0 + 0.5 * a * a)).sqrt();
-        a * r_n * theta.cos() / (eta * s * (1.0 - s))
+    let r_n_sqd = 2.0 * (n as f64) * eta * s * (1.0 - s) - (1.0 + 0.5 * a * a);
+
+    let x = if r_n_sqd > 0.0 {
+        a * r_n_sqd.sqrt() * theta.cos() / (eta * s * (1.0 - s))
+    } else {
+        return 0.0;
     };
 
     let y = a * a / (8.0 * eta * s * (1.0 - s));
@@ -217,15 +231,24 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
 /// Returns the range of harmonics that contribute to the total rate.
 fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
     let n_min = (2.0f64 * (1.0 + 0.5 * a * a) / eta).ceil();
-    // if 1 < a < 10
-    let range = 30.0 * (a * a + eta) * (-(1.5 * eta).sqrt()).exp();
+    let range = if a < 1.0 {
+        2.0 + (2.0 + 20.0 * a * a) * (-(0.5 * eta).sqrt()).exp()
+    } else {
+        // if a < 10
+        30.0 * (a * a + eta) * (-(1.5 * eta).sqrt()).exp()
+    };
 
-    let test = 0.25 - (1.0 + 0.5 * a * a) / (2.0 * n_min * eta);
+    let test = 0.25 - (1.0 + 0.5 * a * a) / (2.0 * (n_min as f64) * eta);
     if test <= 0.0 {
         ((n_min as i32) + 1, (n_min + 1.0 + range) as i32)
     } else {
         (n_min as i32, (n_min + range) as i32)
     }
+}
+
+/// Checks if a and eta are small enough such that the rate < exp(-200)
+fn rate_too_small(a: f64, eta: f64) -> bool {
+    eta.log10() < -1.0 - (a.log10() + 2.0).powi(2) / 4.5
 }
 
 /// Returns the total rate of emission by summing [partial_rate] over the relevant
@@ -236,15 +259,24 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
     let (n_min, n_max) = sum_limits(a, eta);
     let len = n_max - n_min + 1; // inclusive bounds
 
+    let mut n_mode = n_min;
+    let mut max = 0.0;
     let mut total = 0.0;
     let rates: Vec<[f64; 2]> = (n_min..=n_max)
         .map(|n| {
-            total = total + partial_rate(n, a, eta);
+            let pr = partial_rate(n, a, eta);
+            if pr > max {
+                max = pr;
+                n_mode = n;
+            }
+            total = total + pr;
             [n as f64, total]
         })
         .collect();
 
+    let n_mode = n_mode;
     let total = total;
+    // println!("got n_mode = {}", n_mode);
 
     let mut cdf: [[f64; 2]; 16] = [[0.0, 0.0]; 16];
     cdf[0] = [rates[0][0], rates[0][1] / total];
@@ -256,29 +288,42 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
                 .map(|r| [r[0], r[1] / total])
                 .unwrap_or_else(|| [(i as f64) + (n_min as f64), 1.0]);
         }
-    } else if rates.len() <= 100 {
-        // first four harmonics
-        for i in 1..=3 {
-            cdf[i] = [rates[i][0], rates[i][1] / total];
-        }
-        // log-spaced for n >= n_min + 4
-        let delta = ((n_max as f64).ln() - ((n_min + 4) as f64).ln()) / 11.0;
-        for i in 4..=15 {
-            let n = (((n_min + 4) as f64).ln() + ((i - 4) as f64) * delta).exp();
-            let limit = rates.last().unwrap()[0];
-            let n = n.min(limit);
-            cdf[i][0] = n;
-            cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
-        }
     } else {
-        // Sample CDF at 16 log-spaced points
-        let delta = ((n_max as f64).ln() - (n_min as f64).ln())/ 15.0;
-        for i in 1..=15 {
-            let n = ((n_min as f64).ln() + (i as f64) * delta).exp();
-            let limit = rates.last().unwrap()[0];
-            let n = n.min(limit);
-            cdf[i][0] = n;
-            cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
+        // make sure we get the most probable harmonic
+        if n_mode - n_min <= 3 {
+            // first four harmonics
+            for i in 1..=3 {
+                cdf[i] = [rates[i][0], rates[i][1] / total];
+            }
+
+            // power-law spaced for n >= n_min + 4
+            let alpha = if n_max - n_mode < 120 {1.5} else {2.0};
+            for i in 4..=15 {
+                let n = ((n_min + 4) as f64) + ((n_max - (n_min + 4)) as f64) * (((i - 4) as f64) / 11.0).powf(alpha);
+                let limit = rates.last().unwrap()[0];
+                let n = n.min(limit);
+                cdf[i][0] = n;
+                cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
+            }
+        } else {
+            // n_mode >= n_min + 4
+            // can't get everything b/t n_min and n_mode
+            cdf[1] = {
+                let i = ((n_mode - n_min) / 2) as usize;
+                [rates[i][0], rates[i][1] / total]
+            };
+
+            // log-spaced for n >= n_mode
+            // quadratically spaced
+            // let delta = ((n_max as f64).ln() - (n_mode as f64).ln()) / 13.0;
+            for i in 2..=15 {
+                //let n = ((n_mode as f64).ln() + ((i - 2) as f64) * delta).exp();
+                let n = (n_mode as f64) + ((n_max - n_min) as f64) * (((i - 2) as f64) / 13.0).powi(2);
+                let limit = rates.last().unwrap()[0];
+                let n = n.min(limit);
+                cdf[i][0] = n;
+                cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
+            }
         }
     }
 
@@ -291,6 +336,7 @@ mod tests {
     use std::io::Write;
     use rand::prelude::*;
     use rand_xoshiro::*;
+    use rayon::prelude::*;
     use super::*;
 
     #[test]
@@ -343,24 +389,39 @@ mod tests {
     fn total_rate() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
-        let pts: Vec<_> = (0..1000)
-            .map(|_| {
-                let a = (0.1_f64.ln() + (1_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        let pts: Vec<_> = (0..10_000)
+            .map(|_i| {
+                let a = (0.05_f64.ln() + (1_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
                 let eta = (0.1_f64.ln() + (1.0_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
                 (a, eta)
             })
             .collect();
 
-        let pts: Vec<_> = pts.iter()
-            .map(|(a, eta)| {
-                (*a, *eta, rate_by_summation(*a, *eta).0)
-            })
-            .collect();
+        let pts: Vec<_> = pool.install(|| {
+            pts.into_par_iter()
+                .filter(|(a, eta)| !rate_too_small(*a, *eta) && eta / (1.0 + 0.5 * a * a) > 0.1)
+                .map(|(a, eta)| {
+                    let (target, _) = rate_by_summation(a, eta);
+                    let value = rate(a, eta).unwrap();
+                    let error = (target - value) / target;
+                    (a, eta, target, value, error)
+                })
+                .collect()
+            });
 
-        let filename = format!("output/nbw_lp_rate.dat");
+        let filename = format!("output/nbw_lp_rate_error.dat");
         let mut file = File::create(&filename).unwrap();
-        for (a, eta, rate) in &pts {
-            writeln!(file, "{:.6e} {:.6e} {:.6e}", a, eta, rate).unwrap();
+        for (a, eta, target, value, error) in &pts {
+            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
         }
     }
 
@@ -418,6 +479,88 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn create_rate_tables() {
+        let do_mid_range = true;
+
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        if do_mid_range {
+            const LN_MIN_A: f64 = -7.0 * consts::LN_10 / 5.0; // ~0.04
+            const LN_MAX_ETA_PRIME: f64 = consts::LN_2; // 2.0
+            const A_DENSITY: usize = 20; // points per order of magnitude
+            const ETA_PRIME_DENSITY: usize = 4; // points per harmonic step
+            const N_COLS: usize = 29; // points in a0
+            const N_ROWS: usize = 77; // points in eta_prime
+
+            let mut pts = vec![];
+            for i in 0..N_ROWS {
+                for j in 0..N_COLS {
+                    // eta' = 2 density / (i + 1)
+                    let eta_prime = LN_MAX_ETA_PRIME.exp() / (1.0 + (i as f64) / (ETA_PRIME_DENSITY as f64));
+                    let a = LN_MIN_A.exp() * 10_f64.powf((j as f64) / (A_DENSITY as f64));
+                    pts.push((i, j, a, eta_prime));
+                }
+            }
+
+            let pts: Vec<_> = pool.install(|| {
+                pts.into_par_iter().map(|(i, j, a, eta_prime)| {
+                    let eta = (1.0 + 0.5 * a * a) * eta_prime;
+                    let (total, cdf) = rate_by_summation(a, eta);
+                    println!(
+                        "LP NBW [{:>3}]: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}",
+                        rayon::current_thread_index().unwrap_or(1),
+                        eta, a, total.ln()
+                    );
+                    (i, j, total, cdf)
+                })
+                .collect()
+            });
+
+            // Build rate table
+            let mut table = [[0.0; N_COLS]; N_ROWS];
+            for (i, j, rate, _) in pts.iter() {
+                table[*i][*j] = *rate;
+            }
+
+            let mut file = File::create("output/nbw_mid_a_rate_table.rs").unwrap();
+            // writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+            // writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+            writeln!(file, "pub const LN_MIN_A: f64 = {:.12e};", LN_MIN_A).unwrap();
+            writeln!(file, "pub const LN_MAX_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME).unwrap();
+            writeln!(file, "pub const LN_MIN_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME - (1.0 + ((N_ROWS - 1) as f64) / (ETA_PRIME_DENSITY as f64)).ln()).unwrap();
+            writeln!(file, "pub const LN_A_STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
+            writeln!(file, "pub const ETA_PRIME_DENSITY: f64 = {:.12e};", ETA_PRIME_DENSITY).unwrap();
+            writeln!(file, "pub const TABLE: [[f64; {}]; {}] = [", N_COLS, N_ROWS).unwrap();
+            for row in table.iter() {
+                let val = row.first().unwrap().ln();
+                if val.is_finite() {
+                    write!(file, "\t[{:>18.12e}", val).unwrap();
+                } else {
+                    write!(file, "\t[{:>18}", "NEG_INFINITY").unwrap();
+                }
+                for val in row.iter().skip(1) {
+                    let tmp = val.ln();
+                    if tmp.is_finite() {
+                        write!(file, ", {:>18.12e}", tmp).unwrap();
+                    } else {
+                        write!(file, ", {:>18}", "NEG_INFINITY").unwrap();
+                    }
+                }
+                writeln!(file, "],").unwrap();
+            }
+            writeln!(file, "];").unwrap();
+
         }
     }
 }
