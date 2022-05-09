@@ -39,7 +39,7 @@ pub fn generate<R: Rng>(ell: FourVector, _sv: StokesVector, k: FourVector, a: f6
 
     let (n, s, cphi_zmf) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng),
-        Polarization::Linear => unimplemented!(),
+        Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng),
     };
 
     // Scattering momentum (/m) and angles in zero momentum frame

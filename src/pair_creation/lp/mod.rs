@@ -2,6 +2,7 @@
 
 use std::f64::consts;
 use num_complex::Complex;
+use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
@@ -25,6 +26,60 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
         println!("out of bounds at {} {}", a, eta);
         Some(0.0)
     }
+}
+
+/// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
+/// transfer) and theta (azimuthal angle in the ZMF) for a pair creatione event that
+/// occurs at normalized amplitude a and energy parameter eta.
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
+    let frac = rng.gen::<f64>();
+
+    let n = if tables::mid_range::contains(a, eta) {
+        tables::mid_range::invert(a, eta, frac)
+    } else {
+        panic!("out of bounds at {} {}", a, eta);
+    };
+
+    let s_min = 0.5;
+    let s_max = 0.5 + (0.25 - (1.0 + 0.5 * a * a) / (2.0 * (n as f64) * eta)).sqrt();
+
+    let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+    let theta_max = ThetaBound::for_harmonic(n, a, eta);
+
+    let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+
+    // Rejection sampling
+    let (s, theta) = loop {
+        let s = s_min + (s_max - s_min) * rng.gen::<f64>();
+        let theta = consts::FRAC_PI_2 * rng.gen::<f64>();
+        if theta > theta_max.at(s) {
+            continue;
+        }
+        let z = max * rng.gen::<f64>();
+        let f = double_diff_partial_rate(a, eta, s, theta, &mut dj);
+        if z < f {
+            break (s, theta);
+        }
+    };
+
+    // Fix s, which is [1/2, s_max] at the moment
+    let s = match rng.gen_range(0, 1) {
+        0 => 1.0 - s,
+        1 => s,
+        _ => unreachable!(),
+    };
+
+    // Fix range of theta, which is [0, pi/2] at the moment
+    let quadrant = rng.gen_range(0, 4);
+    let theta = match quadrant {
+        0 => theta,
+        1 => consts::PI - theta,
+        2 => consts::PI + theta,
+        3 => 2.0 * consts::PI - theta,
+        _ => unreachable!(),
+    };
+
+    (n, s, theta)
 }
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
@@ -51,6 +106,33 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
     let h_s = 0.5 / (s * (1.0 - s)) - 1.0;
 
     (gamma[0].powi(2) + a * a * h_s * (gamma[1].powi(2) - gamma[0] * gamma[2])) / (2.0 * consts::PI)
+}
+
+/// Returns the largest possible value of [double_diff_partial_rate], multiplied by a small safety factor.
+fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> f64 {
+    let n = dj.n();
+    let s_min = 0.5;
+    let s_max = 0.5 + (0.25 - (1.0 + 0.5 * a * a) / (2.0 * (n as f64) * eta)).sqrt();
+
+    // double-diff rate always maxmised along theta = 0
+    let theta = 0.0;
+
+    let centre = 0.5 + (0.25 - (1.0 + a * a) / (2.0 * (n as f64) * eta)).sqrt();
+    let (lower, upper) = if centre.is_finite() {
+        ((centre - 0.1).max(s_min), 0.5 * (centre + s_max))
+    } else {
+        (s_min, s_max)
+    };
+
+    let max = (0..40)
+        .map(|i| {
+            let s = lower + (upper - lower) * (i as f64) / 40.0;
+                double_diff_partial_rate(a, eta, s, theta, dj)
+            })
+        .reduce(f64::max)
+        .unwrap();
+
+    1.1 * max
 }
 
 #[derive(Debug)]
@@ -386,6 +468,72 @@ mod tests {
     }
 
     #[test]
+    fn rate_ceiling() {
+        let pts = vec![
+            (0.5, 0.1, 23),
+            (0.5, 0.1, 24),
+            (2.0, 0.1, 61),
+            (2.0, 0.1, 70),
+            (2.0, 0.1, 80),
+            (2.0, 0.1, 100),
+            (2.0, 0.01, 601),
+            (2.0, 0.01, 700),
+            (2.0, 0.01, 800),
+            (2.0, 0.01, 1000),
+            (6.0, 1.0, 39),
+            (6.0, 1.0, 80),
+            (6.0, 1.0, 160),
+            (6.0, 1.0, 350),
+            (6.0, 0.1, 400),
+            (6.0, 0.1, 500),
+            (6.0, 0.1, 750),
+            (6.0, 0.1, 1000),
+            (6.0, 0.01, 3801),
+            (6.0, 0.01, 3900),
+            (6.0, 0.01, 4000),
+            (6.0, 0.01, 4200),
+            (15.0, 1.0, 228),
+            (15.0, 1.0, 500),
+            (15.0, 1.0, 1000),
+            (15.0, 1.0, 2000),
+            (15.0, 0.1, 2280),
+            (15.0, 0.1, 3800),
+            (15.0, 0.1, 4500),
+            (15.0, 0.1, 6800),
+            (15.0, 0.01, 22800),
+            (15.0, 0.01, 24000),
+            (15.0, 0.01, 26000),
+            (15.0, 0.01, 28500),
+        ];
+
+        for (a, eta, n) in pts.into_iter() {
+            let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+
+            let target = {
+                let s_min = 0.5;
+                let s_max = 0.5 + (0.25 - (1.0 + 0.5 * a * a) / (2.0 * (n as f64) * eta)).sqrt();
+                (0..1000)
+                    .map(|i| {
+                        let s = s_min + (s_max - s_min) * (i as f64) / 1000.0;
+                            double_diff_partial_rate(a, eta, s, 0.0, &mut dj)
+                        })
+                    .reduce(f64::max)
+                    .unwrap()
+            };
+
+            let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+            let err = (target - max) / target;
+
+            println!(
+                "a = {:>9.3e}, eta = {:>9.3e}, n = {:>4} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                a, eta, n, target, max, 100.0 * err,
+            );
+
+            assert!(err < 0.0);
+        }
+    }
+
+    #[test]
     fn total_rate() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
@@ -485,6 +633,7 @@ mod tests {
     #[test]
     fn create_rate_tables() {
         let do_mid_range = true;
+        let do_high_range = false;
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
@@ -561,6 +710,108 @@ mod tests {
             }
             writeln!(file, "];").unwrap();
 
+            let mut file = File::create("output/nbw_mid_a_cdf_table.rs").unwrap();
+            writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+            //writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+            writeln!(file, "pub const LN_MIN_A: f64 = {:.12e};", LN_MIN_A).unwrap();
+            writeln!(file, "pub const LN_MAX_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME).unwrap();
+            writeln!(file, "pub const LN_MIN_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME - (1.0 + ((N_ROWS - 1) as f64) / (ETA_PRIME_DENSITY as f64)).ln()).unwrap();
+            writeln!(file, "pub const LN_A_STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
+            writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS * N_ROWS).unwrap();
+            for (_, _, _, cdf) in &pts {
+                write!(file, "\t[").unwrap();
+                for entry in cdf.iter().take(15) {
+                    write!(file, "[{:>18.12e}, {:>18.12e}], ", entry[0], entry[1]).unwrap();
+                }
+                writeln!(file, "[{:>18.12e}, {:>18.12e}]],", cdf[15][0], cdf[15][1]).unwrap();
+            }
+            writeln!(file, "];").unwrap();
+        }
+
+        if do_high_range {
+            const LN_MIN_A: f64 = -7.0 * consts::LN_10 / 5.0; // ~0.04
+            const A_DENSITY: usize = 10; // points per order of magnitude
+            const N_COLS: usize = 25; // points in a0, a <= 10
+
+            const MIN_ETA: f64 = 0.002;
+            const ETA_DENSITY: usize = 5;
+            const N_ROWS: usize = 3 * ETA_DENSITY; // points in eta, eta < 2
+
+            let mut pts = vec![];
+            for i in 0..N_ROWS {
+                for j in 0..N_COLS {
+                    let a = LN_MIN_A.exp() * 10_f64.powf((j as f64) / (A_DENSITY as f64));
+                    let eta = MIN_ETA * 10_f64.powf((i as f64) / (ETA_DENSITY as f64));
+                    pts.push((i, j, a, eta));
+                }
+            }
+
+            let pts: Vec<_> = pool.install(|| {
+                pts.into_par_iter().map(|(i, j, a, eta)| {
+                    let (total, cdf) = if !rate_too_small(a, eta) {
+                        rate_by_summation(a, eta)
+                    } else {
+                        (0.0, [[0.0; 2]; 16])
+                    };
+
+                    println!(
+                        "LP NBW [{:>3}]: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}",
+                        rayon::current_thread_index().unwrap_or(1),
+                        eta, a, total.ln()
+                    );
+                    (i, j, total, cdf)
+                })
+                .collect()
+            });
+
+            // Build rate table
+            let mut table = [[0.0; N_COLS]; N_ROWS];
+            for (i, j, rate, _) in pts.iter() {
+                table[*i][*j] = *rate;
+            }
+
+            let mut file = File::create("output/nbw_rate_table.rs").unwrap();
+            writeln!(file, "use std::f64::NEG_INFINITY;").unwrap();
+            writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+            writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+            writeln!(file, "pub const LN_MIN_A: f64 = {:.12e};", LN_MIN_A).unwrap();
+            writeln!(file, "pub const LN_MIN_ETA: f64 = {:.12e};", MIN_ETA.ln()).unwrap();
+            writeln!(file, "pub const LN_A_STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
+            writeln!(file, "pub const LN_ETA_STEP: f64 = {:.12e};", consts::LN_10 / (ETA_DENSITY as f64)).unwrap();
+            writeln!(file, "pub const TABLE: [[f64; {}]; {}] = [", N_COLS, N_ROWS).unwrap();
+            for row in table.iter() {
+                let val = row.first().unwrap().ln();
+                if val.is_finite() {
+                    write!(file, "\t[{:>18.12e}", val).unwrap();
+                } else {
+                    write!(file, "\t[{:>18}", "NEG_INFINITY").unwrap();
+                }
+                for val in row.iter().skip(1) {
+                    let tmp = val.ln();
+                    if tmp.is_finite() {
+                        write!(file, ", {:>18.12e}", tmp).unwrap();
+                    } else {
+                        write!(file, ", {:>18}", "NEG_INFINITY").unwrap();
+                    }
+                }
+                writeln!(file, "],").unwrap();
+            }
+            writeln!(file, "];").unwrap();
+
+            let mut file = File::create("output/nbw_cdf_table.rs").unwrap();
+            writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+            writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
+            writeln!(file, "pub const MIN: [f64; 2] = [{:.12e}, {:.12e}];", LN_MIN_A, MIN_ETA.ln()).unwrap();
+            writeln!(file, "pub const STEP: [f64; 2] = [{:.12e}, {:.12e}];", consts::LN_10 / (A_DENSITY as f64), consts::LN_10 / (ETA_DENSITY as f64)).unwrap();
+            writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS * N_ROWS).unwrap();
+            for (_, _, _, cdf) in &pts {
+                write!(file, "\t[").unwrap();
+                for entry in cdf.iter().take(15) {
+                    write!(file, "[{:>18.12e}, {:>18.12e}], ", entry[0], entry[1]).unwrap();
+                }
+                writeln!(file, "[{:>18.12e}, {:>18.12e}]],", cdf[15][0], cdf[15][1]).unwrap();
+            }
+            writeln!(file, "];").unwrap();
         }
     }
 }
