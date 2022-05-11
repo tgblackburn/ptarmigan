@@ -278,7 +278,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                     .zip(GAUSS_32_WEIGHTS.iter())
                     .map(|(s, w)| {
                         let rate = single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj);
-                        w * (s1 - s0) * rate
+                        0.5 * w * (s1 - s0) * rate
                     })
                     .sum()
             })
@@ -300,7 +300,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
                     .zip(weights.iter())
                     .map(|(s, w)| {
                         let rate = single_diff_partial_rate(a, eta, s, theta_max.at(s), &mut dj);
-                        w * (s1 - s0) * rate
+                        0.5 * w * (s1 - s0) * rate
                     })
                     .sum()
             })
@@ -352,6 +352,9 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
                 n_mode = n;
             }
             total = total + pr;
+            // if (n - n_min) % ((n_max - n_min) / 100) == 0 {
+            //     println!("done n = {} of {} to {}...", n, n_min, n_max);
+            // }
             [n as f64, total]
         })
         .collect();
@@ -400,7 +403,7 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
             // let delta = ((n_max as f64).ln() - (n_mode as f64).ln()) / 13.0;
             for i in 2..=15 {
                 //let n = ((n_mode as f64).ln() + ((i - 2) as f64) * delta).exp();
-                let n = (n_mode as f64) + ((n_max - n_min) as f64) * (((i - 2) as f64) / 13.0).powi(2);
+                let n = (n_mode as f64) + ((n_max - n_mode) as f64) * (((i - 2) as f64) / 13.0).powi(2);
                 let limit = rates.last().unwrap()[0];
                 let n = n.min(limit);
                 cdf[i][0] = n;
@@ -411,6 +414,143 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
 
     (total, cdf)
 }
+
+/// Returns the total rate of emission by integrating [partial_rate] as a function of
+/// nover the relevant range of harmonics and the cumulative density function.
+/// Multiply by alpha / eta to get dP/dphase.
+#[allow(unused)]
+fn rate_by_integration(a: f64, eta: f64) -> (f64, f64, [[f64; 2]; 16]) {
+    // the number of harmonics is > 150
+    assert!(a >= 5.0);
+
+    let (n_min, n_max) = sum_limits(a, eta);
+    let delta = (n_max - n_min) as f64;
+
+    // Fill nodes of CDF
+    let mut cdf = {
+        let start = n_min as f64;
+        let n_mode = (start + a.powf(1.1)).round();
+
+        let mut cdf = [[0.0; 2]; 16];
+
+        cdf[0][0] = start.round();
+        cdf[1][0] = (0.5 * (start + n_mode)).round();
+
+        for i in 2..=15 {
+            let n = n_mode + ((n_max as f64) - n_mode) * (((i - 2) as f64) / 13.0).powi(2);
+            cdf[i][0] = n.round();
+        }
+
+        cdf
+    };
+
+    cdf[0][1] = partial_rate(n_min, a, eta);
+
+    for i in 1..3 {
+        let min = cdf[i-1][0] as i32; // exclusive
+        let max = cdf[i][0] as i32; // inclusive
+        cdf[i][1] = cdf[i-1][1] + (min+1..=max).map(|n| partial_rate(n, a, eta)).sum::<f64>()
+    }
+
+    for i in 3..16 {
+        let x_min = cdf[i-1][0]; // exclusive
+        let x_max = cdf[i][0]; // inclusive
+        let delta = x_max - x_min;
+
+        // print!("from {} to {} with {} nodes: ", x_min, x_max, if delta < 4.0 {"all"} else if delta < 8.0 {"2"} else if delta < 64.0 {"4"} else {"8"});
+
+        let integral = if delta < 4.0 {
+            let min = x_min as i32;
+            let max = x_max as i32;
+            (min+1..=max).map(|n| partial_rate(n, a, eta)).sum::<f64>()
+        } else {
+            let (nodes, weights): (&[f64], &[f64]) = if delta < 8.0 {
+                (&GAUSS_2_NODES, &GAUSS_2_WEIGHTS)
+            } else if delta < 64.0 {
+                (&GAUSS_4_NODES, &GAUSS_4_WEIGHTS)
+            } else {
+                (&GAUSS_8_NODES, &GAUSS_8_WEIGHTS)
+            };
+
+            nodes.iter()
+                .map(|x| x_min + 0.5 * (x + 1.0) * delta)
+                .map(|n| {
+                    // let frac = n.fract();
+                    // let n = n.floor() as i32;
+                    // (1.0 - frac) * partial_rate(n, a, eta) + frac * partial_rate(n+1, a, eta)
+                    // print!("{} ", n.round());
+                    partial_rate(n.round() as i32, a, eta)
+                })
+                .zip(weights.iter())
+                .map(|(y, w)| 0.5 * w * delta * y)
+                .sum()
+        };
+
+        // println!("");
+        //let y_max = partial_rate(cdf[i][0]  as i32, a, eta);
+
+        cdf[i][1] = cdf[i-1][1] + integral;
+    }
+
+    let cdf_total = cdf[15][1];
+    for i in 0..16 {
+        cdf[i][1] = cdf[i][1] / cdf_total;
+    }
+
+    let total: f64 = GAUSS_32_NODES.iter()
+        .map(|x| (n_min as f64) + 0.5 * (x + 1.0) * delta)
+        .zip(GAUSS_32_WEIGHTS.iter())
+        .map(|(n, w)| 0.5 * w * delta * partial_rate(n.round() as i32, a, eta))
+        .sum();
+
+    (total, cdf_total, cdf)
+}
+
+static GAUSS_2_NODES: [f64; 2] = [
+    -0.57735026918962576451,
+    0.57735026918962576451,
+];
+
+static GAUSS_2_WEIGHTS: [f64; 2] = [
+    1.0,
+    1.0,
+];
+
+static GAUSS_4_NODES: [f64; 4] = [
+    -0.86113631159405257522,
+    -0.33998104358485626480,
+    0.33998104358485626480,
+    0.86113631159405257522,
+];
+
+static GAUSS_4_WEIGHTS: [f64; 4] = [
+    0.3478548451374538574,
+    0.6521451548625461426,
+    0.6521451548625461426,
+    0.3478548451374538574,
+];
+
+static GAUSS_8_NODES: [f64; 8] = [
+    -0.96028985649753623168,
+    -0.79666647741362673959,
+    -0.52553240991632898582,
+    -0.18343464249564980494,
+    0.18343464249564980494,
+    0.52553240991632898582,
+    0.79666647741362673959,
+    0.96028985649753623168,
+];
+
+static GAUSS_8_WEIGHTS: [f64; 8] = [
+    0.101228536290376259,
+    0.22238103445337447,
+    0.313706645877887287,
+    0.3626837833783619830,
+    0.3626837833783619830,
+    0.313706645877887287,
+    0.22238103445337447,
+    0.101228536290376259,
+];
 
 #[cfg(test)]
 mod tests {
@@ -530,6 +670,35 @@ mod tests {
             );
 
             assert!(err < 0.0);
+        }
+    }
+
+    #[test]
+    fn sum_vs_integral() {
+        let pts = [
+            (5.0, 1.0, 1.300522926497e-1),
+            (5.0, 0.1, 7.770395919096e-5),
+            (5.0, 0.01, 5.173715305605e-27),
+            (7.5, 1.0, 2.278728143894e-1),
+            (7.5, 0.1, 7.618916024118e-4),
+            (7.5, 0.05, 8.803325768014e-6),
+            (10.0, 1.0, 3.206858045905e-1),
+            (10.0, 0.1, 2.623276241871e-3),
+            (10.0, 0.05, 7.481145913658e-5),
+        ];
+
+        for (a, eta, target) in &pts {
+            //let (target, tcdf) = rate_by_summation(*a, *eta);
+            let (value, value2, _cdf) = rate_by_integration(*a, *eta);
+            let error = (target - value) / target;
+            let error2 = (target - value2) / target;
+            println!("a = {}, eta = {}: target = {:.12e}, value = {:.12e} [{:.12e}], err = {:.2}% [{:.2}%]", a, eta, target, value, value2, 100.0 * error, 100.0 * error2);
+            // for row in &tcdf {
+            //     println!("\t{:.6e} {:.3e}", row[0], row[1]);
+            // }
+            // for row in &cdf {
+            //     println!("\t{:.6e} {:.3e}", row[0], row[1]);
+            // }
         }
     }
 
@@ -715,7 +884,7 @@ mod tests {
             //writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
             writeln!(file, "pub const LN_MIN_A: f64 = {:.12e};", LN_MIN_A).unwrap();
             writeln!(file, "pub const LN_MAX_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME).unwrap();
-            writeln!(file, "pub const LN_MIN_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME - (1.0 + ((N_ROWS - 1) as f64) / (ETA_PRIME_DENSITY as f64)).ln()).unwrap();
+            // writeln!(file, "pub const LN_MIN_ETA_PRIME: f64 = {:.12e};", LN_MAX_ETA_PRIME - (1.0 + ((N_ROWS - 1) as f64) / (ETA_PRIME_DENSITY as f64)).ln()).unwrap();
             writeln!(file, "pub const LN_A_STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
             writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS * N_ROWS).unwrap();
             for (_, _, _, cdf) in &pts {
