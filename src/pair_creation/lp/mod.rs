@@ -22,6 +22,8 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
         Some(0.0)
     } else if tables::mid_range::contains(a, eta) {
         Some(tables::mid_range::interpolate(a, eta))
+    } else if tables::contains(a, eta) {
+        Some(tables::interpolate(a, eta))
     } else {
         println!("out of bounds at {} {}", a, eta);
         Some(0.0)
@@ -703,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn total_rate() {
+    fn mid_range_total_rate() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
@@ -730,6 +732,90 @@ mod tests {
                     let (target, _) = rate_by_summation(a, eta);
                     let value = rate(a, eta).unwrap();
                     let error = (target - value) / target;
+                    (a, eta, target, value, error)
+                })
+                .collect()
+            });
+
+        let filename = format!("output/nbw_lp_rate_error.dat");
+        let mut file = File::create(&filename).unwrap();
+        for (a, eta, target, value, error) in &pts {
+            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
+        }
+    }
+
+    #[test]
+    fn total_rate() {
+        // let mut rng = Xoshiro256StarStar::seed_from_u64(2);
+
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        // let pts: Vec<_> = (0..20)
+        //     .map(|_i| {
+        //         let a = (0.05_f64.ln() + (10_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
+        //         let eta = (0.002_f64.ln() + (2.0_f64.ln() - 0.002_f64.ln()) * rng.gen::<f64>()).exp();
+        //         (a, eta)
+        //     })
+        //     .collect();
+
+        let pts: Vec<_> = vec![
+            (1.209189037686e0, 3.502291364468e-1, 3.585920927235e-5),
+            (2.430063261487e0, 1.996527536127e0, 1.260645004784e-1),
+            (4.682646626094e-1, 8.090858286656e-2, 5.818691756078e-28),
+            (4.650938878614e0, 1.141836795031e0, 1.434222039945e-1),
+            (2.088807161995e0, 7.363579921586e-3, 2.142961360381e-78),
+            (2.616135478775e-1, 6.054043860245e-2, 8.935459056006e-51),
+            (9.321947554657e0, 1.617656220612e-2, 6.189325439919e-11),
+            (1.525230970612e0, 1.100448152064e0, 1.550999340076e-2),
+            (9.378192248215e0, 9.359495048212e-1, 2.754379741939e-1),
+            (2.836115718354e0, 6.054457593332e-3, 2.853246124390e-71),
+            (8.008052999038e0, 1.505163068267e0, 3.972241570172e-1),
+            (5.824226220113e0, 6.572020201879e-3, 2.766897262535e-34),
+            (2.072116777067e0, 7.283495487271e-2, 9.629136992171e-11),
+            (1.047139255241e0, 2.985491243937e-2, 1.467953586579e-38),
+            (4.946680749202e0, 9.039815898684e-2, 3.586011659312e-5),
+            (6.995957567137e0, 1.488279488418e0, 3.349261151496e-1),
+            (7.003384469117e0, 2.033856662597e-1, 8.918750490606e-3),
+            (1.200700740903e0, 9.389810351565e-1, 5.125341409015e-3),
+            (5.819378129203e-1, 6.172360831784e-2, 8.150324670220e-31),
+            (1.271806552500e0, 2.240419069513e-2, 8.337168337189e-43),
+            (2.675301882055e0, 1.769161259739e0, 1.198768692020e-1),
+            (4.827435868141e-1, 3.060800793908e-2, 1.475046625103e-66),
+            (1.558360623431e0, 1.019792932967e-2, 6.773365827108e-75),
+            (3.825598140112e-1, 5.110279453650e-2, 3.894933556154e-48),
+            (1.895924862043e0, 1.020916989053e-2, 7.357879339317e-63),
+            (1.541786727993e0, 9.082122770474e-3, 2.177098935406e-84),
+            (1.259370976106e0, 3.534847529521e-1, 4.462617511505e-5),
+            (2.597986058152e0, 2.330145968294e-2, 1.136299288771e-22),
+            (1.839889967118e0, 1.525139076740e0, 5.045829803345e-2),
+            (9.888992718065e0, 4.128743595197e-3, 1.951545503262e-32),
+            (1.727592424768e0, 2.989954001547e-1, 1.146087770149e-4),
+            (4.067212428238e-1, 2.971016391213e-2, 2.577788343745e-76),
+            (1.344516193618e0, 8.038144142092e-2, 1.227748850437e-13),
+            (5.586945686452e0, 1.630320014010e-2, 3.075531230636e-16),
+        ];
+
+        let pts: Vec<_> = pool.install(|| {
+            pts.into_par_iter()
+                .filter(|(a, eta, target)| {
+                    !rate_too_small(*a, *eta) && !tables::mid_range::contains(*a, *eta)
+                })
+                .map(|(a, eta, target)| {
+                    // let target = if a < 5.0 {
+                    //     rate_by_summation(a, eta).0
+                    // } else {
+                    //     rate_by_integration(a, eta).0
+                    // };
+                    let value = rate(a, eta).unwrap();
+                    let error = (target - value) / target;
+                    println!("({:.12e}, {:.12e}, {:.12e}), value = {:.12e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
                     (a, eta, target, value, error)
                 })
                 .collect()
@@ -801,8 +887,8 @@ mod tests {
 
     #[test]
     fn create_rate_tables() {
-        let do_mid_range = true;
-        let do_high_range = false;
+        let do_mid_range = false;
+        let do_high_range = true;
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
@@ -904,7 +990,7 @@ mod tests {
 
             const MIN_ETA: f64 = 0.002;
             const ETA_DENSITY: usize = 5;
-            const N_ROWS: usize = 3 * ETA_DENSITY; // points in eta, eta < 2
+            const N_ROWS: usize = 3 * ETA_DENSITY + 1; // points in eta, eta <= 2
 
             let mut pts = vec![];
             for i in 0..N_ROWS {
@@ -917,7 +1003,10 @@ mod tests {
 
             let pts: Vec<_> = pool.install(|| {
                 pts.into_par_iter().map(|(i, j, a, eta)| {
-                    let (total, cdf) = if !rate_too_small(a, eta) {
+                    let (total, cdf) = if a > 5.0 {
+                        let (total, _, cdf) = rate_by_integration(a, eta);
+                        (total, cdf)
+                    } else if !rate_too_small(a, eta) {
                         rate_by_summation(a, eta)
                     } else {
                         (0.0, [[0.0; 2]; 16])
