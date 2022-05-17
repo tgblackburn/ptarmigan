@@ -747,7 +747,7 @@ mod tests {
 
     #[test]
     fn total_rate() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        // let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
@@ -758,29 +758,31 @@ mod tests {
             .build()
             .unwrap();
 
-        let pts: Vec<_> = (0..1000)
-            .map(|_i| {
-                let a = (0.05_f64.ln() + (10_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
-                let eta = (0.002_f64.ln() + (2.0_f64.ln() - 0.002_f64.ln()) * rng.gen::<f64>()).exp();
-                (a, eta)
-            })
-            .collect();
+        // let pts: Vec<_> = (0..1000)
+        //     .map(|_i| {
+        //         let a = (0.05_f64.ln() + (10_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
+        //         let eta = (0.002_f64.ln() + (2.0_f64.ln() - 0.002_f64.ln()) * rng.gen::<f64>()).exp();
+        //         (a, eta)
+        //     })
+        //     .collect();
+
+        let pts = include!("total_rate_test.in");
 
         let pts: Vec<_> = pool.install(|| {
             pts.into_par_iter()
-                .filter(|(a, eta)| {
+                .filter(|(a, eta, _)| {
                     !rate_too_small(*a, *eta)
                 })
-                .map(|(a, eta)| {
-                    let target = if a < 5.0 {
-                        rate_by_summation(a, eta).0
-                    } else {
-                        rate_by_integration(a, eta).0
-                    };
+                .map(|(a, eta, target)| {
+                    // let target = if a < 5.0 {
+                    //     rate_by_summation(a, eta).0
+                    // } else {
+                    //     rate_by_integration(a, eta).0
+                    // };
                     let value = rate(a, eta).unwrap();
                     let error = (target - value) / target;
-                    ///println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
-                    println!("\t({:.12e}, {:.12e}, {:.12e}),", a, eta, target);
+                    println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
+                    //println!("\t({:.12e}, {:.12e}, {:.12e}),", a, eta, target);
                     (a, eta, target, value, error)
                 })
                 .collect()
@@ -789,6 +791,26 @@ mod tests {
         let filename = format!("output/nbw_lp_rate_error.dat");
         let mut file = File::create(&filename).unwrap();
         for (a, eta, target, value, error) in &pts {
+            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
+        }
+    }
+
+    #[test]
+    fn slice_total_rate() {
+        let a = 1.5;
+        let (eta_min, eta_max) = (0.03_f64, 2.0_f64);
+        let filename = format!("output/nbw_lp_rate_error_slice.dat");
+        let mut file = File::create(&filename).unwrap();
+
+        for i in 0..1000 {
+            let eta = (eta_min.ln() + (i as f64) * (eta_max.ln() - eta_min.ln()) / 1000.0).exp();
+            let target = if a < 5.0 {
+                rate_by_summation(a, eta).0
+            } else {
+                rate_by_integration(a, eta).0
+            };
+            let value = rate(a, eta).unwrap();
+            let error = (target - value) / target;
             writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
         }
     }
@@ -852,8 +874,8 @@ mod tests {
 
     #[test]
     fn create_rate_tables() {
-        let do_mid_range = false;
-        let do_high_range = true;
+        let do_mid_range = true;
+        let do_high_range = false;
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
@@ -869,7 +891,7 @@ mod tests {
             const LN_MAX_ETA_PRIME: f64 = consts::LN_2; // 2.0
             const A_DENSITY: usize = 20; // points per order of magnitude
             const ETA_PRIME_DENSITY: usize = 4; // points per harmonic step
-            const N_COLS: usize = 29; // points in a0
+            const N_COLS: usize = 36; // points in a0
             const N_ROWS: usize = 157; // points in eta_prime
 
             let mut pts = vec![];
