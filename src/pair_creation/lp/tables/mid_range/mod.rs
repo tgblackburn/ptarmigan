@@ -55,33 +55,6 @@ fn interpolate_in_eta_prime(eta_prime: f64, ia: usize) -> f64 {
     alpha * (eta_prime - lower.0).powf(m) + lower.1
 }
 
-#[allow(unused)]
-fn interpolate_in_eta_prime_envelope(eta_prime: f64, ia: usize) -> f64 {
-    use total::*;
-
-    // eta' = 2 / (1 + i/r)
-    let ie = (ETA_PRIME_DENSITY * (LN_MAX_ETA_PRIME.exp() / eta_prime - 1.0)) as usize;
-
-    // fit g(x) exp(-C/x) between harmonics
-    // remember increasing ie reduces eta
-    let (upper, lower) = {
-        let index = ie / (ETA_PRIME_DENSITY as usize);
-        let index = (ETA_PRIME_DENSITY as usize) * index; // index of lower bdy
-        (
-            (2.0 / (1.0 + (index as f64) / ETA_PRIME_DENSITY), TABLE[index][ia]),
-            (2.0 / (1.0 + ((index + 4) as f64) / ETA_PRIME_DENSITY), TABLE[index+4][ia]),
-        )
-    };
-
-    // need something like g(x) exp(-C/x) + delta(x), where delta = 0 at bdys
-    let envelope = {
-        let weight = (eta_prime - lower.0) / (upper.0 - lower.0);
-        (lower.1 * lower.0 * (1.0 - weight) + upper.1 * upper.0 * weight) / eta_prime
-    };
-
-    envelope
-}
-
 pub fn interpolate(a: f64, eta: f64) -> f64 {
     use total::*;
     let ia = ((a.ln() - LN_MIN_A) / LN_A_STEP) as usize;

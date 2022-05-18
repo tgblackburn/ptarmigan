@@ -705,47 +705,6 @@ mod tests {
     }
 
     #[test]
-    fn mid_range_total_rate() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-
-        let num: usize = std::env::var("RAYON_NUM_THREADS")
-            .map(|s| s.parse().unwrap_or(1))
-            .unwrap_or(1);
-
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num)
-            .build()
-            .unwrap();
-
-        let pts: Vec<_> = (0..10_000)
-            .map(|_i| {
-                let a = (0.05_f64.ln() + (1_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
-                let eta = (0.1_f64.ln() + (1.0_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
-                (a, eta)
-            })
-            .collect();
-
-        let pts: Vec<_> = pool.install(|| {
-            pts.into_par_iter()
-                .filter(|(a, eta)| !rate_too_small(*a, *eta) && eta / (1.0 + 0.5 * a * a) > 0.1)
-                .map(|(a, eta)| {
-                    let (target, _) = rate_by_summation(a, eta);
-                    let value = rate(a, eta).unwrap();
-                    let error = (target - value) / target;
-                    println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
-                    (a, eta, target, value, error)
-                })
-                .collect()
-            });
-
-        let filename = format!("output/nbw_lp_mid_range_rate_error.dat");
-        let mut file = File::create(&filename).unwrap();
-        for (a, eta, target, value, error) in &pts {
-            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
-        }
-    }
-
-    #[test]
     fn total_rate() {
         // let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
@@ -788,31 +747,44 @@ mod tests {
                 .collect()
             });
 
-        let filename = format!("output/nbw_lp_rate_error.dat");
-        let mut file = File::create(&filename).unwrap();
-        for (a, eta, target, value, error) in &pts {
-            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
-        }
+        let rms_error: f64 = pts.iter()
+            .fold(0_f64, |acc, (_, _, _, _, error)| acc.hypot(*error));
+        let rms_error = rms_error / (pts.len() as f64);
+
+        // let filename = format!("output/nbw_lp_rate_error.dat");
+        // let mut file = File::create(&filename).unwrap();
+        // for (a, eta, target, value, error) in &pts {
+        //     writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
+        // }
+
+        println!("=> rms error = {:.3}%", 100.0 * rms_error);
+        assert!(rms_error < 0.01);
     }
 
     #[test]
     fn slice_total_rate() {
-        let a = 1.5;
+        let a = 1.0;
         let (eta_min, eta_max) = (0.03_f64, 2.0_f64);
-        let filename = format!("output/nbw_lp_rate_error_slice.dat");
-        let mut file = File::create(&filename).unwrap();
 
-        for i in 0..1000 {
-            let eta = (eta_min.ln() + (i as f64) * (eta_max.ln() - eta_min.ln()) / 1000.0).exp();
-            let target = if a < 5.0 {
-                rate_by_summation(a, eta).0
-            } else {
-                rate_by_integration(a, eta).0
-            };
+        let mut rms_error = 0_f64;
+        let mut count = 0;
+        for i in 0..100 {
+            let eta = (eta_min.ln() + (i as f64) * (eta_max.ln() - eta_min.ln()) / 100.0).exp();
+            if !tables::mid_range::contains(a, eta) {
+                continue;
+            }
+            let target = rate_by_summation(a, eta).0;
             let value = rate(a, eta).unwrap();
             let error = (target - value) / target;
-            writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", a, eta, target, value, error).unwrap();
+            rms_error = rms_error.hypot(error);
+            count +=1;
+            println!("{:.6e} {:.6e} {:.6e} {:.6e} {:.3}%", a, eta, target, value, 100.0 * error);
+            assert!(error.abs() < 0.1);
         }
+
+        let rms_error = rms_error / (count as f64);
+        println!("=> rms error = {:.3}%", 100.0 * rms_error);
+        assert!(rms_error < 0.01);
     }
 
     #[test]
