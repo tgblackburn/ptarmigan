@@ -318,8 +318,8 @@ fn sum_limits(a: f64, eta: f64) -> (i32, i32) {
     let range = if a < 1.0 {
         2.0 + (2.0 + 20.0 * a * a) * (-(0.5 * eta).sqrt()).exp()
     } else {
-        // if a < 10
-        30.0 * (a * a + eta) * (-(1.5 * eta).sqrt()).exp()
+        // if a < 20
+        3.0 + 2.8 * a.powf(8.0/3.0) / eta.cbrt() + 0.25 * a.powi(3) * eta.sqrt()
     };
 
     let test = 0.25 - (1.0 + 0.5 * a * a) / (2.0 * (n_min as f64) * eta);
@@ -789,16 +789,19 @@ mod tests {
 
     #[test]
     fn summation_limits() {
-        let max_error = 1.0e-4;
+        let max_error = 1.0e-3;
 
         let filename = format!("output/nbw_lp_rates.dat");
         let mut file = File::create(&filename).unwrap();
 
-        for a in [0.1, 0.2, 0.3, 0.5, 0.7, 1.0].iter() { //[1.0, 2.0, 3.0, 5.0, 10.0].iter() {
-            for eta in [0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 1.0].iter() {
-                // if a * eta < 0.02 {
-                //     continue;
-                // }
+        let filename = format!("output/nbw_harmonic_limits.dat");
+        let mut file2 = File::create(&filename).unwrap();
+
+        for a in [0.3, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0, 15.0, 20.0].iter() { //[1.0, 2.0, 3.0, 5.0, 10.0].iter() {
+            for eta in [1.0, 0.3, 0.1, 0.03, 0.01].iter() {
+                if rate_too_small(*a, *eta) {
+                    continue;
+                }
 
                 let n_min = (2.0f64 * (1.0 + 0.5 * a * a) / eta).ceil() as i32;
                 //let n_stop = n_min + ((30.0 * (a * a + eta) * (-(1.5 * eta).sqrt()).exp()) as i32);
@@ -810,13 +813,22 @@ mod tests {
                 loop {
                     let rate = partial_rate(n, *a, *eta);
                     total += 0.5 * (rate + prev) * (step as f64);
-                    prev = rate;
-                    println!("n = {:>4}, rate = {:>9.3e}, total = {:>9.3e}", n, rate, total);
+
+                    // linear extrapolation: estimate fraction left to sum
+                    let frac_remaining = 0.5 * (step as f64) * rate * rate / (total * (prev - rate));
+                    let frac_remaining = if frac_remaining < 0.0 || frac_remaining > 1.0 {
+                        1.0
+                    } else {
+                        frac_remaining
+                    };
+
+                    println!("n = {:>4}, rate = {:>9.3e}, total = {:>9.3e}, estd frac left = {:>9.3}%", n, rate, total, 100.0 * frac_remaining);
                     writeln!(file, "{:.6e} {:.6e} {} {:.6e} {:.6e}", a, eta, n, rate, total).unwrap();
 
-                    // if n > n_stop {
-                    //     break;
-                    // }
+                    if frac_remaining < max_error {
+                        writeln!(file2, "{:.6e} {:.6e} {} {} {}", a, eta, n_min, n, n - n_min).unwrap();
+                        break;
+                    }
 
                     if n - n_min > 10_000 {
                         step = 3000;
@@ -834,11 +846,8 @@ mod tests {
                         step = 3;
                     }
 
+                    prev = rate;
                     n += step;
-
-                    if rate / total < max_error {
-                        break;
-                    }
                 }
             }
         }
@@ -945,7 +954,7 @@ mod tests {
         if do_high_range {
             const LN_MIN_A: f64 = -consts::LN_10; // 0.1
             const A_DENSITY: usize = 20; // points per order of magnitude
-            const N_COLS: usize = 2 * A_DENSITY + 1; // points in a0, a <= 10
+            const N_COLS: usize = 2 * A_DENSITY + 1 + 7; // points in a0, a <= 20
 
             const MIN_ETA: f64 = 0.002;
             const ETA_DENSITY: usize = 20;
