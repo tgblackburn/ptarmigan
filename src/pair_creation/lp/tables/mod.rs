@@ -10,7 +10,7 @@ mod total;
 mod cdf;
 
 pub fn contains(a: f64, eta: f64) -> bool {
-    a.ln() >= total::LN_MIN_A && a < 10.0 && eta.ln() >= total::LN_MIN_ETA && eta < 2.0
+    a.ln() >= total::LN_MIN_A && a < 20.0 && eta.ln() >= total::LN_MIN_ETA && eta < 2.0
 }
 
 #[allow(unused_parens)]
