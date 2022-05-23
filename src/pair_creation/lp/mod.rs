@@ -17,17 +17,17 @@ mod tables;
 /// but implemented as a table lookup.
 #[allow(unused_parens)]
 pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
-    if rate_too_small(a, eta) {
-        println!("rate too small at {} {}", a, eta);
-        Some(0.0)
+    let interp = if rate_too_small(a, eta) {
+        0.0
     } else if tables::mid_range::contains(a, eta) {
-        Some(tables::mid_range::interpolate(a, eta))
+        tables::mid_range::interpolate(a, eta)
     } else if tables::contains(a, eta) {
-        Some(tables::interpolate(a, eta))
+        tables::interpolate(a, eta)
     } else {
-        println!("out of bounds at {} {}", a, eta);
-        Some(0.0)
-    }
+       0.0
+    };
+
+    Some(2.0 * interp)
 }
 
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
@@ -38,6 +38,8 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
 
     let n = if tables::mid_range::contains(a, eta) {
         tables::mid_range::invert(a, eta, frac)
+    } else if tables::contains(a, eta) {
+        tables::invert(a, eta, frac)
     } else {
         panic!("out of bounds at {} {}", a, eta);
     };
@@ -65,7 +67,7 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
     };
 
     // Fix s, which is [1/2, s_max] at the moment
-    let s = match rng.gen_range(0, 1) {
+    let s = match rng.gen_range(0, 2) {
         0 => 1.0 - s,
         1 => s,
         _ => unreachable!(),
@@ -558,12 +560,11 @@ static GAUSS_8_WEIGHTS: [f64; 8] = [
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
-    use rand_xoshiro::*;
     use rayon::prelude::*;
     use super::*;
 
     #[test]
+    #[ignore]
     fn integration() {
         let (n, a, eta): (i32, f64, f64) = (21, 3.0, 1.0);
         let n_min = (2.0 * (1.0 + 0.5 * a * a) / eta).ceil() as i32;
@@ -676,6 +677,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn sum_vs_integral() {
         let pts = [
             (5.0, 1.0, 1.301054231639e-1),
@@ -704,8 +706,6 @@ mod tests {
 
     #[test]
     fn total_rate() {
-        // let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
             .unwrap_or(1);
@@ -715,14 +715,6 @@ mod tests {
             .build()
             .unwrap();
 
-        // let pts: Vec<_> = (0..1000)
-        //     .map(|_i| {
-        //         let a = (0.05_f64.ln() + (10_f64.ln() - 0.05_f64.ln()) * rng.gen::<f64>()).exp();
-        //         let eta = (0.002_f64.ln() + (2.0_f64.ln() - 0.002_f64.ln()) * rng.gen::<f64>()).exp();
-        //         (a, eta)
-        //     })
-        //     .collect();
-
         let pts = include!("total_rate_test.in");
 
         let pts: Vec<_> = pool.install(|| {
@@ -731,15 +723,9 @@ mod tests {
                     !rate_too_small(*a, *eta)
                 })
                 .map(|(a, eta, target)| {
-                    // let target = if a < 5.0 {
-                    //     rate_by_summation(a, eta).0
-                    // } else {
-                    //     rate_by_integration(a, eta).0
-                    // };
                     let value = rate(a, eta).unwrap();
                     let error = (target - value) / target;
                     println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
-                    //println!("\t({:.12e}, {:.12e}, {:.12e}),", a, eta, target);
                     (a, eta, target, value, error)
                 })
                 .collect()
@@ -786,6 +772,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn summation_limits() {
         let max_error = 1.0e-3;
 
@@ -852,8 +839,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn create_rate_tables() {
-        let do_mid_range = true;
+        let do_mid_range = false;
         let do_high_range = false;
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")

@@ -224,18 +224,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let tracking_photons = if !using_lcfa && pol == Polarization::Linear {
-        if id == 0 {
-            println!(concat!(
-                "Warning: in LP mode, LMA rates are available only for photon emission.\n",
-                "         Pair creation will be disabled."
-            ));
-        }
-        false
-    } else {
-        tracking_photons
-    };
-
     let (focusing, waist) = input
         .read("laser:waist")
         .map(|w| (true, w))
