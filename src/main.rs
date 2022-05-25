@@ -315,6 +315,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(0.0),
+            _ => Err(e),
+        })
         .and_then(|rho| {
             if use_brem_spec {
                 eprintln!("Energy chirp ignored for bremsstrahlung photons.");
