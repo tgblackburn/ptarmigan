@@ -114,7 +114,6 @@ impl BeamBuilder {
     }
 
     pub fn with_offset(&self, offset: ThreeVector) -> Self {
-        let offset = ThreeVector::new(-offset[0], offset[1], -offset[2]);
         BeamBuilder {
             offset,
             ..*self
@@ -176,8 +175,14 @@ impl BeamBuilder {
                     Species::Photon => FourVector::lightlike(u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()),
                 };
 
-                let t = -self.initial_z;
-                let z = self.initial_z + dz;
+                let (t, z) = if self.offset[2] >= 0.0 {
+                    // beam is further away
+                    (-self.initial_z, self.initial_z + self.offset[2] + dz)
+                } else {
+                    // beam is closer to focal plane, push backwards
+                    (-self.initial_z - self.offset[2].abs(), self.initial_z + dz)
+                };
+
                 let (x, y) = if self.normally_distributed {
                     (
                         self.sigma_x * rng.sample::<f64,_>(StandardNormal),
@@ -189,8 +194,8 @@ impl BeamBuilder {
                     (r * theta.cos(), r * theta.sin())
                 };
 
+                let (x, y) = (x + self.offset[0], y + self.offset[1]);
                 let r = ThreeVector::new(x, y, z);
-                let r = r + self.offset;
                 let r = r.rotate_around_y(self.angle);
                 let r = FourVector::new(t, r[0], r[1], r[2]);
 
