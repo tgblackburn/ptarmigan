@@ -21,13 +21,13 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "angle" | "polar_angle" => Some(
             (polar_angle as ParticleOutput, Angle)
         ),
-        "px" => Some(
+        "px" | "p_x" => Some(
             (px as ParticleOutput, Momentum)
         ),
-        "py" => Some(
+        "py" | "p_y" => Some(
             (py as ParticleOutput, Momentum)
         ),
-        "pz" => Some(
+        "pz" | "p_z" => Some(
             (pz as ParticleOutput, Momentum)
         ),
         "p_perp" => Some(

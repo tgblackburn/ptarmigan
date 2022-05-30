@@ -50,7 +50,7 @@ enum OutputMode {
 }
 
 #[allow(unused)]
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool, t_stop: f64) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -60,7 +60,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
             Species::Electron | Species::Positron => {
-                while field.contains(pt.position()) {
+                while field.contains(pt.position()) && pt.time() < t_stop {
                     let (r, mut u, dt_actual) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
@@ -98,7 +98,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 
             Species::Photon => {
                 let mut has_decayed = false;
-                while field.contains(pt.position()) && !has_decayed && tracking_photons {
+                while field.contains(pt.position()) && pt.time() < t_stop && !has_decayed && tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
@@ -200,6 +200,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
     let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
+    let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
 
     let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
@@ -300,6 +301,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         1.0
     };
+
+    let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(0.0),
+            _ => Err(e),
+        })
+        .and_then(|rho| {
+            if use_brem_spec {
+                eprintln!("Energy chirp ignored for bremsstrahlung photons.");
+                Ok(0.0)
+            } else if rho.abs() > 1.0 {
+                eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
+                Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
+            } else {
+                Ok(rho)
+            }
+        })
+        ?;
 
     let offset = input.read::<Vec<f64>,_>("beam:offset")
         // if missing, assume to be (0,0,0)
@@ -504,6 +523,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_divergence(rms_div)
         .with_collision_angle(angle)
         .with_offset(offset)
+        .with_energy_chirp(energy_chirp)
         .with_length(length);
 
     let builder = if normally_distributed {
@@ -569,7 +589,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons, t_stop))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!(

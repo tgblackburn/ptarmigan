@@ -235,6 +235,11 @@ impl Particle {
         self.r[1]
     }
 
+    /// Returns the lab time of the particle, in seconds
+    pub fn time(&self) -> f64 {
+        self.r[1][0] / SPEED_OF_LIGHT
+    }
+
     /// Loads something that will be tracked with the particle
     /// and may be read by the output routines.
     /// Overwrites whatever has already been written.
