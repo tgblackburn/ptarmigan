@@ -440,10 +440,19 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
     (integral, max)
 }
 
+/// Returns the largest harmonic that contributes to the total rate.
+#[allow(unused)]
+fn sum_limit(a: f64, eta: f64) -> i32 {
+    let m = 3.0 - 0.4 * eta.powf(0.25);
+    let n_max = 6.0 + 2.5 * a.powf(m);
+    // let n_max = 5.0 * (1.0 + 2.0 * a * a);
+    n_max.ceil() as i32
+}
+
 /// Returns the total rate of nonlinear Compton scattering.
 /// Equivalent to calling
 /// ```
-/// let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+/// let nmax = sum_limit(a, eta);
 /// let rate = (1..=nmax).map(|n| partial_rate(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
@@ -554,7 +563,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// the cdf is calculated by integrating and summing the double-differential rates.
 #[cfg(feature = "explicit-harmonic-summation")]
 fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
-    let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+    let nmax = sum_limit(a, eta);
     let target = frac * rate(a, eta).unwrap();
     // println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
     let mut cumsum: f64 = 0.0;
@@ -649,7 +658,7 @@ mod tests {
         for _i in 0..100 {
             let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
             let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
-            let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let n_max = sum_limit(a, eta);
             let harmonics: Vec<_> = if n_max > 200 {
                 (0..=10).map(|i| (2_f64.ln() + 0.1 * (i as f64) * ((n_max as f64).ln() - 2_f64.ln())).exp() as i32).collect()
             } else if n_max > 10 {
@@ -680,7 +689,7 @@ mod tests {
     fn find_rate_max() {
         let a = 15.0;
         let eta = 1.0;
-        let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+        let n_max = sum_limit(a, eta);
         let nodes: Vec<f64> = (1..100).map(|i| (i as f64) / 100.0).collect();
         let pts: Vec<_> =
             //(1..n_max)
@@ -886,7 +895,7 @@ mod tests {
         pool.install(|| {
             pts.into_par_iter().for_each(|(a, eta)| {
                 if let Some(value) =  rate(a, eta) {
-                    let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+                    let n_max = sum_limit(a, eta);
                     let target = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
                     let error = (target - value).abs() / target;
                     println!(
@@ -915,7 +924,7 @@ mod tests {
 
         for (a, eta) in &pts {
             println!("At a = {}, eta = {}:", a, eta);
-            let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let nmax = sum_limit(*a, *eta);
             let nmax = nmax.max(19);
             let rates: Vec<f64> = (1..=nmax).map(|n| partial_rate(n, *a, *eta).0).collect();
             let total: f64 = rates.iter().sum();
@@ -1012,20 +1021,62 @@ mod tests {
     #[test]
     #[ignore]
     fn harmonic_limit() {
-        let a_s: [f64; 9] = [0.1, 0.2, 0.5, 0.7, 1.0, 2.0, 5.0, 7.0, 10.0];
-        let eta = 0.001;
-        for &a in &a_s {
-            let mut sum = 0.0;
-            let mut n = 1;
-            let nstop = loop {
-                let (rate, _) = partial_rate(n, a, eta);
-                sum += rate;
-                if rate / sum < 1.0e-4 {
-                    break n;
+        let max_error = 1.0e-3;
+
+        let filename = format!("output/nlc_lp_rates.dat");
+        let mut file = File::create(&filename).unwrap();
+
+        let filename = format!("output/nlc_harmonic_limits.dat");
+        let mut file2 = File::create(&filename).unwrap();
+
+        for a in [0.1, 0.3, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0].iter() {
+            for eta in [2.0, 1.0, 0.3, 0.1, 0.03, 0.01, 0.001].iter() {
+                let n_min = 1;
+                let mut n = n_min;
+                let mut total = 0.0;
+                let mut step = 1;
+                let mut prev = 0.0;
+
+                loop {
+                    let (rate, _) = partial_rate(n, *a, *eta);
+                    total += 0.5 * (rate + prev) * (step as f64);
+
+                    // linear extrapolation: estimate fraction left to sum
+                    let frac_remaining = 0.5 * (step as f64) * rate * rate / (total * (prev - rate));
+                    let frac_remaining = if frac_remaining < 0.0 || frac_remaining > 1.0 {
+                        1.0
+                    } else {
+                        frac_remaining
+                    };
+
+                    println!("n = {:>4}, rate = {:>9.3e}, total = {:>9.3e}, estd frac left = {:>9.3}%", n, rate, total, 100.0 * frac_remaining);
+                    writeln!(file, "{:.6e} {:.6e} {} {:.6e} {:.6e}", a, eta, n, rate, total).unwrap();
+
+                    if frac_remaining < max_error {
+                        writeln!(file2, "{:.6e} {:.6e} {}", a, eta, n).unwrap();
+                        break;
+                    }
+
+                    if n - n_min > 10_000 {
+                        step = 1500;
+                    } else if n - n_min > 3000 {
+                        step = 500;
+                    } else if n - n_min > 1000 {
+                        step = 150;
+                    } else if n - n_min > 300 {
+                        step = 50;
+                    } else if n - n_min > 100 {
+                        step = 15;
+                    } else if n - n_min > 30 {
+                        step = 5;
+                    } else if n - n_min > 10 {
+                        step = 2;
+                    }
+
+                    prev = rate;
+                    n += step;
                 }
-                n += 1;
-            };
-            println!("a = {:.3e}, stopped at n = {}", a, nstop);
+            }
         }
     }
 
@@ -1037,8 +1088,8 @@ mod tests {
         // 20, 20, 60, 60
         const A_DENSITY: usize = 20; // points per order of magnitude
         const ETA_DENSITY: usize = 20;
-        const N_COLS: usize = 60; // pts in a0 direction
-        const N_ROWS: usize = 60; // pts in eta direction
+        const N_COLS: usize = 61; // pts in a0 direction
+        const N_ROWS: usize = 61; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
@@ -1057,7 +1108,7 @@ mod tests {
             let eta = LOW_ETA_LIMIT * 10.0f64.powf((i as f64) / (ETA_DENSITY as f64));
             for j in 0..N_COLS {
                 let a = LOW_A_LIMIT * 10.0f64.powf((j as f64) / (A_DENSITY as f64));
-                let n_max = (5.0 * (1.0 + 2.0 * a * a)).ceil() as i32;
+                let n_max = sum_limit(a, eta);
                 pts.push((i, j, a, eta, n_max));
             }
         }

@@ -37,8 +37,7 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> f64 {
     2.0 * rate
 }
 
-pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f64> {
-    let eta = k * ell;
+pub fn rate(a: f64, eta: f64) -> Option<f64> {
     let n = (2.0  / eta).ceil() as i32;
     let f = if a < 0.02 {
         0.0
@@ -46,11 +45,10 @@ pub fn probability(ell: FourVector, k: FourVector, a: f64, dt: f64) -> Option<f6
         partial_rate(n, a, eta)
     };
     assert!(f.is_finite());
-    Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
+    Some(f)
 }
 
-pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> (i32, FourVector) {
-    let eta: f64 = k * ell;
+pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R) -> (i32, f64, f64) {
     let j = (2.0 / eta).ceil();
     let n = j as i32;
 
@@ -70,30 +68,9 @@ pub fn generate<R: Rng>(ell: FourVector, k: FourVector, a: f64, rng: &mut R) -> 
         }
     };
 
-    // Scattering momentum (/m) and angles in zero momentum frame
-    // if ell_perp = 0, (q_perp/m)^2 = 2 n eta s (1-s) - 1
-    let e_zmf = (0.5 * j * eta).sqrt();
-    let p_zmf = (0.5 * j * eta - 1.0).sqrt();
-    let cos_theta_zmf = (1.0 - 2.0 * s) * e_zmf / p_zmf;
     let cphi_zmf = 2.0 * consts::PI * rng.gen::<f64>();
 
-    assert!(cos_theta_zmf <= 1.0);
-    assert!(cos_theta_zmf >= -1.0);
-
-    // Four-velocity of ZMF (normalized)
-    let u_zmf: FourVector = (ell + j * k) / (ell + j * k).norm_sqr().sqrt();
-
-    // Unit vectors pointed parallel to gamma-ray momentum in ZMF
-    // and perpendicular to it
-    let along = -ThreeVector::from(ell.boost_by(u_zmf)).normalize();
-    let perp = along.orthogonal().rotate_around(along, cphi_zmf);
-
-    // Construct positron momentum and transform back to lab frame
-    let q: ThreeVector = p_zmf * (cos_theta_zmf * along + (1.0 - cos_theta_zmf.powi(2)).sqrt() * perp);
-    let q = FourVector::lightlike(q[0], q[1], q[2]).with_sqr(1.0);
-    let q = q.boost_by(u_zmf.reverse());
-
-    (n, q)
+    (n, s, cphi_zmf)
 }
 
 #[cfg(test)]
