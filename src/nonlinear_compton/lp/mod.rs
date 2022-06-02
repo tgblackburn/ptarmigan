@@ -964,6 +964,9 @@ mod tests {
                 .zip(counts.iter()
                 .zip(expected.iter()))
             {
+                if *e < 1.0e-3 {
+                    continue;
+                }
                 let error = (c - e).abs() / e;
                 println!("\tExpected = {:.3e}, got {:.3e} [{:.1}%] for n in {:?}", e, c, 100.0 * error, b);
                 assert!(error < 5.0e-2);
