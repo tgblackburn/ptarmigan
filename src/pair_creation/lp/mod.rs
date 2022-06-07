@@ -724,6 +724,7 @@ mod tests {
                     !rate_too_small(*a, *eta)
                 })
                 .map(|(a, eta, target)| {
+                    let target = 2.0 * target;
                     let value = rate(a, eta).unwrap();
                     let error = (target - value) / target;
                     println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
@@ -758,7 +759,7 @@ mod tests {
             if !tables::mid_range::contains(a, eta) {
                 continue;
             }
-            let target = rate_by_summation(a, eta).0;
+            let target = 2.0 * rate_by_summation(a, eta).0;
             let value = rate(a, eta).unwrap();
             let error = (target - value) / target;
             rms_error = rms_error.hypot(error);
