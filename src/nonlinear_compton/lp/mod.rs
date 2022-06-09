@@ -47,47 +47,6 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
     (-gamma[0] * gamma[0] - a * a * (1.0 + 0.5 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])) / (2.0 * consts::PI)
 }
 
-/// Returns the double-differential rate to emit E- and B-polarized photons, respectively.
-/// Result valid only for 0 < s < s_max and 0 < theta < pi/2.
-/// Multiply by alpha / eta to get dP/(ds dtheta dphase)
-fn double_diff_partial_rate_pol_resolved(a: f64, eta: f64, s: f64, theta: f64, dj: &mut DoubleBessel) -> (f64, f64) {
-    let n = dj.n();
-
-    // opposite sign! cos theta > 0 in 0 < theta < pi/2
-    let x = {
-        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
-        let wn = s / (sn * (1.0 - s));
-        let wn = wn.min(1.0);
-        2.0 * (n as f64) * a * theta.cos() * (wn * (1.0 - wn)).sqrt() / (1.0 + 0.5 * a * a).sqrt()
-    };
-
-    let y = a * a * s / (8.0 * eta * (1.0 - s));
-
-    let j = dj.evaluate(x, y);
-
-    let gamma = if n % 2 == 0 {
-        // j[1] and j[3] change sign
-        [j[2], -0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
-    } else {
-        // j[0], j[2] and j[4] change sign
-        [-j[2], 0.5 * (j[1] + j[3]), -0.25 * (j[0] + 2.0 * j[2] + j[4])]
-    };
-
-    let parallel = a * a * (
-        (0.5 - (n as f64) / (4.0 * y) + (-x / (8.0 * y)).powi(2)) * gamma[0] * gamma[0]
-        - (1.0 + 0.25 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])
-    ) / (2.0 * consts::PI);
-
-    let perp = (
-        -gamma[0] * gamma[0] - a * a * (
-            (0.5 - (n as f64) / (4.0 * y) + (-x / (8.0 * y)).powi(2)) * gamma[0] * gamma[0]
-            + 0.25 * s * s / (1.0 - s) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])
-        )
-    ) / (2.0 * consts::PI);
-
-    (parallel, perp)
-}
-
 /// Returns the largest value of the double-differential rate, multiplied by a small safety factor.
 fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> f64 {
     let n = dj.n();
@@ -589,6 +548,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
+#[allow(non_snake_case, unused_parens)]
 pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
     let n = fixed_n.unwrap_or_else(|| {
         let frac = rng.gen::<f64>();
@@ -621,14 +581,6 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
 
     // println!("\t... got s = {:.3e}, theta = {:.3e}", s, theta);
 
-    // Pick photon polarization
-    let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
-    let pol = if rng.gen::<f64>() < par / (par + perp) {
-        [1.0, 1.0, 0.0, 0.0].into() // along E
-    } else {
-        [1.0, -1.0, 0.0, 0.0].into() // along B
-    };
-
     // Fix range of theta, which is [0, pi/2] at the moment
     let quadrant = rng.gen_range(0, 4);
     let theta = match quadrant {
@@ -638,6 +590,53 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
         3 => 2.0 * consts::PI - theta,
         _ => unreachable!(),
     };
+
+    // Generate Stokes parameters for emitted photon
+
+    let x = {
+        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+        let wn = s / (sn * (1.0 - s));
+        let wn = wn.min(1.0);
+        -2.0 * (n as f64) * a * theta.cos() * (wn * (1.0 - wn)).sqrt() / (1.0 + 0.5 * a * a).sqrt()
+    };
+
+    let y = a * a * s / (8.0 * eta * (1.0 - s));
+
+    let j = dj.evaluate(x.abs(), y); // n-2, n-1, n, n+1, n+2
+
+    let A = if x > 0.0 {
+        [j[2], 0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
+        // or x is negative, J_n(-|x|, y) = (-1)^n J_n(|x|, y)
+    } else if n % 2 == 0 {
+        // j[1] and j[3] change sign
+        [j[2], -0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    } else {
+        // j[0], j[2] and j[4] change sign
+        [-j[2], 0.5 * (j[1] + j[3]), -0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    };
+
+    let pol: StokesVector = {
+        let u = (2.0 * (n as f64) * eta * (1.0 - s) / s - (1.0 + 0.5 * a * a)).sqrt();
+
+        let xi_0 = (
+            (1.0 - s + 1.0 / (1.0 - s)) * (A[1].powi(2) - A[0] * A[2])
+            - 2.0 * (A[0] / a).powi(2)
+        );
+
+        let xi_1 = (
+            2.0 * (A[1].powi(2) - A[0] * A[2])
+            - 2.0 * (1.0 + 2.0 * u * u * theta.sin().powi(2)) * (A[0] / a).powi(2)
+        );
+
+        let xi_2 = (
+            2.0 * (u * A[0] / a).powi(2) * (2.0 * theta).sin()
+            + 4.0 * u * A[0] * A[1] * theta.sin() / a
+        );
+
+        [1.0, xi_1 / xi_0, xi_2 / xi_0, 0.0].into()
+    };
+
+    // assert!(pol.dop() <= 1.0);
 
     (n, s, theta, pol)
 }
@@ -754,13 +753,7 @@ mod tests {
                 if rate > max {
                     max = rate;
                 }
-                let (par, perp) = double_diff_partial_rate_pol_resolved(a, eta, s, theta, &mut dj);
-                if rate > 0.0 {
-                    let error = (rate - (par + perp)).abs() / rate;
-                    assert!(error < 1.0e-9);
-                    assert!(par < rate);
-                }
-                writeln!(file, "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}", s, theta, rate, par, perp).unwrap();
+                writeln!(file, "{:.6e} {:.6e} {:.6e}", s, theta, rate).unwrap();
             }
         }
 
