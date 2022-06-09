@@ -1,5 +1,5 @@
-pub const LN_MIN_A: f64 = -3.223619130192e0;
-pub const LN_MAX_ETA_PRIME: f64 = 6.931471805599e-1;
+pub const LN_MIN_A: f64 = -7.0 * std::f64::consts::LN_10 / 5.0;
+pub const LN_MAX_ETA_PRIME: f64 = std::f64::consts::LN_2;
 pub const LN_MIN_ETA_PRIME: f64 = -2.995732273554e0;
 pub const LN_A_STEP: f64 = 1.151292546497e-1;
 pub const ETA_PRIME_DENSITY: f64 = 4.000000000000e0;

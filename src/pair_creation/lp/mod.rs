@@ -561,6 +561,7 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use rayon::prelude::*;
+    use rand_xoshiro::*;
     use super::*;
 
     #[test]
@@ -715,7 +716,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let pts = include!("total_rate_test.in");
+        let pts = include!("test/total_rate.in");
 
         let pts: Vec<_> = pool.install(|| {
             pts.into_par_iter()
@@ -723,6 +724,7 @@ mod tests {
                     !rate_too_small(*a, *eta)
                 })
                 .map(|(a, eta, target)| {
+                    let target = 2.0 * target;
                     let value = rate(a, eta).unwrap();
                     let error = (target - value) / target;
                     println!("a = {:.6e}, eta = {:.6e}, target = {:.6e}, value = {:.6e}, err = {:.2}%", a, eta, target, value, 100.0 * error);
@@ -757,7 +759,7 @@ mod tests {
             if !tables::mid_range::contains(a, eta) {
                 continue;
             }
-            let target = rate_by_summation(a, eta).0;
+            let target = 2.0 * rate_by_summation(a, eta).0;
             let value = rate(a, eta).unwrap();
             let error = (target - value) / target;
             rms_error = rms_error.hypot(error);
@@ -769,6 +771,106 @@ mod tests {
         let rms_error = rms_error / (count as f64);
         println!("=> rms error = {:.3}%", 100.0 * rms_error);
         assert!(rms_error < 0.01);
+    }
+
+    #[test]
+    fn spectrum_0p5() {
+        let a = 0.5_f64;
+        let eta = 0.2_f64;
+        let mut counts = [0.0; 161];
+        let ds = 0.005;
+        let s_min = 0.1 - 0.5 * ds;
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _ in 0..100_000 {
+            let (_, s, _) = sample(a, eta, &mut rng);
+            let index = ((s - s_min) / ds) as usize;
+            if index < counts.len() {
+                counts[index] += 1.0;
+            }
+        }
+
+        let theory = include!("test/spectrum_0.5.in");
+        let target = ds * theory.iter().map(|r| r[1]).sum::<f64>();
+        let rate = (crate::constants::ALPHA_FINE / eta) * rate(a, eta).unwrap_or(0.0);
+        let error = (target - rate) / target;
+        assert!(error.abs() < 0.05);
+
+        println!("a = {}, eta = {}:\n\ttotal rate: target = {:.3e}, predicted = {:.3e}, error = {:.2}%", a, eta, target, rate, 100.0 * error);
+
+        let mut valid = 0;
+        let mut rms_error = 0_f64;
+        let mut avg_error = 0_f64;
+
+        for (ct, th) in counts.iter().zip(theory.iter()) {
+            if *ct < 10.0 {
+                // fewer than ten samples per cell
+                continue;
+            }
+            let dn_ds = rate * ct / (1.0e5 * ds);
+            let error = (th[1] - dn_ds) / th[1];
+            valid += 1;
+            rms_error = rms_error.hypot(error);
+            avg_error += error;
+            // println!("{:.3e} {:.6e} {:.6e} {:.2}%", th[0], th[1], dn_ds, 100.0 * error);
+        }
+
+        let rms_error = rms_error / (valid as f64);
+        let avg_error = avg_error / (valid as f64);
+
+        println!("\tspectrum: rms error = {:.3}%, avg error = {:.3}%", 100.0 * rms_error, 100.0 * avg_error);
+        assert!(rms_error < 0.05);
+    }
+
+    #[test]
+    fn spectrum_2p5() {
+        let a = 2.5_f64;
+        let eta = 0.2_f64;
+        let mut counts = [0.0; 161];
+        let ds = 0.005;
+        let s_min = 0.1 - 0.5 * ds;
+
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _ in 0..100_000 {
+            let (_, s, _) = sample(a, eta, &mut rng);
+            let index = ((s - s_min) / ds) as usize;
+            if index < counts.len() {
+                counts[index] += 1.0;
+            }
+        }
+
+        let theory = include!("test/spectrum_2.5.in");
+        let target = ds * theory.iter().map(|r| r[1]).sum::<f64>();
+        let rate = (crate::constants::ALPHA_FINE / eta) * rate(a, eta).unwrap_or(0.0);
+        let error = (target - rate) / target;
+        assert!(error.abs() < 0.05);
+
+        println!("a = {}, eta = {}:\n\ttotal rate: target = {:.3e}, predicted = {:.3e}, error = {:.2}%", a, eta, target, rate, 100.0 * error);
+
+        let mut valid = 0;
+        let mut rms_error = 0_f64;
+        let mut avg_error = 0_f64;
+
+        for (ct, th) in counts.iter().zip(theory.iter()) {
+            if *ct < 10.0 {
+                // fewer than ten samples per cell
+                continue;
+            }
+            let dn_ds = rate * ct / (1.0e5 * ds);
+            let error = (th[1] - dn_ds) / th[1];
+            valid += 1;
+            rms_error = rms_error.hypot(error);
+            avg_error += error;
+            // println!("{:.3e} {:.6e} {:.6e} {:.2}%", th[0], th[1], dn_ds, 100.0 * error);
+        }
+
+        let rms_error = rms_error / (valid as f64);
+        let avg_error = avg_error / (valid as f64);
+
+        println!("\tspectrum: rms error = {:.3}%, avg error = {:.3}%", 100.0 * rms_error, 100.0 * avg_error);
+        assert!(rms_error < 0.05);
     }
 
     #[test]

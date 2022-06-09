@@ -77,26 +77,40 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
         da * de,
     ];
 
-    let n_alt: f64 = index.iter()
+    let (delta, shift) = index.iter()
         .zip(weight.iter())
         .map(|(i, w)| {
-            let table = &TABLE[*i];
-            let n = if frac <= table[0][1] {
-                table[0][0] - 0.1
-            } else {
-                pwmci::invert(frac, table).unwrap().0
-            };
-            //println!("\tgot n = {}, d = {}", n, n - table[0][0]);
-            //(n - table[0][0]) * w
-            n * w
-        })
-        .sum();
+            let src = &TABLE[*i];
+            let mut table = [[0.0; 2]; 17];
 
-    let n = n_alt.ceil() as i32;
+            // Where extrapolated CDF crosses y = 0.
+            let n_zero = (src[0][0] * src[1][1] - src[1][0] * src[0][1]) / (src[1][1] - src[0][1]);
+            // let n_zero = src[0][0] - 1.0;
+            let shift = n_zero - src[0][0];
+
+            for i in 0..16 {
+                table[i+1][0] = (src[i][0] - n_zero) / (src[15][0] - n_zero);
+                table[i+1][1] = src[i][1];
+            }
+
+            let delta = pwmci::invert(frac, &table).unwrap().0;
+
+            (delta * w, shift * w)
+        })
+        .reduce(|a, b| (a.0 + b.0, a.1 + b.1))
+        .unwrap();
+
     let (n_min, n_max) = super::sum_limits(a, eta);
+    let n_zero = (n_min as f64) + shift;
+    let n = (n_zero + ((n_max as f64) - n_zero) * delta).ceil() as i32;
     if n < n_min {
-        eprintln!("pair_creation::generate failed to sample a harmonic order (a = {:.3e}, eta = {:.3e}, {} <= n < {}), falling back to {}.", a, eta, n_min, n_max, n_min);
-        n_min
+        // most probable harmonic, ish
+        let fallback = n_min + a.powf(1.1).round() as i32;
+        eprintln!(
+            "pair_creation::lp::sample unable to obtain a harmonic order in [{}, {}] at a = {:.3e}, eta = {:.3e}, falling back to {}...",
+            n_min, n_max, a, eta, fallback
+        );
+        fallback
     } else {
         n
     }
@@ -114,18 +128,23 @@ mod tests {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         let pts = [
-            (2.5, 0.1),
+            (2.5, 0.2),
+            (5.0, 0.2),
+            (11.0, 0.2),
+            (8.0, 0.05),
         ];
 
         for (a, eta) in &pts {
             let (n_min, n_max) = lp::sum_limits(*a, *eta);
-            let harmonics: Vec<_> = (n_min..=n_max).collect();
+            let harmonics: Vec<_> = ((n_min-1)..=(n_min+16)).collect();
+
             let rates: Vec<_> = harmonics.iter().map(|n| lp::partial_rate(*n, *a, *eta)).collect();
-            let total: f64 = rates.iter().sum();
+            let total: f64 = interpolate(*a, *eta);
 
             println!("a = {}, eta = {}, n = {}..{}:", a, eta, n_min, n_max);
 
             let mut counts = [0.0; 16];
+
             for _ in 0..1_000_000 {
                 let n = invert(*a, *eta, rng.gen());
                 for i in 0..harmonics.len() {
@@ -137,11 +156,12 @@ mod tests {
 
             for ((n, rate), count) in harmonics.iter().zip(rates.iter()).zip(counts.iter()) {
                 let target = rate / total;
-                // if target < 1.0e-6 {
-                //     continue;
-                // }
+                if target == 0.0 && *count == 0.0 {
+                    continue;
+                }
                 let error = (target - count) / target;
                 println!("\t{:>4} {:>9.3e} {:>9.3e} [{:>6.2}%]", n, target, count, 100.0 * error);
+                assert!(error < 0.5);
             };
         }
     }
