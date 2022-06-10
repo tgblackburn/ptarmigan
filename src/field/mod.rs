@@ -2,7 +2,7 @@
 
 use rand::prelude::*;
 use enum_dispatch::enum_dispatch;
-use crate::geometry::FourVector;
+use crate::geometry::{FourVector, StokesVector};
 
 mod focused_laser;
 mod fast_focused_laser;
@@ -56,13 +56,15 @@ pub trait Field {
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
-    /// returns the momentum of that photon, the new momentum of the electron,
+    /// returns the momentum of that photon,
+    /// its polarization,
+    /// the new momentum of the electron,
     /// and the effective a0 of the interaction.
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)>;
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)>;
 
     /// Checks to see if an electron-positron pair is produced by
-    /// a photon (position `r`, normalized momentum `ell`), returning the
-    /// probability that it occurs in the specified interval `dt` and,
+    /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
+    /// returning the probability that it occurs in the specified interval `dt` and,
     /// if so, the fraction of the photon that decays, the
     /// the momentum of the electron and positron, and the effective
     /// a0 of the interaction.
@@ -71,7 +73,7 @@ pub trait Field {
     /// by the given factor, increasing the statistics for what would
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>);
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>);
 }
 
 #[cfg(test)]

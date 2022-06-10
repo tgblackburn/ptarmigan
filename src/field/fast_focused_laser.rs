@@ -4,7 +4,7 @@ use num_complex::Complex;
 
 use crate::field::{Field, Polarization};
 use crate::constants::*;
-use crate::geometry::{FourVector, ThreeVector};
+use crate::geometry::{FourVector, ThreeVector, StokesVector};
 use crate::lcfa;
 
 /// Represents a focusing laser pulse, including
@@ -137,6 +137,7 @@ impl FastFocusedLaser {
     /// Returns the position and momentum of a particle with charge-to-mass ratio `rqm`,
     /// which has been accelerated in an electric field `E` and magnetic field `B`
     /// over a time interval `dt`.
+    /// Assumes that ui is defined at t = 0, and r, E, B are defined at t = dt/2.
     #[allow(non_snake_case)]
     #[inline]
     pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
@@ -171,7 +172,7 @@ impl FastFocusedLaser {
         let gamma = (1.0 + u_new * u_new).sqrt();
 
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
-        let r_new = r + SPEED_OF_LIGHT * u_new * dt / gamma;
+        let r_new = r + 0.5 * SPEED_OF_LIGHT * u_new * dt / gamma;
 
         (r_new, u_new, dt)
     }
@@ -181,7 +182,7 @@ impl FastFocusedLaser {
     /// magnetic field `B`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<FourVector> {
+    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector)> {
         let beta = ThreeVector::from(u) / u[0];
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
@@ -196,10 +197,12 @@ impl FastFocusedLaser {
             );
             if let Some(theta) = theta {
                 let long: ThreeVector = beta.normalize();
-                let perp: ThreeVector = long.orthogonal().rotate_around(long, cphi);
+                let w = -(E - (long * E) * long / E.norm_sqr().sqrt() + SPEED_OF_LIGHT * beta.cross(B)).normalize();
+                let perp: ThreeVector = w.rotate_around(long, cphi);
                 let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
                 let k = FourVector::lightlike(k[0], k[1], k[2]);
-                Some(k)
+                let pol = lcfa::photon_emission::stokes_parameters(k, chi, u[0], beta, w);
+                Some((k, pol))
             } else {
                 None
             }
@@ -267,20 +270,21 @@ impl Field for FastFocusedLaser {
 
     #[allow(non_snake_case)]
     fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+        let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
-            .map(|k| (k, u - k, a))
+            .map(|(k, pol)| (k, pol, u - k, a))
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, _pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);

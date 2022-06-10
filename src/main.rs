@@ -17,8 +17,6 @@ use rand_xoshiro::*;
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 7);
-#[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 8);
 
 mod constants;
@@ -52,7 +50,7 @@ enum OutputMode {
 }
 
 #[allow(unused)]
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool, t_stop: f64) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
@@ -62,7 +60,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
             Species::Electron | Species::Positron => {
-                while field.contains(pt.position()) {
+                while field.contains(pt.position()) && pt.time() < t_stop {
                     let (r, mut u, dt_actual) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
@@ -70,7 +68,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                         dt
                     );
 
-                    if let Some((k, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
+                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -78,6 +76,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
+                            .with_polarization(pol)
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
@@ -99,11 +98,12 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 
             Species::Photon => {
                 let mut has_decayed = false;
-                while field.contains(pt.position()) && !has_decayed && tracking_photons {
+                while field.contains(pt.position()) && pt.time() < t_stop && !has_decayed && tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
+                    let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
 
-                    let (prob, frac, momenta) = field.pair_create(r, ell, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
@@ -153,7 +153,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let u: FourVector = FourVector::new(0.0, 0.0, 0.0, -gamma).unitize();
     let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let pair_rate = pair_creation::probability(ell, kappa, a0, dt);
+    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a0, dt, Polarization::Circular);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, Polarization::Circular);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
@@ -200,6 +200,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
     let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
+    let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
 
     let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
@@ -222,18 +223,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             Polarization::Circular
         }
-    };
-
-    let tracking_photons = if !using_lcfa && pol == Polarization::Linear {
-        if id == 0 {
-            println!(concat!(
-                "Warning: in LP mode, LMA rates are available only for photon emission.\n",
-                "         Pair creation will be disabled."
-            ));
-        }
-        false
-    } else {
-        tracking_photons
     };
 
     let (focusing, waist) = input
@@ -312,6 +301,24 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         1.0
     };
+
+    let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(0.0),
+            _ => Err(e),
+        })
+        .and_then(|rho| {
+            if use_brem_spec {
+                eprintln!("Energy chirp ignored for bremsstrahlung photons.");
+                Ok(0.0)
+            } else if rho.abs() > 1.0 {
+                eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
+                Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
+            } else {
+                Ok(rho)
+            }
+        })
+        ?;
 
     let offset = input.read::<Vec<f64>,_>("beam:offset")
         // if missing, assume to be (0,0,0)
@@ -516,6 +523,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_divergence(rms_div)
         .with_collision_angle(angle)
         .with_offset(offset)
+        .with_energy_chirp(energy_chirp)
         .with_length(length);
 
     let builder = if normally_distributed {
@@ -581,7 +589,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons))
+                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons, t_stop))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!(
@@ -815,11 +823,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
                     photons.append(&mut recv);
                 }
-                let (x, p, w, a, n, id, pid) = photons
+                let (x, p, pol, w, a, n, id, pid) = photons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
+                        pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
                         pt.weight(),
                         pt.payload(),
                         pt.interaction_count(),
@@ -848,6 +857,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_data("parent_id")
                         .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")
                         .write(&pid[..])?
+                    .new_data("polarization")
+                        .with_desc("Stokes parameters of the photon: I, Q, U, V")
+                        .with_unit("1")
+                        .write(&pol[..])?
                     .new_data("position")
                         .with_unit(units.length.name())
                         .with_desc("four-position of the photon")
@@ -859,6 +872,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
                 // Provide alias for a0
                 fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
+                fs.group("photon")?.link_soft("polarization", "polarisation")?;
 
                 #[cfg(feature = "with-mpi")]
                 for recv_rank in 1..ntasks {

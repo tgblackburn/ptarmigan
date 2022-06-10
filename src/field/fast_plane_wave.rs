@@ -3,7 +3,7 @@ use rand::prelude::*;
 
 use crate::field::{Field, Polarization, FastFocusedLaser};
 use crate::constants::*;
-use crate::geometry::{FourVector, ThreeVector};
+use crate::geometry::{FourVector, ThreeVector, StokesVector};
 
 /// Represents a plane-wave laser pulse, including the
 /// fast oscillating carrier wave
@@ -102,20 +102,21 @@ impl Field for FastPlaneWave {
 
     #[allow(non_snake_case)]
     fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+        let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng)
-            .map(|k| (k, u - k, a))
+            .map(|(k, pol)| (k, pol, u - k, a))
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, _pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);
@@ -135,7 +136,7 @@ mod tests {
         let n_cycles = 8.0;
         let wavelength = 0.8e-6;
         let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
-        let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = 0.005 * 0.8e-6 / (SPEED_OF_LIGHT);
         let a0 = 100.0;
         let laser = FastPlaneWave::new(a0, wavelength, n_cycles, Polarization::Circular, 0.0);
 
@@ -148,17 +149,16 @@ mod tests {
         //let mut file = File::create("output/fast_plane_wave.dat").unwrap();
 
         for _k in 0..2 {
-            for _i in 0..400 {
+            for _i in 0..800 {
                 let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                r = new.0;
                 u = new.1;
                 let u_perp = u[1].hypot(u[2]);
-                // vay push leapfrogs r and u
-                let phase = 0.5 * laser.k() * (r + new.0);
+                let phase = laser.k() * r;
                 if u_perp > u_perp_max {
                     u_perp_max = u_perp;
                     phase_max = phase;
                 }
-                r = new.0;
                 //writeln!(file, "{:.6e} {:.6e} {:.6e}", phase, u[1], u[2]).unwrap();
             }
         }

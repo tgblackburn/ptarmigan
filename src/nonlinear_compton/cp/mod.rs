@@ -2,6 +2,7 @@
 use std::f64::consts;
 use rand::prelude::*;
 use crate::special_functions::*;
+use crate::geometry::StokesVector;
 use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 // Lookup tables
@@ -14,7 +15,7 @@ mod total;
 /// let rate = (1..=nmax).map(|n| integrated_spectrum(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
-pub fn rate(a: f64, eta: f64) -> Option<f64> {
+pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     let f = if a < total::LOW_A_LIMIT && eta < total::LOW_ETA_LIMIT {
         // linear Thomson
         Some(2.0 * a  * a * eta / 3.0)
@@ -153,7 +154,7 @@ fn spectrum_low_eta(n: i32, a: f64, v: f64) -> f64 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
     let n = fixed_n.unwrap_or_else(|| {
         let nmax = (10.0 * (1.0 + a * a * a)) as i32;
         let frac = rng.gen::<f64>();
@@ -192,8 +193,8 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
     };
 
     // Four-momentum transfer s = k.l / k.q
+    let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
     let s = {
-        let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
         let smax = sn / (1.0 + sn);
         v * smax
     };
@@ -201,7 +202,31 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
     // Azimuthal angle in ZMF
     let theta = 2.0 * consts::PI * rng.gen::<f64>();
 
-    (n, s, theta)
+    // Stokes parameters
+    let z = (
+        ((4 * n * n) as f64)
+        * (a * a / (1.0 + a * a))
+        * (s / (sn * (1.0 - s)))
+        * (1.0 - s / (sn * (1.0 - s)))
+    ).sqrt();
+
+    let (j_nm1, j_n, j_np1) = z.j_pm(n);
+
+    // Defined w.r.t. rotated basis: x || k x k' and y || k'_perp
+    let sv: StokesVector = {
+        let xi_0 = (1.0 - s + 1.0 / (1.0 - s)) * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) - (2.0 * j_n / a).powi(2);
+        let xi_1 = 2.0 * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) + 8.0 * j_n * j_n * (1.0 - ((n as f64) / z).powi(2) - 0.5 / (a * a));
+        let xi_2 = 0.0;
+        let xi_3 = (1.0 - s + 1.0 / (1.0 - s)) * (1.0 - 2.0 * s / (sn * (1.0 - s))) * (j_nm1 * j_nm1 - j_np1 * j_np1); // +/-1 depending on wave handedness
+        [1.0, xi_1 / xi_0, xi_2 / xi_0, xi_3 / xi_0].into()
+    };
+
+    // assert!(sv.dop() <= 1.0);
+
+    // So that Stokes vector is defined w.r.t. to e_1 and e_2
+    let sv = sv.rotate_by(consts::FRAC_PI_2 + theta);
+
+    (n, s, theta, sv)
 }
 
 #[cfg(test)]
@@ -283,7 +308,7 @@ mod tests {
         let eta = 0.1;
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+        let vs: Vec<(i32,f64,f64,_)> = (0..10_000)
             .map(|_n| {
                 sample(a, eta, &mut rng, Some(n))
             })
@@ -293,7 +318,7 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_cp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (_, s, phi) in vs {
+        for (_, s, phi, _) in vs {
             writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
         }
     }

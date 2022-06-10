@@ -40,13 +40,14 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 /// in a plane EM wave with (local) wavector `k`
 /// and polarization `pol`.
 ///
-/// Returns the harmonic index of the photon and the
-/// normalized momentum.
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+/// Returns the harmonic index of the photon,
+/// the normalized momentum,
+/// and the polarization (if applicable).
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector, StokesVector) {
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
-    let (n, s, cphi_zmf) = match pol {
+    let (n, s, cphi_zmf, sv) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng, None),
         Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng, None),
     };
@@ -83,7 +84,22 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
-    (n, k_prime)
+    // Stokes vector is defined w.r.t. to the orthonormal basis
+    // e_1 = x - k_x (k - omega z) / (omega * (omega - k_z))
+    // e_2 = y - k_y (k - omega z) / (omega * (omega - k_z))
+    // which are perpendicular to k.
+
+    // The global basis requires one vector to be in the x-z plane,
+    // so e_1 gets rotated by
+    let theta = {
+        let sin_theta = -k_prime[1] * k_prime[2] / (k_prime[0] * (k_prime[0] - k_prime[3]));
+        sin_theta.asin()
+    };
+
+    // and the Stokes parameters by
+    let sv = sv.rotate_by(theta);
+
+    (n, k_prime, sv)
 }
 
 #[cfg(test)]
@@ -91,32 +107,49 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use rand::prelude::*;
-    use rand_xoshiro::*;
+    use rayon::prelude::*;
     use super::*;
 
     #[test]
     #[ignore]
     fn spectrum() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let a = 2.0;
+        let eta = 0.1;
         let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
-        let u = 10.0 * 1000.0 / 0.511;
+        let u = 0.511 * eta / (2.0 * 1.55e-6);
         let u = FourVector::new(0.0, 0.0, 0.0, -u).unitize();
-        let q = u + a * a * k / (2.0 * k * u);
+        let q = u + 0.5 * a * a * k / (2.0 * k * u);
+
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        println!("Running on {:?}", pool);
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(f64,f64,f64,i32)> = (0..100_000)
-            .map(|_i| {
-                let (n, k_prime) = generate(k, q, Polarization::Linear, &mut rng);
-                (k * k_prime / (k * q), k_prime[1], k_prime[2], n)
+
+        let vs: Vec<_> = pool.install(|| {
+            (0..1000).into_par_iter().map(|_i| {
+                let mut rng = thread_rng();
+                let (n, k_prime, sv) = generate(k, q, Polarization::Linear, &mut rng);
+                let weight = sv.project_onto(ThreeVector::from(k_prime).normalize(), [0.0, 1.0, 0.0].into());
+                (k * k_prime / (k * q), k_prime[1], k_prime[2], n, sv[1], weight)
             })
-            .collect();
+            .collect()
+        });
+
         let rt = rt.elapsed();
 
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", (q * q - 1.0).sqrt(), k * q, vs.len(), rt);
-        let mut file = File::create("output/spectrum.dat").unwrap();
+        let filename = format!("output/nlc_spectrum_{}_{}.dat", a, eta);
+        let mut file = File::create(&filename).unwrap();
         for v in vs {
-            writeln!(file, "{:.6e} {:.6e} {:.6e} {}", v.0, v.1, v.2, v.3).unwrap();
+            writeln!(file, "{:.6e} {:.6e} {:.6e} {} {:.6e} {:.6e}", v.0, v.1, v.2, v.3, v.4, v.5).unwrap();
         }
     }
 }

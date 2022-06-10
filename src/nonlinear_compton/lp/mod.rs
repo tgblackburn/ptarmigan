@@ -4,6 +4,7 @@ use num_complex::Complex;
 use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
+use crate::geometry::StokesVector;
 use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 mod rate_table;
@@ -44,6 +45,93 @@ fn double_diff_partial_rate(a: f64, eta: f64, s: f64, theta: f64, dj: &mut Doubl
     };
 
     (-gamma[0] * gamma[0] - a * a * (1.0 + 0.5 * s * s / (1.0 - s)) * (gamma[0] * gamma[2] - gamma[1] * gamma[1])) / (2.0 * consts::PI)
+}
+
+/// Returns the largest value of the double-differential rate, multiplied by a small safety factor.
+fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> f64 {
+    let n = dj.n();
+    let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+    let smax = sn / (1.0 + sn);
+
+    let max = if n == 1 {
+        let theta = consts::FRAC_PI_2;
+        f64::max(
+            double_diff_partial_rate(a, eta, 0.01 * smax, theta, dj),
+            double_diff_partial_rate(a, eta, 0.99 * smax, theta, dj)
+        )
+    } else if a <= 2.0 {
+        // we know that n > 1
+        let theta = 0.0;
+        // search 0.4 < s / s_max < 1
+        (1..=32)
+            .map(|i| {
+                let s = smax * (0.4 + 0.6 * (i as f64) / 32.0);
+                double_diff_partial_rate(a, eta, s, theta, dj)
+            })
+            .reduce(f64::max)
+            .unwrap()
+    } else if a <= 5.0 {
+        // n > 1, 2 < a < 5
+        let n_switch = (1.3 * a.powf(1.2)).ceil() as i32;
+        if n < n_switch {
+            // linear fit in theta_opt as a function of log(n)
+            let theta = consts::FRAC_PI_2 * (1.0 - (n as f64).ln() / (n_switch as f64).ln());
+            // search 0 < s / s_max < 1.0
+            (0..=32)
+                .map(|i| {
+                    let s = smax * (i as f64) / 32.0;
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        } else {
+            let theta = 0.0;
+            // search max(x_min, 0.4) < s / s_max < 1.0
+            let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.4);
+            (1..=32)
+                .map(|i| {
+                    let s = smax * (x_min + (1.0 - x_min) * (i as f64) / 32.0);
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        }
+    } else {
+        // n > 1, a > 5
+        let n_switch = (a * a).ceil() as i32;
+
+        if n < n_switch {
+            let theta = {
+                let n = n as f64;
+                let n_switch = n_switch as f64;
+                consts::FRAC_PI_2 * (n.powf(-0.7) - n_switch.powf(-0.7)) / (1.0 - n_switch.powf(-0.7))
+            };
+
+            // search in 0.3 < s / s_max < 1
+            (1..=64)
+                .map(|i| {
+                    let s = smax * (0.3 + 0.7 * (i as f64) / 64.0);
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        } else {
+            let theta = 0.0;
+            // search x_min < s < x_peak
+            let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.3);
+            let x_peak = (1.0 + sn) / (2.0 + sn);
+            let len = if n > 10 * n_switch {64} else if n > 3 * n_switch {42} else {32};
+            (1..=len)
+                .map(|i| {
+                    let s = smax * (x_min + (x_peak - x_min) * (i as f64) / (len as f64));
+                    double_diff_partial_rate(a, eta, s, theta, dj)
+                })
+                .reduce(f64::max)
+                .unwrap()
+        }
+    };
+
+    1.15 * max
 }
 
 #[derive(Debug)]
@@ -224,6 +312,7 @@ fn single_diff_partial_rate(a: f64, eta: f64, s: f64, theta_max: f64, dj: &mut D
 /// Integrates `double_diff_partial_rate` over s and theta, returning
 /// the value of the integral and the largest value of the integrand.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase)
+#[allow(unused)]
 fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
     let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
     let smax = sn / (1.0 + sn);
@@ -311,16 +400,25 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
     (integral, max)
 }
 
+/// Returns the largest harmonic that contributes to the total rate.
+#[allow(unused)]
+fn sum_limit(a: f64, eta: f64) -> i32 {
+    let m = 3.0 - 0.4 * eta.powf(0.25);
+    let n_max = 6.0 + 2.5 * a.powf(m);
+    // let n_max = 5.0 * (1.0 + 2.0 * a * a);
+    n_max.ceil() as i32
+}
+
 /// Returns the total rate of nonlinear Compton scattering.
 /// Equivalent to calling
 /// ```
-/// let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+/// let nmax = sum_limit(a, eta);
 /// let rate = (1..=nmax).map(|n| partial_rate(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
 /// Multiply by alpha / eta to get dP/(ds dtheta dphase).
 #[allow(unused_parens)]
-pub fn rate(a: f64, eta: f64) -> Option<f64> {
+pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());
 
     if x < rate_table::MIN[0] {
@@ -425,7 +523,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// the cdf is calculated by integrating and summing the double-differential rates.
 #[cfg(feature = "explicit-harmonic-summation")]
 fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
-    let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+    let nmax = sum_limit(a, eta);
     let target = frac * rate(a, eta).unwrap();
     // println!("Aiming for {:.1}% of total rate...", 100.0 * frac);
     let mut cumsum: f64 = 0.0;
@@ -451,25 +549,22 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
 /// transfer) and theta (azimuthal angle in the ZMF) for a photon emission that
 /// occurs at normalized amplitude a and energy parameter eta.
-pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64) {
-    let (n, max) = match fixed_n {
-        None => {
-            let frac = rng.gen::<f64>();
-            // via lookup of cdf
-            let n = get_harmonic_index(a, eta, frac);
-            let max = partial_rate(n, a, eta).1;
-            // println!("\t... got n = {}", n);
-            (n, max)
-        },
-        Some(n) => (n, partial_rate(n, a, eta).1),
-    };
+#[allow(non_snake_case, unused_parens)]
+pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
+    let n = fixed_n.unwrap_or_else(|| {
+        let frac = rng.gen::<f64>();
+        get_harmonic_index(a, eta, frac) // via lookup of cdf
+    });
 
     let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
     let theta_max = ThetaBound::for_harmonic(n, a, eta);
 
     let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
     let smax = sn / (1.0 + sn);
-    let max = 1.1 * max;
+
+    let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+    // let (_, max) = partial_rate(n, a, eta);
+    // let max = 1.1 * max;
 
     // Rejection sampling
     let (s, theta) = loop {
@@ -497,7 +592,54 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
         _ => unreachable!(),
     };
 
-    (n, s, theta)
+    // Generate Stokes parameters for emitted photon
+
+    let x = {
+        let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+        let wn = s / (sn * (1.0 - s));
+        let wn = wn.min(1.0);
+        -2.0 * (n as f64) * a * theta.cos() * (wn * (1.0 - wn)).sqrt() / (1.0 + 0.5 * a * a).sqrt()
+    };
+
+    let y = a * a * s / (8.0 * eta * (1.0 - s));
+
+    let j = dj.evaluate(x.abs(), y); // n-2, n-1, n, n+1, n+2
+
+    let A = if x > 0.0 {
+        [j[2], 0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
+        // or x is negative, J_n(-|x|, y) = (-1)^n J_n(|x|, y)
+    } else if n % 2 == 0 {
+        // j[1] and j[3] change sign
+        [j[2], -0.5 * (j[1] + j[3]), 0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    } else {
+        // j[0], j[2] and j[4] change sign
+        [-j[2], 0.5 * (j[1] + j[3]), -0.25 * (j[0] + 2.0 * j[2] + j[4])]
+    };
+
+    let pol: StokesVector = {
+        let u = (2.0 * (n as f64) * eta * (1.0 - s) / s - (1.0 + 0.5 * a * a)).sqrt();
+
+        let xi_0 = (
+            (1.0 - s + 1.0 / (1.0 - s)) * (A[1].powi(2) - A[0] * A[2])
+            - 2.0 * (A[0] / a).powi(2)
+        );
+
+        let xi_1 = (
+            2.0 * (A[1].powi(2) - A[0] * A[2])
+            - 2.0 * (1.0 + 2.0 * u * u * theta.sin().powi(2)) * (A[0] / a).powi(2)
+        );
+
+        let xi_2 = (
+            2.0 * (u * A[0] / a).powi(2) * (2.0 * theta).sin()
+            + 4.0 * u * A[0] * A[1] * theta.sin() / a
+        );
+
+        [1.0, xi_1 / xi_0, xi_2 / xi_0, 0.0].into()
+    };
+
+    // assert!(pol.dop() <= 1.0);
+
+    (n, s, theta, pol)
 }
 
 #[cfg(test)]
@@ -508,6 +650,83 @@ mod tests {
     use rand_xoshiro::*;
     use rayon::prelude::*;
     use super::*;
+
+    #[test]
+    fn rate_ceiling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _i in 0..100 {
+            let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
+            let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
+            let n_max = sum_limit(a, eta);
+            let harmonics: Vec<_> = if n_max > 200 {
+                (0..=10).map(|i| (2_f64.ln() + 0.1 * (i as f64) * ((n_max as f64).ln() - 2_f64.ln())).exp() as i32).collect()
+            } else if n_max > 10 {
+                let mut low = vec![1, 2, 3];
+                let mut high: Vec<_> = (0..=4).map(|i| (5_f64.ln() + 0.25 * (i as f64) * ((n_max as f64).ln() - 5_f64.ln())).exp() as i32).collect();
+                low.append(&mut high);
+                low
+            } else {
+                (1..n_max).collect()
+            };
+
+            for n in &harmonics {
+                let (_, true_max) = partial_rate(*n, a, eta);
+                let mut dj = DoubleBessel::at_index(*n, (*n as f64) * consts::SQRT_2, (*n as f64) * 0.5);
+                let max = ceiling_double_diff_partial_rate(a, eta, &mut dj);
+                let err = (true_max - max) / true_max;
+                println!(
+                    "a = {:>9.3e}, eta = {:>9.3e}, n = {:>4} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                    a, eta, n, true_max, max, 100.0 * err,
+                );
+                assert!(err < 0.0);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn find_rate_max() {
+        let a = 15.0;
+        let eta = 1.0;
+        let n_max = sum_limit(a, eta);
+        let nodes: Vec<f64> = (1..100).map(|i| (i as f64) / 100.0).collect();
+        let pts: Vec<_> =
+            //(1..n_max)
+            //(1..10).chain((10..100).step_by(2)).chain((100..n_max).step_by(5)) // 5
+            //(1..10).chain((10..100).step_by(5)).chain((100..n_max).step_by(10)) // 10
+            (1..10).chain((10..100).step_by(10)).chain((100..n_max).step_by(50)) // 20
+            .map(|n| {
+                let mut dj = DoubleBessel::at_index(n, (n as f64) * consts::SQRT_2, (n as f64) * 0.5);
+                let max_theta = ThetaBound::for_harmonic(n, a, eta);
+                let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
+                let smax = sn / (1.0 + sn);
+
+                let mut max = 0.0;
+                let mut s0 = 0.0;
+                let mut theta0 = 0.0;
+
+                for s in nodes.iter().map(|x| x * smax) {
+                    for theta in nodes.iter().map(|x| x * max_theta.at(s)) {
+                        let val = double_diff_partial_rate(a, eta, s, theta, &mut dj);
+                        if val > max {
+                            max = val;
+                            s0 = s;
+                            theta0 = theta;
+                        }
+                    }
+                }
+
+                (n, s0 / smax, theta0, max)
+            })
+            .collect();
+
+        let filename = format!("output/nlc_lp_max_{}_{}.dat", a, eta);
+        let mut file = File::create(&filename).unwrap();
+        for (n, s, theta, max) in &pts {
+            writeln!(file, "{} {:.6e} {:.6e} {:.6e}", n, s, theta, max).unwrap();
+        }
+    }
 
     #[test]
     #[ignore]
@@ -670,7 +889,7 @@ mod tests {
         pool.install(|| {
             pts.into_par_iter().for_each(|(a, eta)| {
                 if let Some(value) =  rate(a, eta) {
-                    let n_max = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+                    let n_max = sum_limit(a, eta);
                     let target = (1..=n_max).map(|n| partial_rate(n, a, eta).0).sum::<f64>();
                     let error = (target - value).abs() / target;
                     println!(
@@ -699,7 +918,7 @@ mod tests {
 
         for (a, eta) in &pts {
             println!("At a = {}, eta = {}:", a, eta);
-            let nmax = (5.0 * (1.0 + 2.0 * a * a)) as i32;
+            let nmax = sum_limit(*a, *eta);
             let nmax = nmax.max(19);
             let rates: Vec<f64> = (1..=nmax).map(|n| partial_rate(n, *a, *eta).0).collect();
             let total: f64 = rates.iter().sum();
@@ -739,6 +958,9 @@ mod tests {
                 .zip(counts.iter()
                 .zip(expected.iter()))
             {
+                if *e < 1.0e-3 {
+                    continue;
+                }
                 let error = (c - e).abs() / e;
                 println!("\tExpected = {:.3e}, got {:.3e} [{:.1}%] for n in {:?}", e, c, 100.0 * error, b);
                 assert!(error < 5.0e-2);
@@ -755,7 +977,7 @@ mod tests {
         let eta = 0.1;
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..10_000)
+        let vs: Vec<(i32,f64,f64,_)> = (0..10_000)
             .map(|_n| {
                 sample(a, eta, &mut rng, Some(n))
             })
@@ -765,7 +987,7 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_partial_spectrum_{}_{}_{}.dat", n, a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (_, s, phi) in vs {
+        for (_, s, phi, _) in vs {
             writeln!(file, "{:.6e} {:.6e}", s, phi).unwrap();
         }
     }
@@ -778,7 +1000,7 @@ mod tests {
         let eta = 0.1; // 0.105925;
 
         let rt = std::time::Instant::now();
-        let vs: Vec<(i32,f64,f64)> = (0..100)
+        let vs: Vec<(i32,f64,f64,_)> = (0..100)
             .map(|_n| {
                 sample(a, eta, &mut rng, None)
             })
@@ -788,7 +1010,7 @@ mod tests {
         println!("a = {:.3e}, eta = {:.3e}, {} samples takes {:?}", a, eta, vs.len(), rt);
         let filename = format!("output/nlc_lp_spectrum_{}_{}.dat", a, eta);
         let mut file = File::create(&filename).unwrap();
-        for (n, s, phi) in vs {
+        for (n, s, phi, _) in vs {
             writeln!(file, "{} {:.6e} {:.6e}", n, s, phi).unwrap();
         }
     }
@@ -796,20 +1018,62 @@ mod tests {
     #[test]
     #[ignore]
     fn harmonic_limit() {
-        let a_s: [f64; 9] = [0.1, 0.2, 0.5, 0.7, 1.0, 2.0, 5.0, 7.0, 10.0];
-        let eta = 0.001;
-        for &a in &a_s {
-            let mut sum = 0.0;
-            let mut n = 1;
-            let nstop = loop {
-                let (rate, _) = partial_rate(n, a, eta);
-                sum += rate;
-                if rate / sum < 1.0e-4 {
-                    break n;
+        let max_error = 1.0e-3;
+
+        let filename = format!("output/nlc_lp_rates.dat");
+        let mut file = File::create(&filename).unwrap();
+
+        let filename = format!("output/nlc_harmonic_limits.dat");
+        let mut file2 = File::create(&filename).unwrap();
+
+        for a in [0.1, 0.3, 1.0, 2.0, 3.0, 5.0, 10.0, 20.0].iter() {
+            for eta in [2.0, 1.0, 0.3, 0.1, 0.03, 0.01, 0.001].iter() {
+                let n_min = 1;
+                let mut n = n_min;
+                let mut total = 0.0;
+                let mut step = 1;
+                let mut prev = 0.0;
+
+                loop {
+                    let (rate, _) = partial_rate(n, *a, *eta);
+                    total += 0.5 * (rate + prev) * (step as f64);
+
+                    // linear extrapolation: estimate fraction left to sum
+                    let frac_remaining = 0.5 * (step as f64) * rate * rate / (total * (prev - rate));
+                    let frac_remaining = if frac_remaining < 0.0 || frac_remaining > 1.0 {
+                        1.0
+                    } else {
+                        frac_remaining
+                    };
+
+                    println!("n = {:>4}, rate = {:>9.3e}, total = {:>9.3e}, estd frac left = {:>9.3}%", n, rate, total, 100.0 * frac_remaining);
+                    writeln!(file, "{:.6e} {:.6e} {} {:.6e} {:.6e}", a, eta, n, rate, total).unwrap();
+
+                    if frac_remaining < max_error {
+                        writeln!(file2, "{:.6e} {:.6e} {}", a, eta, n).unwrap();
+                        break;
+                    }
+
+                    if n - n_min > 10_000 {
+                        step = 1500;
+                    } else if n - n_min > 3000 {
+                        step = 500;
+                    } else if n - n_min > 1000 {
+                        step = 150;
+                    } else if n - n_min > 300 {
+                        step = 50;
+                    } else if n - n_min > 100 {
+                        step = 15;
+                    } else if n - n_min > 30 {
+                        step = 5;
+                    } else if n - n_min > 10 {
+                        step = 2;
+                    }
+
+                    prev = rate;
+                    n += step;
                 }
-                n += 1;
-            };
-            println!("a = {:.3e}, stopped at n = {}", a, nstop);
+            }
         }
     }
 
@@ -821,8 +1085,8 @@ mod tests {
         // 20, 20, 60, 60
         const A_DENSITY: usize = 20; // points per order of magnitude
         const ETA_DENSITY: usize = 20;
-        const N_COLS: usize = 60; // pts in a0 direction
-        const N_ROWS: usize = 60; // pts in eta direction
+        const N_COLS: usize = 61; // pts in a0 direction
+        const N_ROWS: usize = 61; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
@@ -841,7 +1105,7 @@ mod tests {
             let eta = LOW_ETA_LIMIT * 10.0f64.powf((i as f64) / (ETA_DENSITY as f64));
             for j in 0..N_COLS {
                 let a = LOW_A_LIMIT * 10.0f64.powf((j as f64) / (A_DENSITY as f64));
-                let n_max = (5.0 * (1.0 + 2.0 * a * a)).ceil() as i32;
+                let n_max = sum_limit(a, eta);
                 pts.push((i, j, a, eta, n_max));
             }
         }

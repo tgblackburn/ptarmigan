@@ -57,6 +57,8 @@ pub struct Particle {
     species: Species,
     r: [FourVector; 2],
     u: [FourVector; 2],
+    has_pol: bool,
+    pol: StokesVector,
     optical_depth: f64,
     payload: f64,
     interaction_count: f64,
@@ -69,11 +71,13 @@ pub struct Particle {
 unsafe impl Equivalence for Particle {
     type Out = UserDatatype;
     fn equivalent_datatype() -> Self::Out {
-        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1, 1];
+        let blocklengths = [1, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1];
         let displacements = [
             offset_of!(Particle, species) as mpi::Address,
             offset_of!(Particle, r) as mpi::Address,
             offset_of!(Particle, u) as mpi::Address,
+            offset_of!(Particle, has_pol) as mpi::Address,
+            offset_of!(Particle, pol) as mpi::Address,
             offset_of!(Particle, optical_depth) as mpi::Address,
             offset_of!(Particle, payload) as mpi::Address,
             offset_of!(Particle, interaction_count) as mpi::Address,
@@ -81,10 +85,12 @@ unsafe impl Equivalence for Particle {
             offset_of!(Particle, id) as mpi::Address,
             offset_of!(Particle, parent_id) as mpi::Address,
         ];
-        let types: [&dyn Datatype; 9] = [
+        let types: [&dyn Datatype; 11] = [
             &Species::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
             &FourVector::equivalent_datatype(),
+            &bool::equivalent_datatype(),
+            &StokesVector::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
             &f64::equivalent_datatype(),
@@ -92,7 +98,7 @@ unsafe impl Equivalence for Particle {
             &u64::equivalent_datatype(),
             &u64::equivalent_datatype(),
         ];
-        UserDatatype::structured(9, &blocklengths, &displacements, &types)
+        UserDatatype::structured(11, &blocklengths, &displacements, &types)
     }
 }
 
@@ -142,6 +148,8 @@ impl Particle {
             species,
             r: [r; 2],
             u: [u; 2],
+            has_pol: false,
+            pol: StokesVector::unpolarized(),
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
             interaction_count: 0.0,
@@ -227,6 +235,11 @@ impl Particle {
         self.r[1]
     }
 
+    /// Returns the lab time of the particle, in seconds
+    pub fn time(&self) -> f64 {
+        self.r[1][0] / SPEED_OF_LIGHT
+    }
+
     /// Loads something that will be tracked with the particle
     /// and may be read by the output routines.
     /// Overwrites whatever has already been written.
@@ -270,10 +283,15 @@ impl Particle {
         let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
+        // let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
+        // let pol = FourVector::new(self.pol[0], pol[0], pol[1], pol[2]);
+
         Particle {
             species: self.species,
             r: [r0, r],
             u: [u0, u],
+            has_pol: self.has_pol,
+            pol: self.pol,
             optical_depth: self.optical_depth,
             payload: self.payload,
             interaction_count: self.interaction_count,
@@ -309,10 +327,122 @@ impl Particle {
     pub fn species(&self) -> Species {
         self.species
     }
+
+    /// Updates the particle polarization
+    pub fn with_polarization(&mut self, pol: StokesVector) -> Self {
+        self.has_pol = true;
+        self.pol = pol;
+        *self
+    }
+
+    /// Returns the particle polarization, if it exists
+    #[allow(unused)]
+    pub fn polarization(&self) -> Option<StokesVector> {
+        if self.has_pol {
+            Some(self.pol)
+        } else {
+            None
+        }
+    }
+
+    /// Projects the particle polarization onto the given axis.
+    /// `polarization_along_x` and `polarization_along_y` are
+    /// provided for convenience
+    pub fn polarization_along<T: Into<ThreeVector>>(&self, axis: T) -> f64 {
+        let sv = self.polarization()
+            .unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into());
+
+        let n = ThreeVector::from(self.normalized_momentum()).normalize();
+        sv.project_onto(n, axis.into())
+    }
+
+    /// Projects the particle polarization onto the x axis.
+    pub fn polarization_along_x(&self) -> f64 {
+        self.polarization_along([1.0, 0.0, 0.0])
+    }
+    /// Projects the particle polarization onto the y axis.
+    pub fn polarization_along_y(&self) -> f64 {
+        self.polarization_along([0.0, 1.0, 0.0])
+    }
 }
 
 impl Shower {
     pub fn multiplicity(&self) -> usize {
         self.secondaries.len() - 1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts;
+    use super::*;
+
+    #[test]
+    fn project_polarization() {
+        let mut photon = Particle::create(Species::Photon, [0.0; 4].into());
+        let angles = [
+            (consts::PI, 0.0_f64),
+            (0.75 * consts::PI, 0.0),
+            (0.6 * consts::PI, consts::FRAC_PI_2),
+            (0.8 * consts::PI, 1.0),
+            (0.2 * consts::PI, 4.0),
+        ];
+        let x_axis = ThreeVector::from([1.0, 0.0, 0.0]);
+        let y_axis = ThreeVector::from([0.0, 1.0, 0.0]);
+
+        for (theta, phi) in &angles{
+            let k = FourVector::lightlike(theta.sin() * phi.cos(), theta.sin() * phi.sin(), theta.cos());
+            photon.with_normalized_momentum(k);
+            println!("photon k = {:.3} {:.3} {:.3}", k[1], k[2], k[3]);
+
+            // LP E
+            photon.with_polarization([1.0, 1.0, 0.0, 0.0].into());
+            //let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize();
+            let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
+
+            let pol = photon.polarization_along_x();
+            let target = (eps * x_axis).powi(2);
+            println!("\tLPx: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            let target = (eps * y_axis).powi(2);
+            println!("\tLPx: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            // LP B
+            photon.with_polarization([1.0, -1.0, 0.0, 0.0].into());
+            let eps: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
+            let eps = eps.cross(k.into()).normalize();
+            //let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize();
+
+            let pol = photon.polarization_along_x();
+            let target = (eps * x_axis).powi(2);
+            println!("\tLPy: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            let target = (eps * y_axis).powi(2);
+            println!("\tLPy: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            // CP+
+            photon.with_polarization([1.0, 0.0, 0.0, 1.0].into());
+            let e1: ThreeVector = [k[3] / k[1].hypot(k[3]), 0.0, -k[1] / k[1].hypot(k[3])].into();
+            let e1 = e1 / consts::SQRT_2;
+            let e2 = e1.cross(k.into()).normalize() / consts::SQRT_2;
+
+            let pol = photon.polarization_along_x();
+            //let eps = ThreeVector::from(e1 - (k * e1) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (e1 * x_axis).powi(2) + (e2 * x_axis).powi(2);
+            println!("\tCP+: got pol_x = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+
+            let pol = photon.polarization_along_y();
+            //let eps = ThreeVector::from(e2 - (k * e2) * n / (k * n)).normalize() / consts::SQRT_2;
+            let target = (e1 * y_axis).powi(2) + (e2 * y_axis).powi(2);
+            println!("\tCP+: got pol_y = {:.3}, expected = {:.3}", pol, target);
+            assert!(pol == target || (pol - target).abs() < 1.0e-6);
+        }
     }
 }
