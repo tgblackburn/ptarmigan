@@ -120,9 +120,10 @@ fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> 
             // search x_min < s < x_peak
             let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.3);
             let x_peak = (1.0 + sn) / (2.0 + sn);
-            (1..=32)
+            let len = if n > 10 * n_switch {64} else if n > 3 * n_switch {42} else {32};
+            (1..=len)
                 .map(|i| {
-                    let s = smax * (x_min + (x_peak - x_min) * (i as f64) / 32.0);
+                    let s = smax * (x_min + (x_peak - x_min) * (i as f64) / (len as f64));
                     double_diff_partial_rate(a, eta, s, theta, dj)
                 })
                 .reduce(f64::max)
@@ -130,7 +131,7 @@ fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> 
         }
     };
 
-    1.1 * max
+    1.15 * max
 }
 
 #[derive(Debug)]

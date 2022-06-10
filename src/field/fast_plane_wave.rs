@@ -136,7 +136,7 @@ mod tests {
         let n_cycles = 8.0;
         let wavelength = 0.8e-6;
         let t_start = -0.5 * n_cycles * wavelength / (SPEED_OF_LIGHT);
-        let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = 0.005 * 0.8e-6 / (SPEED_OF_LIGHT);
         let a0 = 100.0;
         let laser = FastPlaneWave::new(a0, wavelength, n_cycles, Polarization::Circular, 0.0);
 
@@ -149,17 +149,16 @@ mod tests {
         //let mut file = File::create("output/fast_plane_wave.dat").unwrap();
 
         for _k in 0..2 {
-            for _i in 0..400 {
+            for _i in 0..800 {
                 let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                r = new.0;
                 u = new.1;
                 let u_perp = u[1].hypot(u[2]);
-                // vay push leapfrogs r and u
-                let phase = 0.5 * laser.k() * (r + new.0);
+                let phase = laser.k() * r;
                 if u_perp > u_perp_max {
                     u_perp_max = u_perp;
                     phase_max = phase;
                 }
-                r = new.0;
                 //writeln!(file, "{:.6e} {:.6e} {:.6e}", phase, u[1], u[2]).unwrap();
             }
         }
