@@ -2,7 +2,7 @@
 
 ## v0.10.0
 
-In progress.
+2022-06-10
 
 Added:
 
@@ -16,6 +16,7 @@ Fixed:
 
 * Time-centering in particle push.
 * Initialisation of beam with non-zero offset.
+* Rate ceiling calculation for NLC (LP)
 
 ## v0.9.1
 
