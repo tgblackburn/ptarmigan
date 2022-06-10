@@ -31,12 +31,12 @@ The ptarmigan changelog can be found [here](docs/changelog.md).
 
 ptarmigan takes as its single argument the path to a YAML file describing the input configuration. Output is automatically written to the same directory as this file. The inputs for some test problems can be found in [examples](examples). Starting from scratch, the input needs to contain the following sections:
 
-* control
 * laser
 * beam
 
 and optionally
 
+* control
 * constants
 * output
 * stats

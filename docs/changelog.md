@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.10.0
+
+In progress.
+
+Added:
+
+* Photon-polarization-resolved emission rates, LMA (LP and CP) and LCFA.
+* Nonlinear Breit-Wheeler pair creation for photons in LP lasers, using LMA.
+* Output routines for Stokes parameters and polarization-weighted distributions.
+* Energy chirping of incident particle beam.
+* Early stopping at chosen time.
+
+Fixed:
+
+* Time-centering in particle push.
+* Initialisation of beam with non-zero offset.
+
 ## v0.9.1
 
 2022-04-13

@@ -75,6 +75,15 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "weight" | "number" => Some(
             (weighted_by_number as ParticleOutput, Dimensionless)
         ),
+        "S_1" | "S1" => Some(
+            (stokes_1 as ParticleOutput, Dimensionless)
+        ),
+        "S_2" | "S2" => Some(
+            (stokes_2 as ParticleOutput, Dimensionless)
+        ),
+        "S_3" | "S3" => Some(
+            (stokes_3 as ParticleOutput, Dimensionless)
+        ),
         _ => None,
     }
 }
@@ -179,6 +188,30 @@ pub fn payload(pt: &Particle) -> f64 {
 
 pub fn interaction_count(pt: &Particle) -> f64 {
     pt.interaction_count()
+}
+
+pub fn stokes_1(pt: &Particle) -> f64 {
+    if let Some(sv) = pt.polarization() {
+        sv[1]
+    } else {
+        0.0
+    }
+}
+
+pub fn stokes_2(pt: &Particle) -> f64 {
+    if let Some(sv) = pt.polarization() {
+        sv[2]
+    } else {
+        0.0
+    }
+}
+
+pub fn stokes_3(pt: &Particle) -> f64 {
+    if let Some(sv) = pt.polarization() {
+        sv[3]
+    } else {
+        0.0
+    }
 }
 
 pub fn weighted_by_energy(pt: &Particle) -> f64 {

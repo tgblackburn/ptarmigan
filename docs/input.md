@@ -51,16 +51,19 @@ All output is written to the directory where the input file is found.
 * `file_format`: select how to output particle distribution functions. Possible formats are: `plain_text` or `fits`.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `max_angle` (optional, default = `pi`): if specified, discard secondary particles that are moving, with respect to the shower's primary particle, at angles greater than the given limit.
-* `electron` (optional): list of specifiers, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to its own FITS file.
-* `photon` (optional): as above.
-* `positron` (optional): as above.
 * `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `hdf5`. A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
 * `coordinate_system` (optional, default = `laser`): by default, particle positions and momenta are output in the simulation coordinate system, where the laser travels towards positive z. If set to `beam`, these are transformed such that the beam propagation defines the positive z direction.
 * `discard_background_e` (optional, default = `false`): whether to discard primary electrons that have not radiated, before generating output.
 * `units` (optional, default = `auto`): select the units to be used when generating distribution or particle output (FITS/HDF5-formatted). Possible choices of unit system are `hep` (distances in mm, momenta in GeV/c, etc), `si` (distances in m, momenta in kg/m/s, etc) or `auto` (distances in m, momenta in MeV/c, etc).
 In future, it will be possible to select each unit individually.
 
-The possible distributions are:
+The desired distribution outputs are specified per species:
+
+* `electron` (optional): list of specifiers of the form `dstr1[:dstr2][:(log|auto;weight)]`, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to a separate file.
+* `photon` (optional): as above.
+* `positron` (optional): as above.
+
+The possible distributions `dstr` are:
 
 * `x`, `y` and `z`: particle spatial coordinates, in metres
 * `px`, `py`, `pz`: particle momenta, in MeV/c
@@ -75,6 +78,16 @@ The possible distributions are:
 * `pi_minus_angle` (`theta` also accepted): polar angle between particle momentum and the *negative* z-axis, in radians
 * `birth_a`: normalized amplitude a<sub>0</sub> at the point where the particle was created:
 either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value, `e E / m c omega` (if using LCFA).
+* `S_1`, `S_2` and `S_3`: the Stokes parameters associated with the particle polarization. `S_1` is associated with linear polarization along x (+1) or y (-1); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
+In the current version of Ptarmigan, these are meaningful only for photons.
+
+It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing a third, bracketed, argument to the output specifier.
+The possible weight functions are:
+
+* `auto`: the particle weight (default)
+* `energy`: particle energy, in MeV
+* `pol_x`: the projection of the particle polarization along the global x-axis
+* `pol_x`: the projection of the particle polarization along the global y-axis
 
 ## stats
 
