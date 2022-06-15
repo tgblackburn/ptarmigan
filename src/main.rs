@@ -308,7 +308,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             _ => Err(e),
         })
         .and_then(|rho| {
-            if use_brem_spec {
+            if use_brem_spec && rho != 0.0 {
                 eprintln!("Energy chirp ignored for bremsstrahlung photons.");
                 Ok(0.0)
             } else if rho.abs() > 1.0 {
@@ -547,8 +547,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         sh.secondaries.retain(|&pt| {
             let p = pt.momentum();
             let n = ThreeVector::from(p).normalize();
-            let angle = (n * n0).acos();
-            p[0] > min_energy && angle < max_angle
+            p[0] > min_energy && n0 * n > max_angle.cos()
         });
         if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
             while let Some(pt) = sh.secondaries.pop() {
