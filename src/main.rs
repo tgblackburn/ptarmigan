@@ -258,11 +258,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let weight = input.read("beam:charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
         .unwrap_or(1.0);
-    let (radius, normally_distributed) = input.read::<Vec<String>,_>("beam:radius")
+
+    let (radius, normally_distributed, max_radius) = input.read::<Vec<String>,_>("beam:radius")
         .and_then(|vs| {
             // whether a single f64 or a tuple of [f64, dstr],
             // the first value must be the radius
             let radius = vs.first().map(|s| input.evaluate(s)).flatten();
+
             // a second entry, if present, is a distribution spec
             let normally_distributed = match vs.get(1) {
                 None => Some(true), // if not specified at all, assume normally distributed
@@ -270,8 +272,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Some(s) if s == "uniformly_distributed" => Some(false),
                 _ => None // anything else is an error
             };
+
+            // a third entry, if present, would be the optional cutoff for a
+            // normal distribution
+            let max_radius = vs.get(2).and_then(|s| input.evaluate(s));
+
             if let (Some(r), Some(b)) = (radius, normally_distributed) {
-                Ok((r, b))
+                Ok((r, b, max_radius))
             } else {
                 eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
                             \tradius: 2.0e-6\n\
@@ -282,6 +289,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
         })?;
+
     let species = input.read::<String,_>("beam:species")
         .map_or_else(
             |e| match e.kind() {
@@ -527,7 +535,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_length(length);
 
     let builder = if normally_distributed {
-        builder.with_normally_distributed_xy(radius, radius)
+        if let Some(r_max) = max_radius {
+            builder.with_trunc_normally_distributed_xy(radius, radius, r_max, r_max)
+        } else {
+            builder.with_normally_distributed_xy(radius, radius)
+        }
     } else {
         builder.with_uniformly_distributed_xy(radius)
     };
@@ -785,6 +797,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     Species::Photon => 0.0,
                 };
 
+                let r_max = if normally_distributed {
+                    max_radius.unwrap_or(std::f64::INFINITY)
+                } else { // uniformly distributed
+                    radius
+                };
+
                 conf.create_group("beam")?
                     .new_data("n")
                         .with_unit("1")
@@ -801,6 +819,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_data("bremsstrahlung_source").write(&use_brem_spec)?
                     .new_data("gamma_min").with_unit("1").with_condition(|| use_brem_spec).write(&gamma_min)?
                     .new_data("radius").with_unit(units.length.name()).write(&radius.convert(&units.length))?
+                    .new_data("radius_max")
+                        .with_unit(units.length.name())
+                        .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")
+                        .write(&r_max.convert(&units.length))?
                     .new_data("length").with_unit(units.length.name()).write(&length.convert(&units.length))?
                     .new_data("collision_angle").with_unit("rad").write(&angle)?
                     .new_data("rms_divergence").with_unit("rad").write(&rms_div)?

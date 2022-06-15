@@ -90,8 +90,7 @@ impl BeamBuilder {
         }
     }
 
-    #[allow(unused)]
-    pub fn with_trunc_uniformly_distributed_xy(&self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
+    pub fn with_trunc_normally_distributed_xy(&self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::TruncNormal { sigma_x, sigma_y, x_max, y_max },
             ..*self
