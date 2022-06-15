@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.10.1
+
+2022-06-15
+
+Fixed:
+
+* Unnecessary warning about energy chirp when running with incident photons.
+* Loss of precision in calculating ArcCos which led to particles || to primary being incorrectly discarded.
+
 ## v0.10.0
 
 2022-06-10
