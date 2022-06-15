@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.2
+
+In progress
+
+Added:
+
+* Particle-beam transverse profile can be given by a truncated normal distribution.
+
 ## v0.10.1
 
 2022-06-15
