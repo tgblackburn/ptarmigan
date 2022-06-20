@@ -2,16 +2,6 @@
 
 use std::ffi;
 
-// #[cfg(feature = "with-mpi")]
-// use mpi::traits::*;
-
-// #[cfg(not(feature = "with-mpi"))]
-// mod no_mpi;
-// #[cfg(not(feature = "with-mpi"))]
-// use no_mpi::*;
-// #[cfg(not(feature = "with-mpi"))]
-// use no_mpi as mpi;
-
 mod dataset;
 mod datatype;
 mod error;

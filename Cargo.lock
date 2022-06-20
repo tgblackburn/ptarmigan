@@ -339,6 +339,7 @@ name = "hdf5-writer"
 version = "0.1.0"
 dependencies = [
  "hdf5-sys",
+ "libc",
  "mpi",
  "mpi-sys",
  "no-mpi",
