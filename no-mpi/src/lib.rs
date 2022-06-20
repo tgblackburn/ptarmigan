@@ -25,22 +25,27 @@ pub enum SystemOperation {
     min(),
     max(),
     sum(),
+    logical_and(),
 }
 
 impl Operation for SystemOperation {}
 
 pub trait Communicator {
-   fn all_reduce_into<S: AsSlice + ?Sized, O: Operation>(&self, send: &S, recv: &mut S, _op: O) {
-       recv.copy_from(send);
-   }
+    fn all_reduce_into<S: AsSlice + ?Sized, O: Operation>(&self, send: &S, recv: &mut S, _op: O) {
+        recv.copy_from(send);
+    }
 
-   fn rank(&self) -> i32 {
-       0
-   }
+    fn all_gather_into<T: Copy>(&self, send: &T, recv: &mut [T]) {
+        recv[0] = *send;
+    }
 
-   fn size(&self) -> i32 {
-       1
-   }
+    fn rank(&self) -> i32 {
+        0
+    }
+
+    fn size(&self) -> i32 {
+        1
+    }
 }
 
 pub struct SingleTask {}

@@ -4,16 +4,18 @@ use std::f64::consts;
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
+
 #[cfg(not(feature = "with-mpi"))]
-mod no_mpi;
+extern crate no_mpi as mpi;
+
 #[cfg(not(feature = "with-mpi"))]
-use no_mpi::*;
-#[cfg(not(feature = "with-mpi"))]
-use no_mpi as mpi;
+use mpi::Communicator;
 
 use rand::prelude::*;
 use rand_xoshiro::*;
 
+#[cfg(feature = "hdf5-output")]
+use hdf5_writer;
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 6);
 #[cfg(feature = "hdf5-output")]
@@ -210,20 +212,16 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = match input.read::<String,_>("laser:polarization") {
-        Ok(s) if s == "linear" => Polarization::Linear,
-        Ok(s) if s == "circular" => Polarization::Circular,
-        _ => {
-            if id == 0 {
-                println!(concat!(
-                    "Warning: laser polarisation has not been specified.\n",
-                    "         This will be an error in the next version of Ptarmigan.\n",
-                    "         Continuing with default value of 'circular'..."
-                ));
+    let pol = input.read::<String, _>("laser:polarization")
+        .and_then(|s| match s.as_str() {
+            "linear" => Ok(Polarization::Linear),
+            "circular" => Ok(Polarization::Circular),
+            _ => {
+                eprintln!("Laser polarization must be linear | circular.");
+                Err(InputError::conversion("laser:polarization", "polarization"))
             }
-            Polarization::Circular
-        }
-    };
+        })
+        ?;
 
     let (focusing, waist) = input
         .read("laser:waist")
@@ -680,326 +678,267 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     match output_mode {
-        #[cfg(feature = "enable-plain-text-dump")]
-        OutputMode::PlainText => {
-            #[cfg(feature = "with-mpi")]
-            let mut particles = [electrons, photons, positrons].concat();
-            #[cfg(not(feature = "with-mpi"))]
-            let particles = [electrons, photons, positrons].concat();
-
-            if id == 0 {
-                use std::fs::File;
-                use std::io::Write;
-                let filename = format!("{}{}{}{}particles.out", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-                let mut file = File::create(filename)?;
-                writeln!(file, "#{:-^1$}", "", 170)?;
-                writeln!(file, "# Particle properties when tracking stops")?;
-                writeln!(file, "#{:-^1$}", "", 170)?;
-                writeln!(file, "# First interacting species: {}\t\tSecond interacting species: laser", species.to_string())?;
-                writeln!(file, "# First initial particle energy = {:.4} +/- {:.4} GeV, Sigma_xyz = {:.2} {:.2} {:.2} microns, count = {}", 1.0e-3 * gamma * ELECTRON_MASS_MEV, 1.0e-3 * sigma * ELECTRON_MASS_MEV, 1.0e6 * radius, 1.0e6 * radius, 1.0e6 * length, (npart as f64) * weight)?;
-                writeln!(file, "# Laser peak intensity = {:.2} x 10^18 W/cm^2, wavelength = {:.2} nm, pulse length = {:.2} fs, beam waist = {:.2} microns", a0.powi(2) * 1.37 / (1.0e6 * wavelength).powi(2), 1.0e9 * wavelength, 1.0e15 * tau, 1.0e6 * waist)?;
-                writeln!(file, "# Pulse peak xi = {:.4}, chi = {:.4}", a0, (2.0 * consts::PI * SPEED_OF_LIGHT * COMPTON_TIME / wavelength) * a0 * gamma * (1.0 + angle.cos()))?;
-                writeln!(file, "#{:-^1$}", "", 170)?;
-                writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tp_x (GeV/c)\tp_y (GeV/c)\tp_z (GeV/c)\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
-                //writeln!(file, "# E (GeV)\tx (micron)\ty (micron)\tz (micron)\tbeta_x\tbeta_y\tbeta_z\tPDG_NUM\tMP_Wgt\tMP_ID\tt (um/c)\txi")?;
-                writeln!(file, "#{:-^1$}", "", 170)?;
-
-                for pt in &particles {
-                    writeln!(file, "{}", pt)?;
-                }
-
-                #[cfg(feature = "with-mpi")]
-                for recv_rank in 1..ntasks {
-                    particles = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
-                    for pt in &particles {
-                        writeln!(file, "{}", pt)?;
-                    }
-                }
-            }
-
-            #[cfg(feature = "with-mpi")]
-            if id != 0 {
-                world.process_at_rank(0).synchronous_send(&particles[..]);
-            }
-        },
         #[cfg(feature = "hdf5-output")]
         OutputMode::Hdf5 => {
-            if id == 0 {
-                let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
-                let file = hdf5::File::create(&filename)?;
+            use hdf5_writer::GroupHolder;
 
-                // Build info
-                file.create_group("build")?
-                    .new_data("version").write(env!("CARGO_PKG_VERSION"))?
-                    .new_data("branch").write(env!("VERGEN_GIT_BRANCH"))?
-                    .new_data("commit-hash").write(env!("VERGEN_GIT_SHA"))?
-                    .new_data("features").write(env!("PTARMIGAN_ACTIVE_FEATURES"))?;
+            let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let file = hdf5_writer::ParallelFile::create(&world, &filename)?;
 
-                // Top-level run information
-                let conf = file.create_group("config")?;
-                conf.new_data("mpi-tasks").write(&ntasks)?
-                    .new_data("input-file").write(raw_input.as_str())?;
+            // Build info
+            file.new_group("build")?
+                .only_task(0)
+                .new_dataset("version")?
+                    .write(env!("CARGO_PKG_VERSION"))?
+                .new_dataset("branch")?
+                    .write(env!("VERGEN_GIT_BRANCH"))?
+                .new_dataset("commit-hash")?
+                    .write(env!("VERGEN_GIT_SHA"))?
+                .new_dataset("features")?
+                    .write(env!("PTARMIGAN_ACTIVE_FEATURES"))?;
 
-                conf.create_group("unit")?
-                    .new_data("position").write(units.length.name())?
-                    .new_data("momentum").write(units.momentum.name())?;
+            // Top-level run information
+            let conf = file.new_group("config")?
+                .only_task(0);
 
-                // Parsed input configuration
-                conf.create_group("control")?
-                    .new_data("dt_multiplier").write(&dt_multiplier)?
-                    .new_data("radiation_reaction").write(&rr)?
-                    .new_data("pair_creation").write(&tracking_photons)?
-                    .new_data("lcfa").write(&using_lcfa)?
-                    .new_data("rng_seed").write(&rng_seed)?
-                    .new_data("increase_pair_rate_by").write(&pair_rate_increase)?
-                    .new_data("bandwidth_correction").write(&finite_bandwidth)?
-                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
-                    .new_data("select_multiplicity").with_condition(|| multiplicity.is_none()).write(&false)?;
+            conf.new_dataset("mpi-tasks")?.write(&ntasks)?
+                .new_dataset("input-file")?.write(raw_input.as_str())?;
 
-                conf.create_group("laser")?
-                    .new_data("a0")
-                        .with_unit("1")
-                        .with_desc("peak value of the laser normalized amplitude")
-                        .write(&a0)?
-                    .new_data("wavelength")
-                        .with_unit(units.length.name())
-                        .with_desc("wavelength of the carrier")
-                        .write(&wavelength.convert(&units.length))?
-                    .new_data("polarization")
-                        .with_desc("linear/circular")
-                        .write(&pol)?
-                    .new_data("focusing")
-                        .with_desc("true/false => pulse is modelled in 1d/3d")
-                        .write(&focusing)?
-                    .new_data("chirp_b")
-                        .with_unit("1")
-                        .with_desc("parameter that appears in carrier phase = phi + b phi^2")
-                        .write(&chirp_b)?
-                    .new_data("waist")
-                        .with_unit(units.length.name())
-                        .with_desc("radius in the focal plane at which intensity is 1/e^2 of its peak value")
-                        .with_condition(|| focusing)
-                        .write(&waist.convert(&units.length))?
-                    .new_data("fwhm_duration")
-                        .with_unit("s")
-                        .with_desc("full width at half maximum of the temporal intensity profile")
-                        .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
-                        .write(&tau)?
-                    .new_data("n_cycles")
-                        .with_unit("1")
-                        .with_desc("number of wavelengths corresponding to the total pulse duration")
-                        .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
-                        .write(&tau)?;
+            conf.new_group("unit")?
+                .new_dataset("position")?.write(units.length.name())?
+                .new_dataset("momentum")?.write(units.momentum.name())?;
 
-                let charge = match species {
-                    Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
-                    Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
-                    Species::Photon => 0.0,
-                };
+            // Parsed input configuration
+            conf.new_group("control")?
+                .new_dataset("dt_multiplier")?.write(&dt_multiplier)?
+                .new_dataset("radiation_reaction")?.write(&rr)?
+                .new_dataset("pair_creation")?.write(&tracking_photons)?
+                .new_dataset("lcfa")?.write(&using_lcfa)?
+                .new_dataset("rng_seed")?.write(&rng_seed)?
+                .new_dataset("increase_pair_rate_by")?.write(&pair_rate_increase)?
+                .new_dataset("bandwidth_correction")?.write(&finite_bandwidth)?
+                .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
+                .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_none()).write(&false)?;
 
-                let r_max = if normally_distributed {
-                    max_radius.unwrap_or(std::f64::INFINITY)
-                } else { // uniformly distributed
-                    radius
-                };
+            conf.new_group("laser")?
+                .new_dataset("a0")?
+                    .with_unit("1")?
+                    .with_desc("peak value of the laser normalized amplitude")?
+                    .write(&a0)?
+                .new_dataset("wavelength")?
+                    .with_unit(units.length.name())?
+                    .with_desc("wavelength of the carrier")?
+                    .write(&wavelength.convert(&units.length))?
+                .new_dataset("polarization")?
+                    .with_desc("linear/circular")?
+                    .write(&pol)?
+                .new_dataset("focusing")?
+                    .with_desc("true/false => pulse is modelled in 1d/3d")?
+                    .write(&focusing)?
+                .new_dataset("chirp_b")?
+                    .with_unit("1")?
+                    .with_desc("parameter that appears in carrier phase = phi + b phi^2")?
+                    .write(&chirp_b)?
+                .new_dataset("waist")?
+                    .with_unit(units.length.name())?
+                    .with_desc("radius in the focal plane at which intensity is 1/e^2 of its peak value")?
+                    .with_condition(|| focusing)
+                    .write(&waist.convert(&units.length))?
+                .new_dataset("fwhm_duration")?
+                    .with_unit("s")?
+                    .with_desc("full width at half maximum of the temporal intensity profile")?
+                    .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
+                    .write(&tau)?
+                .new_dataset("n_cycles")?
+                    .with_unit("1")?
+                    .with_desc("number of wavelengths corresponding to the total pulse duration")?
+                    .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
+                    .write(&tau)?;
 
-                conf.create_group("beam")?
-                    .new_data("n")
-                        .with_unit("1")
-                        .with_desc("number of primary macroparticles")
-                        .write(&npart)?
-                    .new_data("n_real")
-                        .with_unit("1")
-                        .with_desc("total number of real particles represented by the primary macroparticles")
-                        .write(&((npart as f64) * weight))?
-                    .new_data("charge").with_unit("C").write(&charge)?
-                    .new_data("species").write(species.to_string().as_str())?
-                    .new_data("gamma").with_unit("1").write(&gamma)?
-                    .new_data("sigma").with_unit("1").write(&sigma)?
-                    .new_data("bremsstrahlung_source").write(&use_brem_spec)?
-                    .new_data("gamma_min").with_unit("1").with_condition(|| use_brem_spec).write(&gamma_min)?
-                    .new_data("radius").with_unit(units.length.name()).write(&radius.convert(&units.length))?
-                    .new_data("radius_max")
-                        .with_unit(units.length.name())
-                        .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")
-                        .write(&r_max.convert(&units.length))?
-                    .new_data("length").with_unit(units.length.name()).write(&length.convert(&units.length))?
-                    .new_data("collision_angle").with_unit("rad").write(&angle)?
-                    .new_data("rms_divergence").with_unit("rad").write(&rms_div)?
-                    .new_data("offset").with_unit(units.length.name()).write(&offset.convert(&units.length))?
-                    .new_data("transverse_distribution_is_normal").write(&normally_distributed)?
-                    .new_data("longitudinal_distribution_is_normal").write(&true)?;
+            let charge = match species {
+                Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
+                Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
+                Species::Photon => 0.0,
+            };
 
-                conf.create_group("output")?
-                    .new_data("laser_defines_positive_z").write(&laser_defines_z)?
-                    .new_data("beam_defines_positive_z").write(&!laser_defines_z)?
-                    .new_data("discard_background_e").write(&discard_bg_e)?
-                    .new_data("min_energy").with_unit(units.energy.name()).write(&min_energy.convert(&units.energy))?;
+            let r_max = if normally_distributed {
+                max_radius.unwrap_or(std::f64::INFINITY)
+            } else { // uniformly distributed
+                radius
+            };
 
-                // Write particle data
-                let fs = file.create_group("final-state")?;
+            conf.new_group("beam")?
+                .new_dataset("n")?
+                    .with_unit("1")?
+                    .with_desc("number of primary macroparticles")?
+                    .write(&npart)?
+                .new_dataset("n_real")?
+                    .with_unit("1")?
+                    .with_desc("total number of real particles represented by the primary macroparticles")?
+                    .write(&((npart as f64) * weight))?
+                .new_dataset("charge")?.with_unit("C")?.write(&charge)?
+                .new_dataset("species")?.write(species.to_string().as_str())?
+                .new_dataset("gamma")?.with_unit("1")?.write(&gamma)?
+                .new_dataset("sigma")?.with_unit("1")?.write(&sigma)?
+                .new_dataset("bremsstrahlung_source")?.write(&use_brem_spec)?
+                .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| use_brem_spec).write(&gamma_min)?
+                .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
+                .new_dataset("radius_max")?
+                    .with_unit(units.length.name())?
+                    .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
+                    .write(&r_max.convert(&units.length))?
+                .new_dataset("length")?.with_unit(units.length.name())?.write(&length.convert(&units.length))?
+                .new_dataset("collision_angle")?.with_unit("rad")?.write(&angle)?
+                .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
+                .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
+                .new_dataset("transverse_distribution_is_normal")?.write(&normally_distributed)?
+                .new_dataset("longitudinal_distribution_is_normal")?.write(&true)?;
 
-                #[cfg(feature = "with-mpi")]
-                for recv_rank in 1..ntasks {
-                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
-                    photons.append(&mut recv);
-                }
-                let (x, p, pol, w, a, n, id, pid) = photons
-                    .iter()
-                    .map(|pt| (
-                        pt.position().convert(&units.length),
-                        pt.momentum().convert(&units.momentum),
-                        pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
-                        pt.weight(),
-                        pt.payload(),
-                        pt.interaction_count(),
-                        pt.id(),
-                        pt.parent_id()
-                    ))
-                    .unzip_n_vec();
-                drop(photons);
+            conf.new_group("output")?
+                .new_dataset("laser_defines_positive_z")?.write(&laser_defines_z)?
+                .new_dataset("beam_defines_positive_z")?.write(&!laser_defines_z)?
+                .new_dataset("discard_background_e")?.write(&discard_bg_e)?
+                .new_dataset("min_energy")?.with_unit(units.energy.name())?.write(&min_energy.convert(&units.energy))?;
 
-                fs.create_group("photon")?
-                    .new_data("weight")
-                        .with_unit("1")
-                        .with_desc("number of real photons each macrophoton represents")
-                        .write(&w[..])?
-                    .new_data("a0_at_creation")
-                        .with_unit("1")
-                        .with_desc("normalized amplitude at point of emission")
-                        .write(&a[..])?
-                    .new_data("n_pos")
-                        .with_unit("1")
-                        .with_desc("total probability of pair creation for the photon")
-                        .write(&n[..])?
-                    .new_data("id")
-                        .with_desc("unique ID of the photon")
-                        .write(&id[..])?
-                    .new_data("parent_id")
-                        .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")
-                        .write(&pid[..])?
-                    .new_data("polarization")
-                        .with_desc("Stokes parameters of the photon: I, Q, U, V")
-                        .with_unit("1")
-                        .write(&pol[..])?
-                    .new_data("position")
-                        .with_unit(units.length.name())
-                        .with_desc("four-position of the photon")
-                        .write(&x[..])?
-                    .new_data("momentum")
-                        .with_unit(units.momentum.name())
-                        .with_desc("four-momentum of the photon")
-                        .write(&p[..])?;
+            // Write particle data
+            let fs = file.new_group("final-state")?;
 
-                // Provide alias for a0
-                fs.group("photon")?.link_soft("a0_at_creation", "xi")?;
-                fs.group("photon")?.link_soft("polarization", "polarisation")?;
+            let (x, p, pol, w, a, n, id, pid) = photons
+                .iter()
+                .map(|pt| (
+                    pt.position().convert(&units.length),
+                    pt.momentum().convert(&units.momentum),
+                    pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
+                    pt.weight(),
+                    pt.payload(),
+                    pt.interaction_count(),
+                    pt.id(),
+                    pt.parent_id()
+                ))
+                .unzip_n_vec();
 
-                #[cfg(feature = "with-mpi")]
-                for recv_rank in 1..ntasks {
-                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
-                    electrons.append(&mut recv);
-                }
-                let (x, p, w, n, id, pid) = electrons
-                    .iter()
-                    .map(|pt| (
-                        pt.position().convert(&units.length),
-                        pt.momentum().convert(&units.momentum),
-                        pt.weight(),
-                        pt.interaction_count(),
-                        pt.id(),
-                        pt.parent_id()
-                    ))
-                    .unzip_n_vec();
-                drop(electrons);
+            drop(photons);
 
-                fs.create_group("electron")?
-                    .new_data("weight")
-                        .with_unit("1")
-                        .with_desc("number of real electrons each macroelectron represents")
-                        .write(&w[..])?
-                    .new_data("n_gamma")
-                        .with_unit("1")
-                        .with_desc("total number of photons emitted by the electron")
-                        .write(&n[..])?
-                    .new_data("id")
-                        .with_desc("unique ID of the electron")
-                        .write(&id[..])?
-                    .new_data("parent_id")
-                        .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")
-                        .write(&pid[..])?
-                    .new_data("position")
-                        .with_unit(units.length.name())
-                        .with_desc("four-position of the electron")
-                        .write(&x[..])?
-                    .new_data("momentum")
-                        .with_unit(units.momentum.name())
-                        .with_desc("four-momentum of the electron")
-                        .write(&p[..])?;
+            fs.new_group("photon")?
+                .new_dataset("weight")?
+                    .with_unit("1")?
+                    .with_desc("number of real photons each macrophoton represents")?
+                    .write(&w[..])?
+                .new_dataset("a0_at_creation")?
+                    .with_unit("1")?
+                    .with_desc("normalized amplitude (RMS under LMA) at point of emission")?
+                    .with_alias("xi")?
+                    .write(&a[..])?
+                .new_dataset("n_pos")?
+                    .with_unit("1")?
+                    .with_desc("total probability of pair creation for the photon")?
+                    .write(&n[..])?
+                .new_dataset("id")?
+                    .with_desc("unique ID of the photon")?
+                    .write(&id[..])?
+                .new_dataset("parent_id")?
+                    .with_desc("ID of the particle that created the photon (for primary particles, parent_id = id")?
+                    .write(&pid[..])?
+                .new_dataset("polarization")?
+                    .with_desc("Stokes parameters of the photon: I, Q, U, V")?
+                    .with_unit("1")?
+                    .with_alias("polarisation")?
+                    .write(&pol[..])?
+                .new_dataset("position")?
+                    .with_unit(units.length.name())?
+                    .with_desc("four-position of the photon")?
+                    .write(&x[..])?
+                .new_dataset("momentum")?
+                    .with_unit(units.momentum.name())?
+                    .with_desc("four-momentum of the photon")?
+                    .write(&p[..])?;
 
-                #[cfg(feature = "with-mpi")]
-                for recv_rank in 1..ntasks {
-                    let mut recv = world.process_at_rank(recv_rank).receive_vec::<Particle>().0;
-                    positrons.append(&mut recv);
-                }
-                let (x, x0, p, w, n, id, pid, a) = positrons
-                    .iter()
-                    .map(|pt| (
-                        pt.position().convert(&units.length),
-                        pt.was_created_at().convert(&units.length),
-                        pt.momentum().convert(&units.momentum),
-                        pt.weight(),
-                        pt.interaction_count(),
-                        pt.id(),
-                        pt.parent_id(),
-                        pt.payload()
-                    ))
-                    .unzip_n_vec();
-                drop(positrons);
+            let (x, p, w, n, id, pid) = electrons
+                .iter()
+                .map(|pt| (
+                    pt.position().convert(&units.length),
+                    pt.momentum().convert(&units.momentum),
+                    pt.weight(),
+                    pt.interaction_count(),
+                    pt.id(),
+                    pt.parent_id()
+                ))
+                .unzip_n_vec();
 
-                fs.create_group("positron")?
-                    .new_data("weight")
-                        .with_unit("1")
-                        .with_desc("number of real positrons each macropositron represents")
-                        .write(&w[..])?
-                    .new_data("a0_at_creation")
-                        .with_unit("1")
-                        .with_desc("normalized amplitude at point of creation")
-                        .write(&a[..])?
-                    .new_data("n_gamma")
-                        .with_unit("1")
-                        .with_desc("total number of photons emitted by the positron")
-                        .write(&n[..])?
-                    .new_data("id")
-                        .with_desc("unique ID of the positron")
-                        .write(&id[..])?
-                    .new_data("parent_id")
-                        .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")
-                        .write(&pid[..])?
-                    .new_data("position")
-                        .with_unit(units.length.name())
-                        .with_desc("four-position of the positron")
-                        .write(&x[..])?
-                    .new_data("position_at_creation")
-                        .with_unit(units.length.name())
-                        .with_desc("four-position at which the positron was created")
-                        .write(&x0[..])?
-                    .new_data("momentum")
-                        .with_unit(units.momentum.name())
-                        .with_desc("four-momentum of the positron")
-                        .write(&p[..])?;
+            drop(electrons);
 
-                fs.group("positron")?.link_soft("a0_at_creation", "xi")?;
-            } else {
-                #[cfg(feature = "with-mpi")] {
-                    world.process_at_rank(0).synchronous_send(&photons[..]);
-                    drop(photons);
-                    world.process_at_rank(0).synchronous_send(&electrons[..]);
-                    drop(electrons);
-                    world.process_at_rank(0).synchronous_send(&positrons[..]);
-                    drop(positrons);
-                }
-            }
+            fs.new_group("electron")?
+                .new_dataset("weight")?
+                    .with_unit("1")?
+                    .with_desc("number of real electrons each macroelectron represents")?
+                    .write(&w[..])?
+                .new_dataset("n_gamma")?
+                    .with_unit("1")?
+                    .with_desc("total number of photons emitted by the electron")?
+                    .write(&n[..])?
+                .new_dataset("id")?
+                    .with_desc("unique ID of the electron")?
+                    .write(&id[..])?
+                .new_dataset("parent_id")?
+                    .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")?
+                    .write(&pid[..])?
+                .new_dataset("position")?
+                    .with_unit(units.length.name())?
+                    .with_desc("four-position of the electron")?
+                    .write(&x[..])?
+                .new_dataset("momentum")?
+                    .with_unit(units.momentum.name())?
+                    .with_desc("four-momentum of the electron")?
+                    .write(&p[..])?;
+
+            let (x, x0, p, w, n, id, pid, a) = positrons
+                .iter()
+                .map(|pt| (
+                    pt.position().convert(&units.length),
+                    pt.was_created_at().convert(&units.length),
+                    pt.momentum().convert(&units.momentum),
+                    pt.weight(),
+                    pt.interaction_count(),
+                    pt.id(),
+                    pt.parent_id(),
+                    pt.payload()
+                ))
+                .unzip_n_vec();
+
+            drop(positrons);
+
+            fs.new_group("positron")?
+                .new_dataset("weight")?
+                    .with_unit("1")?
+                    .with_desc("number of real positrons each macropositron represents")?
+                    .write(&w[..])?
+                .new_dataset("a0_at_creation")?
+                    .with_unit("1")?
+                    .with_desc("normalized amplitude (RMS under LMA) at point of creation")?
+                    .with_alias("xi")?
+                    .write(&a[..])?
+                .new_dataset("n_gamma")?
+                    .with_unit("1")?
+                    .with_desc("total number of photons emitted by the positron")?
+                    .write(&n[..])?
+                .new_dataset("id")?
+                    .with_desc("unique ID of the positron")?
+                    .write(&id[..])?
+                .new_dataset("parent_id")?
+                    .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")?
+                    .write(&pid[..])?
+                .new_dataset("position")?
+                    .with_unit(units.length.name())?
+                    .with_desc("four-position of the positron")?
+                    .write(&x[..])?
+                .new_dataset("position_at_creation")?
+                    .with_unit(units.length.name())?
+                    .with_desc("four-position at which the positron was created")?
+                    .write(&x0[..])?
+                .new_dataset("momentum")?
+                    .with_unit(units.momentum.name())?
+                    .with_desc("four-momentum of the positron")?
+                    .write(&p[..])?;
         },
         OutputMode::None => {},
     }

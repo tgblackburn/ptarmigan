@@ -4,7 +4,7 @@
 use {mpi::traits::*, mpi::datatype::UserDatatype};
 
 #[cfg(feature = "hdf5-output")]
-use hdf5::types::*;
+use hdf5_writer::{Hdf5Type, Datatype};
 
 use super::ThreeVector;
 
@@ -23,12 +23,9 @@ unsafe impl Equivalence for FourVector {
 }
 
 #[cfg(feature = "hdf5-output")]
-unsafe impl H5Type for FourVector {
-    fn type_descriptor() -> TypeDescriptor {
-        TypeDescriptor::FixedArray(
-            Box::new(f64::type_descriptor()),
-            4,
-        )
+impl Hdf5Type for FourVector {
+    fn new() -> Datatype {
+        f64::array(4)
     }
 }
 

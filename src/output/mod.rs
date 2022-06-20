@@ -7,7 +7,7 @@ use std::str::FromStr;
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
 #[cfg(not(feature = "with-mpi"))]
-use crate::no_mpi::*;
+use no_mpi::*;
 
 use crate::particle::*;
 
@@ -24,11 +24,6 @@ pub use stats::*;
 
 mod units;
 pub use units::*;
-
-#[cfg(feature = "hdf5-output")]
-mod binary;
-#[cfg(feature = "hdf5-output")]
-pub use binary::*;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FileFormat {

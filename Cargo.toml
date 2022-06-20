@@ -7,6 +7,7 @@ publish = false
 readme = "README.md"
 license = "Apache-2.0"
 build = "build.rs"
+rust-version = "1.60"
 
 [dependencies]
 mpi = {version = "0.5", optional = true, default-features = false}
@@ -18,17 +19,20 @@ yaml-rust = "0.4.5"
 num-complex = "0.4.0"
 enum_dispatch = "0.3"
 memoffset = {version = "0.5", optional = true}
-hdf5 = {version = "0.8.0", optional = true}
+hdf5-writer = {path = "./hdf5-writer", version = "0.1", optional = true}
 unzip-n = {version = "0.1.2", optional = true}
+no-mpi = {path = "./no-mpi", version = "0.1"}
+
+[workspace]
+members = ["hdf5-writer", "no-mpi"]
 
 [features]
 default = []
-hdf5-output = ["hdf5", "unzip-n"]
-with-mpi = ["mpi", "memoffset"]
+hdf5-output = ["hdf5-writer", "unzip-n"]
+with-mpi = ["mpi", "memoffset", "hdf5-writer?/with-mpi"]
 compensating-chirp = []
 cos2-envelope-in-3d = []
 leading-order-only = []
-enable-plain-text-dump = []
 
 [build-dependencies]
 vergen = "4.0.3"

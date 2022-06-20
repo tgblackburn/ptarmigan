@@ -1,12 +1,18 @@
 # Changelog
 
-## v0.10.2
+## v1.0.0
 
 In progress
 
 Added:
 
 * Particle-beam transverse profile can be given by a truncated normal distribution.
+* Parallelized HDF5 output.
+
+Removed:
+
+* Plain-text output of complete particle data.
+* `circular` as default choice of laser polarization; must be given explicitly.
 
 ## v0.10.1
 
