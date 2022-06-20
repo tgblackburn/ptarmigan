@@ -733,7 +733,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .with_desc("linear/circular")?
                     .write(&pol)?
                 .new_dataset("focusing")?
-                    .with_desc("true/false => pulse is modelled in 1d/3d")?
+                    .with_desc("true/false => pulse is modelled in 3d/1d")?
                     .write(&focusing)?
                 .new_dataset("chirp_b")?
                     .with_unit("1")?

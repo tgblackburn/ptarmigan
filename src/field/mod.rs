@@ -30,8 +30,8 @@ pub enum Polarization {
 impl Hdf5Type for Polarization {
     fn new() -> Datatype {
         Datatype::enumeration(&[
-            ("linear", Polarization::Linear as i32),
-            ("circular", Polarization::Circular as i32),
+            ("linear", Polarization::Linear as u8),
+            ("circular", Polarization::Circular as u8),
         ])
     }
 }
