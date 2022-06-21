@@ -45,8 +45,6 @@ use input::*;
 #[derive(Copy,Clone,PartialEq)]
 enum OutputMode {
     None,
-    #[cfg(feature = "enable-plain-text-dump")]
-    PlainText,
     #[cfg(feature = "hdf5-output")]
     Hdf5,
 }
@@ -358,13 +356,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .unwrap_or_else(|_| "".to_owned());
 
-    let output_mode = match input.read::<String,_>("output:dump_all_particles") {
-        #[cfg(feature = "enable-plain-text-dump")]
-        Ok(s) if s == "plain_text" || s == "plain-text" => OutputMode::PlainText,
-        #[cfg(feature = "hdf5-output")]
-        Ok(s) if s == "hdf5" => OutputMode::Hdf5,
-        _ => OutputMode::None,
-    };
+    let output_mode = input.read::<String, _>("output:dump_all_particles")
+        .and_then(|s| match s.as_str() {
+            "hdf5" | "true" => Ok(OutputMode::Hdf5),
+            _ => {
+                eprintln!("Specified format for complete data output (dump_all_particles: ...) is not 'hdf5'.");
+                Err(InputError::conversion("output:dump_all_particles", "dump_all_particles"))
+            }
+        })
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Conversion => Err(e),
+            _ => Ok(OutputMode::None)
+        })
+        ?;
 
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
         Ok(s) if s == "beam" => false,
