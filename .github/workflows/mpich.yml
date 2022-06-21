@@ -6,15 +6,13 @@ on:
 
 jobs:
   no-hdf5-output:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v1
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install mpich texinfo
+        sudo apt-get install mpich
     - name: Build
       run: cargo build --release --verbose --features with-mpi
     - name: Run tests

@@ -1,0 +1,19 @@
+name: OpenMPI build
+on:
+  push:
+    branches: master
+  workflow_dispatch:
+
+jobs:
+  no-hdf5-output:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install openmpi-common libopenmpi-dev
+    - name: Build
+      run: cargo build --release --verbose --features with-mpi
+    - name: Run tests
+      run: cargo test --release --verbose --features with-mpi -- --test-threads=1
