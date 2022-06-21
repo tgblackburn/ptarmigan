@@ -186,7 +186,7 @@ dependencies = [
  "cfg-if 1.0.0",
  "crossbeam-utils",
  "lazy_static 1.4.0",
- "memoffset 0.6.5",
+ "memoffset",
  "scopeguard",
 ]
 
@@ -494,15 +494,6 @@ checksum = "3728d817d99e5ac407411fa471ff9800a778d88a24685968b36824eaf4bee400"
 
 [[package]]
 name = "memoffset"
-version = "0.5.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "043175f069eda7b85febe4a74abbaeff828d9f8b448515d3151a14a3542811aa"
-dependencies = [
- "autocfg",
-]
-
-[[package]]
-name = "memoffset"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
@@ -677,7 +668,6 @@ version = "0.10.1"
 dependencies = [
  "enum_dispatch",
  "hdf5-writer",
- "memoffset 0.5.6",
  "meval",
  "mpi",
  "no-mpi",

@@ -1,8 +1,5 @@
 //! Defines a relativistic 4-vector: (t, x, y, z)
 
-#[cfg(feature = "with-mpi")]
-use {mpi::traits::*, mpi::datatype::UserDatatype};
-
 #[cfg(feature = "hdf5-output")]
 use hdf5_writer::{Hdf5Type, Datatype};
 
@@ -10,17 +7,8 @@ use super::ThreeVector;
 
 /// A four-vector
 #[derive(Clone, Copy, Debug, PartialEq)]
-//#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
 #[repr(C)]
 pub struct FourVector(f64, f64, f64, f64);
-
-#[cfg(feature = "with-mpi")]
-unsafe impl Equivalence for FourVector {
-    type Out = UserDatatype;
-    fn equivalent_datatype() -> Self::Out {
-        UserDatatype::contiguous(4, &f64::equivalent_datatype())
-    }
-}
 
 #[cfg(feature = "hdf5-output")]
 impl Hdf5Type for FourVector {
