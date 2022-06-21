@@ -49,18 +49,37 @@ enum OutputMode {
     Hdf5,
 }
 
-#[allow(unused)]
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_multiplier: f64, current_id: &mut u64, rate_increase: f64, discard_bg_e: bool, rr: bool, tracking_photons: bool, t_stop: f64) -> Shower {
+/// Wrapper around detailed optional arguments to [collide](collide)
+#[derive(Copy, Clone)]
+struct CollideOptions {
+    /// Scale the automatic timestep by a factor (generally < 1)
+    dt_multiplier: f64,
+    /// Increase the pair creation rate by a factor (> 1)
+    rate_increase: f64,
+    /// Halt particle tracking (if not already stopped!) at a given time
+    t_stop: f64,
+    /// Discard electrons that have not radiated from output
+    discard_bg_e: bool,
+    /// Enable/disable recoil on photon emission
+    rr: bool,
+    /// Track/do not track photons through the EM field.
+    tracking_photons: bool,
+}
+
+/// Propagates a single particle through a region of EM field, returning a Shower containing
+/// the primary and any secondary particles generated.
+/// `current_id` is incremented every time a new particle is generated.
+fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current_id: &mut u64, options: CollideOptions) -> Shower {
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let dt = field.max_timestep().unwrap_or(1.0);
-    let dt = dt * dt_multiplier;
+    let dt = dt * options.dt_multiplier;
     let primary_id = incident.id();
 
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
             Species::Electron | Species::Positron => {
-                while field.contains(pt.position()) && pt.time() < t_stop {
+                while field.contains(pt.position()) && pt.time() < options.t_stop {
                     let (r, mut u, dt_actual) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
@@ -80,7 +99,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
-                        if rr {
+                        if options.rr {
                             u = u_prime;
                         }
 
@@ -91,19 +110,19 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
                     pt.with_normalized_momentum(u);
                 }
 
-                if pt.id() != primary_id || !discard_bg_e || pt.interaction_count() > 0.0 {
+                if pt.id() != primary_id || !options.discard_bg_e || pt.interaction_count() > 0.0 {
                     secondaries.push(pt);
                 }
             },
 
             Species::Photon => {
                 let mut has_decayed = false;
-                while field.contains(pt.position()) && pt.time() < t_stop && !has_decayed && tracking_photons {
+                while field.contains(pt.position()) && pt.time() < options.t_stop && !has_decayed && options.tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
 
-                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, rate_increase);
+                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
@@ -147,14 +166,15 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, dt_mult
 /// Returns the ratio of the pair creation and photon emission rates,
 /// for a photon (or electron) with normalized energy `gamma` in a
 /// laser with amplitude `a0` and wavelength `wavelength`.
-fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
+fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization) -> f64 {
     let kappa: FourVector = SPEED_OF_LIGHT * COMPTON_TIME * 2.0 * consts::PI * FourVector::new(1.0, 0.0, 0.0, 1.0) / wavelength;
     let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
     let u: FourVector = FourVector::new(0.0, 0.0, 0.0, -gamma).unitize();
-    let q: FourVector = u + a0 * a0 * kappa / (2.0 * kappa * u);
+    let a_rms = match pol { Polarization::Linear => a0 / consts::SQRT_2, Polarization::Circular => a0 };
+    let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a0, dt, Polarization::Circular);
-    let photon_rate = nonlinear_compton::probability(kappa, q, dt, Polarization::Circular);
+    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
     } else {
@@ -476,7 +496,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Ok(s) if s == "auto" => if using_lcfa {
                 Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
             } else {
-                Ok(increase_pair_rate_by(gamma, a0, wavelength))
+                Ok(increase_pair_rate_by(gamma, a0, wavelength, pol))
             },
             _ => Err(e),
         })
@@ -597,12 +617,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
     };
 
+    let options = CollideOptions {
+        dt_multiplier,
+        rate_increase: pair_rate_increase,
+        t_stop,
+        discard_bg_e,
+        rr,
+        tracking_photons,
+    };
+
     let (mut electrons, mut photons, mut positrons) = primaries
         .chunks(num / 20)
         .enumerate()
         .map(|(i, chk)| {
             let tmp = chk.iter()
-                .map(|pt| collide(&laser, *pt, &mut rng, dt_multiplier, &mut current_id, pair_rate_increase, discard_bg_e, rr, tracking_photons, t_stop))
+                .map(|pt| collide(&laser, *pt, &mut rng, &mut current_id, options))
                 .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
             if id == 0 {
                 println!(
