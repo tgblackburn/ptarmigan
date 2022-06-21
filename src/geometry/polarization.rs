@@ -30,7 +30,7 @@ unsafe impl Equivalence for StokesVector {
 #[cfg(feature = "hdf5-output")]
 impl Hdf5Type for StokesVector {
     fn new() -> Datatype {
-        f64::array(4)
+        Datatype::array::<f64>(4)
     }
 }
 

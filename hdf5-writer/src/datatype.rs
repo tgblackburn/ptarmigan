@@ -23,18 +23,59 @@ impl Datatype {
         self.id
     }
 
-    /// Construct an HDF5-interpretable enumeration datatype.
+    /// Construct an HDF5-interpretable enumeration datatype from an array
+    /// of (name, value) tuples.
     /// The source enum must have a primitive representation (e.g. `#[repr(u8)]`) based on
     /// the integer type `T`.
-    pub fn enumeration<T>(src: &[(&str, T)]) -> Self where T: Hdf5EnumBaseType {
+    ///
+    /// This function is marked unsafe because the user must guarantee that the
+    /// target enum is field-less and represented by the integral type `T`.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// #[repr(u8)]
+    /// enum Suit {
+    ///     Clubs,
+    ///     Spades,
+    ///     Hearts,
+    ///     Diamonds,
+    /// }
+    ///
+    /// impl Hdf5Type for Suit {
+    ///     fn new() -> Datatype {
+    ///         unsafe {
+    ///             Datatype::enumeration::<u8>(&[
+    ///                 ("clubs",    Suit::Clubs as u8),
+    ///                 ("spades",   Suit::Spades as u8),
+    ///                 ("hearts",   Suit::Hearts as u8),
+    ///                 ("diamonds", Suit::Diamonds as u8),
+    ///             ])
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub unsafe fn enumeration<T>(src: &[(&str, T)]) -> Self where T: Hdf5EnumBaseType {
+        let type_id = check!( h5t::H5Tenum_create(T::new().id()) ).unwrap();
+        for (name, value) in src.iter() {
+            let name = to_c_string(name).unwrap();
+            let value: *const T = value;
+            check!( h5t::H5Tenum_insert(type_id, name.as_ptr(), value as *const ffi::c_void) ).unwrap();
+        }
+        Datatype { builtin: false, id: type_id }
+    }
+
+    /// Construct an HDF5 datatype which is a contiguous array
+    /// of `T` of given length
+    pub fn array<T>(len: usize) -> Self where T: Hdf5Type {
+        let dims = [len as h5::hsize_t];
+        let base_type = <T as Hdf5Type>::new();
+        let base_id = base_type.id();
         let id = unsafe {
-            let type_id = check!( h5t::H5Tenum_create(T::new().id()) ).unwrap();
-            for (name, value) in src.iter() {
-                let name = to_c_string(name).unwrap();
-                let value: *const T = value;
-                check!( h5t::H5Tenum_insert(type_id, name.as_ptr(), value as *const ffi::c_void) ).unwrap();
-            }
-            type_id
+            check!(h5t::H5Tarray_create(base_id, 1, dims.as_ptr()))
+                .unwrap_or_else(|_|
+                    panic!("Failed to build HDF5 datatype for [{}; {}]", std::any::type_name::<Self>(), len)
+                )
         };
         Datatype { builtin: false, id }
     }
@@ -56,30 +97,14 @@ impl Drop for Datatype {
 pub trait Hdf5Type {
     /// Construct and register a new HDF5-interpretable datatype
     fn new() -> Datatype;
-
-    /// Construct and register an HDF5 datatype which is an array
-    /// of data elements of given length
-    fn array(len: i32) -> Datatype {
-        let dims = [len as h5::hsize_t];
-        let base_type = <Self as Hdf5Type>::new();
-        let base_id = base_type.id();
-        let id = unsafe {
-            check!(h5t::H5Tarray_create(base_id, 1, dims.as_ptr()))
-                .unwrap_or_else(|_|
-                    panic!("Failed to build HDF5 datatype for [{}; {}]", std::any::type_name::<Self>(), len)
-                )
-        };
-        Datatype {builtin: false, id}
-    }
 }
 
 impl Hdf5Type for bool {
     fn new() -> Datatype {
-        // bool is guaranteed to be one byte in size
-        Datatype::enumeration(&[
-            ("false", false as u8),
-            ("true", true as u8),
-        ])
+        unsafe {
+            // bool is guaranteed to be one byte in size
+            Datatype::enumeration::<u8>(&[("false", 0), ("true", 1)])
+        }
     }
 }
 
@@ -125,8 +150,11 @@ impl_hdf5type_for_builtin!(f32, H5T_IEEE_F32LE, H5T_IEEE_F32BE);
 impl_hdf5type_for_builtin!(f64, H5T_IEEE_F64LE, H5T_IEEE_F64BE);
 
 /// Indicates that the implementing type is an integer that can be
-/// used as the discriminant of an HDF5 enumeration
-pub trait Hdf5EnumBaseType: Hdf5Type {}
+/// used as the discriminant of an HDF5 enumeration.
+/// Possible types are `{i|u}{8|16|32|64|size}`.
+/// This trait is sealed and cannot be implemented for new types.
+pub trait Hdf5EnumBaseType: Hdf5Type + private::Sealed {}
+
 impl Hdf5EnumBaseType for i8 {}
 impl Hdf5EnumBaseType for i16 {}
 impl Hdf5EnumBaseType for i32 {}
@@ -137,3 +165,17 @@ impl Hdf5EnumBaseType for u16 {}
 impl Hdf5EnumBaseType for u32 {}
 impl Hdf5EnumBaseType for u64 {}
 impl Hdf5EnumBaseType for usize {}
+
+mod private {
+    pub trait Sealed {}
+    impl Sealed for i8 {}
+    impl Sealed for i16 {}
+    impl Sealed for i32 {}
+    impl Sealed for i64 {}
+    impl Sealed for isize {}
+    impl Sealed for u8 {}
+    impl Sealed for u16 {}
+    impl Sealed for u32 {}
+    impl Sealed for u64 {}
+    impl Sealed for usize {}
+}

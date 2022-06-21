@@ -29,10 +29,10 @@ pub enum Polarization {
 #[cfg(feature = "hdf5-output")]
 impl Hdf5Type for Polarization {
     fn new() -> Datatype {
-        Datatype::enumeration(&[
+        unsafe { Datatype::enumeration(&[
             ("linear", Polarization::Linear as u8),
             ("circular", Polarization::Circular as u8),
-        ])
+        ])}
     }
 }
 

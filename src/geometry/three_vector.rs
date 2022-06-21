@@ -16,7 +16,7 @@ pub struct ThreeVector {
 #[cfg(feature = "hdf5-output")]
 impl Hdf5Type for ThreeVector {
     fn new() -> Datatype {
-        f64::array(3)
+        Datatype::array::<f64>(3)
     }
 }
 
