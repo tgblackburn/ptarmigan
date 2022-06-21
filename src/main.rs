@@ -378,9 +378,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let output_mode = input.read::<String, _>("output:dump_all_particles")
         .and_then(|s| match s.as_str() {
-            "hdf5" | "true" => Ok(OutputMode::Hdf5),
+            #[cfg(feature = "hdf5-output")]
+            "hdf5" => Ok(OutputMode::Hdf5),
+            #[cfg(not(feature = "hdf5-output"))]
+            "hdf5" => {
+                eprintln!("Warning: complete data output has been requested (dump_all_particles: hdf5), but ptarmigan has not been compiled with HDF5 support. No output will be generated.");
+                Ok(OutputMode::None)
+            },
             _ => {
-                eprintln!("Specified format for complete data output (dump_all_particles: ...) is not 'hdf5'.");
+                eprintln!("Specified format for complete data output (dump_all_particles: ...) is invalid.");
                 Err(InputError::conversion("output:dump_all_particles", "dump_all_particles"))
             }
         })
