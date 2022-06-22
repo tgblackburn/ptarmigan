@@ -38,3 +38,7 @@ vergen = "4.0.3"
 
 [dev-dependencies]
 rayon = "1.5.1"
+
+[patch.crates-io]
+mpi = {git = "https://github.com/tgblackburn/rsmpi", branch = "patch"}
+mpi-sys = {git = "https://github.com/tgblackburn/rsmpi", branch = "patch"}

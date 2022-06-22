@@ -74,8 +74,7 @@ checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
 [[package]]
 name = "build-probe-mpi"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4d5ddc2cdf4852ffc94a5f68c41cd4a0c8164984725a2435d9d2e8763edad88"
+source = "git+https://github.com/tgblackburn/rsmpi?branch=patch#a13e83abe04d04013ec73e24c70ad14818037e4e"
 dependencies = [
  "pkg-config",
 ]
@@ -514,8 +513,7 @@ dependencies = [
 [[package]]
 name = "mpi"
 version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7446e2b185924eb36cb5b6723c56c9da5a91e9e3246e2b58f6974b58376f0abb"
+source = "git+https://github.com/tgblackburn/rsmpi?branch=patch#a13e83abe04d04013ec73e24c70ad14818037e4e"
 dependencies = [
  "conv",
  "mpi-sys",
@@ -525,8 +523,7 @@ dependencies = [
 [[package]]
 name = "mpi-sys"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d6059465fe3500b0acdef3107ce0fa4635f4672725a74be5353e5e1fc8c4745"
+source = "git+https://github.com/tgblackburn/rsmpi?branch=patch#a13e83abe04d04013ec73e24c70ad14818037e4e"
 dependencies = [
  "bindgen",
  "build-probe-mpi",
