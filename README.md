@@ -1,6 +1,6 @@
 # ptarmigan
 
-![example workflow](https://github.com/tgblackburn/ptarmigan/actions/workflows/mpich.yml/badge.svg) ![version](https://img.shields.io/github/v/release/tgblackburn/ptarmigan?include_prereleases) ![license](https://img.shields.io/github/license/tgblackburn/ptarmigan)
+![OpenMPI build status](https://github.com/tgblackburn/ptarmigan/actions/workflows/open-mpi.yml/badge.svg) ![MPICH build status](https://github.com/tgblackburn/ptarmigan/actions/workflows/mpich.yml/badge.svg) ![version](https://img.shields.io/github/v/release/tgblackburn/ptarmigan?include_prereleases) ![license](https://img.shields.io/github/license/tgblackburn/ptarmigan)
 
 Simulate the interaction between a high-energy particle beam and an intense laser pulse, including the classical dynamics and strong-field QED processes.
 
@@ -16,8 +16,9 @@ where `NUM_THREADS` is the number of separate threads that Cargo is allowed to s
 
 The following optional features are available:
 
-* `with-mpi`, which enables parallel processing via MPI. Requires an MPI library (ptarmigan is tested against OpenMPI, versions <= 3.1, and MPICH) and the Clang compiler.
+* `with-mpi`, which enables parallel processing via MPI. Requires an MPI library (ptarmigan is tested against OpenMPI and MPICH) and the Clang compiler.
 * `hdf5-output`, which enables output of complete particle data as an HDF5 file. Requires [libhdf5](https://www.hdfgroup.org/solutions/hdf5/).
+If `with-mpi` and `hdf5-output` are both specified, the HDF5 library must have been compiled with MPI support.
 
 To build with a combination of these features, run:
 

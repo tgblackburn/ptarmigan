@@ -12,8 +12,21 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install openmpi-common libopenmpi-dev
+        sudo apt-get install libopenmpi-dev
     - name: Build
       run: cargo build --release --verbose --features with-mpi
     - name: Run tests
       run: cargo test --release --verbose --features with-mpi -- --test-threads=1
+
+  hdf5-output:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install libopenmpi-dev libhdf5-openmpi-dev
+    - name: Build
+      run: cargo build --release --verbose --features with-mpi,hdf5-output
+    - name: Run tests
+      run: cargo test --release --verbose --features with-mpi,hdf5-output -- --test-threads=1

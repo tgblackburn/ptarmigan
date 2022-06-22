@@ -1,4 +1,4 @@
-name: MPI build
+name: MPICH build
 on:
   push:
     branches: master

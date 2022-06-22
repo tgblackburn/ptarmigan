@@ -9,6 +9,10 @@ Added:
 * Particle-beam transverse profile can be given by a truncated normal distribution.
 * Parallelized HDF5 output.
 
+Fixed:
+
+* Building against OpenMPI v4.0+.
+
 Removed:
 
 * Plain-text output of complete particle data.
