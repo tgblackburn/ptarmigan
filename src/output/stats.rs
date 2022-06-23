@@ -5,7 +5,7 @@ use std::fmt;
 #[cfg(feature = "with-mpi")]
 use mpi::{traits::*, collective::SystemOperation};
 #[cfg(not(feature = "with-mpi"))]
-use crate::no_mpi::*;
+use no_mpi::*;
 
 use crate::particle::*;
 

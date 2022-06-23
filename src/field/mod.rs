@@ -4,6 +4,9 @@ use rand::prelude::*;
 use enum_dispatch::enum_dispatch;
 use crate::geometry::{FourVector, StokesVector};
 
+#[cfg(feature = "hdf5-output")]
+use hdf5_writer::{Hdf5Type, Datatype};
+
 mod focused_laser;
 mod fast_focused_laser;
 mod plane_wave;
@@ -17,11 +20,20 @@ pub use self::fast_plane_wave::*;
 /// The polarization of an electromagnetic wave
 #[allow(unused)]
 #[derive(Copy, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "hdf5-output", derive(hdf5::H5Type))]
 #[repr(u8)]
 pub enum Polarization {
     Linear = 0,
     Circular = 1,
+}
+
+#[cfg(feature = "hdf5-output")]
+impl Hdf5Type for Polarization {
+    fn new() -> Datatype {
+        unsafe { Datatype::enumeration(&[
+            ("linear", Polarization::Linear as u8),
+            ("circular", Polarization::Circular as u8),
+        ])}
+    }
 }
 
 /// Specific field structures, i.e. types that implement `trait Field`.
