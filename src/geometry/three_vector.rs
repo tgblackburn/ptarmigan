@@ -1,7 +1,7 @@
 //! Defines a spatial 3-vector: (x, y, z)
 
 #[cfg(feature = "hdf5-output")]
-use hdf5::types::*;
+use hdf5_writer::{Hdf5Type, Datatype};
 
 use super::FourVector;
 
@@ -14,12 +14,9 @@ pub struct ThreeVector {
 }
 
 #[cfg(feature = "hdf5-output")]
-unsafe impl H5Type for ThreeVector {
-    fn type_descriptor() -> TypeDescriptor {
-        TypeDescriptor::FixedArray(
-            Box::new(f64::type_descriptor()),
-            3,
-        )
+impl Hdf5Type for ThreeVector {
+    fn new() -> Datatype {
+        Datatype::array::<f64>(3)
     }
 }
 

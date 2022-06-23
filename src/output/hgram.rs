@@ -49,7 +49,7 @@ impl<W> Write for WriteCounter<W> where W: Write {
 #[cfg(feature = "with-mpi")]
 use mpi::{traits::*, collective::SystemOperation};
 #[cfg(not(feature = "with-mpi"))]
-use crate::no_mpi::*;
+use no_mpi::*;
 
 #[derive(Copy,Clone,PartialEq)]
 pub enum BinSpec {
@@ -563,7 +563,7 @@ mod tests {
     #[cfg(feature = "with-mpi")]
     use mpi::environment::Universe;
     #[cfg(not(feature = "with-mpi"))]
-    use crate::no_mpi as mpi;
+    extern crate no_mpi as mpi;
 
     static mut UNIVERSE: Option<Universe> = None;
 

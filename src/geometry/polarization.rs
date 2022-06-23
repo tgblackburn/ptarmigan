@@ -3,11 +3,8 @@
 use num_complex::Complex;
 use super::ThreeVector;
 
-#[cfg(feature = "with-mpi")]
-use {mpi::traits::*, mpi::datatype::UserDatatype};
-
 #[cfg(feature = "hdf5-output")]
-use hdf5::types::*;
+use hdf5_writer::{Hdf5Type, Datatype};
 
 /// A set of Stokes parameters
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,21 +16,10 @@ pub struct StokesVector {
     v: f64,
 }
 
-#[cfg(feature = "with-mpi")]
-unsafe impl Equivalence for StokesVector {
-    type Out = UserDatatype;
-    fn equivalent_datatype() -> Self::Out {
-        UserDatatype::contiguous(4, &f64::equivalent_datatype())
-    }
-}
-
 #[cfg(feature = "hdf5-output")]
-unsafe impl H5Type for StokesVector {
-    fn type_descriptor() -> TypeDescriptor {
-        TypeDescriptor::FixedArray(
-            Box::new(f64::type_descriptor()),
-            4,
-        )
+impl Hdf5Type for StokesVector {
+    fn new() -> Datatype {
+        Datatype::array::<f64>(4)
     }
 }
 

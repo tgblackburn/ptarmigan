@@ -1,4 +1,4 @@
-name: MPICH build
+name: OpenMPI build
 on:
   push:
     branches: master
@@ -12,7 +12,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install mpich
+        sudo apt-get install libopenmpi-dev
     - name: Build
       run: cargo build --release --verbose --features with-mpi
     - name: Run tests
@@ -25,7 +25,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install mpich libhdf5-mpich-dev
+        sudo apt-get install libopenmpi-dev libhdf5-openmpi-dev
     - name: Build
       run: cargo build --release --verbose --features with-mpi,hdf5-output
     - name: Run tests
