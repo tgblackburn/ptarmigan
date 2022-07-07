@@ -61,7 +61,7 @@ pub fn generate<R: Rng>(ell: FourVector, _sv: StokesVector, k: FourVector, a: f6
 
     let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
     let epsilon = {
-        let k = -ThreeVector::from(k).normalize();
+        let k = along;
         k.cross(epsilon.cross(k)).normalize()
     };
     let perp = epsilon.rotate_around(along, cphi_zmf);
@@ -70,6 +70,12 @@ pub fn generate<R: Rng>(ell: FourVector, _sv: StokesVector, k: FourVector, a: f6
     let q: ThreeVector = p_zmf * (cos_theta_zmf * along + (1.0 - cos_theta_zmf.powi(2)).sqrt() * perp);
     let q = FourVector::lightlike(q[0], q[1], q[2]).with_sqr(1.0 + a * a);
     let q = q.boost_by(u_zmf.reverse());
+
+    // Verify construction of positron momentum
+    // println!("s: sampled = {:.6e}, reconstructed = {:.6e}", s, 1.0 - (k * q) / (k * ell));
+    let s_new = 1.0 - (k * q) / (k * ell); // flipped sign
+    let error = (s - s_new).abs() / s;
+    assert!(error < 1.0e-3);
 
     (n, q)
 }
