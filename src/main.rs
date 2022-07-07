@@ -60,6 +60,8 @@ struct CollideOptions {
     t_stop: f64,
     /// Discard electrons that have not radiated from output
     discard_bg_e: bool,
+    /// Discard photons that have not pair-created from output
+    discard_bg_ph: bool,
     /// Enable/disable recoil on photon emission
     rr: bool,
     /// Track/do not track photons through the EM field.
@@ -150,7 +152,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     pt.with_position(r);
                 }
 
-                if !has_decayed {
+                if !has_decayed && !options.discard_bg_ph {
                     secondaries.push(pt);
                 }
             }
@@ -401,7 +403,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         _ => true,
     };
 
-    let discard_bg_e = input.read("output:discard_background_e").unwrap_or(false);
+    let (discard_bg_e, discard_bg_ph) = input.read::<bool, _>("output:discard_background")
+        .map_or_else(
+            |_e| {
+                // for backwards compatibility
+                let discard_bg_e = input.read("output:discard_background_e").unwrap_or(false);
+                (discard_bg_e, false)
+            },
+            |val| (val, val)
+        );
 
     let min_energy: f64 = input
         .read("output:min_energy")
@@ -628,6 +638,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         rate_increase: pair_rate_increase,
         t_stop,
         discard_bg_e,
+        discard_bg_ph,
         rr,
         tracking_photons,
     };

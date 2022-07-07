@@ -1,8 +1,20 @@
 # Changelog
 
-## v0.11.0
+## v0.11.1
 
 In progress
+
+Added:
+
+* Optional discard of photons that have not pair-created, controlled by input file setting `discard_background`.
+
+Fixed:
+
+* Momentum sampling under LMA at finite collision angle.
+
+## v0.11.0
+
+2022-06-23
 
 Added:
 

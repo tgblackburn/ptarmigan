@@ -70,7 +70,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     let along = -ThreeVector::from(q.boost_by(u_zmf)).normalize();
     let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
     let epsilon = {
-        let k = -ThreeVector::from(q).normalize();
+        let k = along;
         k.cross(epsilon.cross(k)).normalize()
     };
     //println!("ZMF: along.e_1 = {:.3e}, along = [{}], e_1 = [{}]", along * epsilon, along, epsilon);
@@ -99,6 +99,11 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     // and the Stokes parameters by
     let sv = sv.rotate_by(theta);
 
+    // Verify construction of photon momentum
+    let s_new = (k * k_prime) / (k * q);
+    let error = (s - s_new).abs() / s;
+    assert!(error < 1.0e-3);
+
     (n, k_prime, sv)
 }
 
@@ -117,7 +122,8 @@ mod tests {
         let eta = 0.1;
         let k = (1.55e-6 / 0.511) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         let u = 0.511 * eta / (2.0 * 1.55e-6);
-        let u = FourVector::new(0.0, 0.0, 0.0, -u).unitize();
+        let theta = 30_f64.to_radians();
+        let u = FourVector::new(0.0, u * theta.sin(), 0.0, -u * theta.cos()).unitize();
         let q = u + 0.5 * a * a * k / (2.0 * k * u);
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
