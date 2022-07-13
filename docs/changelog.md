@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.11.2
+
+2022-07-13
+
+Fixed:
+
+* Empty (zero-length) datasets are not skipped when generating HDF5 output.
+
 ## v0.11.1
 
 2022-07-07
