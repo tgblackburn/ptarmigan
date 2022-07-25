@@ -102,7 +102,14 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &m
     // Verify construction of photon momentum
     let s_new = (k * k_prime) / (k * q);
     let error = (s - s_new).abs() / s;
-    assert!(error < 1.0e-3);
+    if error >= 1.0e-3 {
+        eprintln!(
+            "nonlinear_compton::generate failed sanity check during construction of photon momentum "
+            "at eta = {:.3e}, a = {:.3e}, n = {}: sampled s = {:.3e}, reconstructed = {:.3e}, error = {:.3}%",
+            eta, a, n, s, s_new, 100.0 * error,
+        );
+    }
+    assert!(error < 1.0e-2);
 
     (n, k_prime, sv)
 }
