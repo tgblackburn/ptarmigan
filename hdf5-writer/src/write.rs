@@ -209,10 +209,6 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
             // now counts = [n_0, n_1, n_2, ...]
             let count: h5::hsize_t = counts.iter().sum();
 
-            if count == 0 {
-                return Ok(None);
-            }
-
             // Determine offsets
             let mut offsets = counts.clone();
             offsets.iter_mut().fold(0, |mut total, n| {
@@ -224,6 +220,8 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
 
             (count, counts[rank as usize], offsets[rank as usize])
         };
+
+        let empty_dset = count == 0;
 
         unsafe {
             // What type are we writing?
@@ -283,14 +281,16 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
             ))?;
 
             // Write
-            check!( h5d::H5Dwrite(
-                dset_id,
-                type_id,
-                memspace,
-                filespace,
-                plist_id,
-                self.as_ptr() as *const ffi::c_void,
-            ))?;
+            if !empty_dset {
+                check!( h5d::H5Dwrite(
+                    dset_id,
+                    type_id,
+                    memspace,
+                    filespace,
+                    plist_id,
+                    self.as_ptr() as *const ffi::c_void,
+                ))?;
+            }
 
             check!(h5s::H5Sclose(filespace))?;
             check!(h5s::H5Sclose(memspace))?;

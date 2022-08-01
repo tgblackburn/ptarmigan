@@ -3,6 +3,9 @@ name = "hdf5-writer"
 version = "0.1.0"
 edition = "2018"
 
+[lib]
+doctest = false
+
 [features]
 default = []
 with-mpi = ["mpi", "mpi-sys", "hdf5-sys/mpio"]
