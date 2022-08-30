@@ -83,13 +83,22 @@ either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value,
 * `S_1`, `S_2` and `S_3`: the Stokes parameters associated with the particle polarization. `S_1` is associated with linear polarization along x (+1) or y (-1); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
 In the current version of Ptarmigan, these are meaningful only for photons.
 
-It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing a third, bracketed, argument to the output specifier.
+It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing an additional, bracketed, argument to the output specifier.
 The possible weight functions are:
 
 * `auto`: the particle weight (default)
 * `energy`: particle energy, in MeV
 * `pol_x`: the projection of the particle polarization along the global x-axis
-* `pol_x`: the projection of the particle polarization along the global y-axis
+* `pol_y`: the projection of the particle polarization along the global y-axis
+
+The number of bins, or whether they should be log-scaled, is controlled by adding an integer or `log` *before* the weight specification.
+The weight function must be given explicitly in this case, e.g. `energy:(log;auto)`.
+
+A simple range cut can be applied before binning by adding a third argument inside the brackets, e.g. `energy:(auto; auto; angle in 0, max)`.
+Both the number of bins and the weight must be given (though they can be replaced with `auto`).
+The syntax is `var in min, max`, where `var` is one of the particle properties given above and `min`, `max` are math expressions evaluated at run time.
+Only particles that are within the given bounds are binned.
+All particles below or above can be accepted by replacing the relevant bound with `auto`.
 
 ## stats
 

@@ -426,21 +426,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
     
     let gospec: Vec<String> = input.read("output:photon")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let gospec: Vec<DistributionFunction> = gospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
 
     let pospec: Vec<String> = input.read("output:positron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
 
     let file_format = input.read::<String,_>("output:file_format")
