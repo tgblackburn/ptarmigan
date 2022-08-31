@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.0
+
+In progress.
+
+Added:
+
+* Range cuts to distribution output
+
+Fixed:
+
+* Upgraded to mpi v0.6.
+
 ## v0.11.3
 
 2022-07-25
