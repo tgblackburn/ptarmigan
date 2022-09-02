@@ -6,7 +6,8 @@ In progress.
 
 Added:
 
-* Range cuts to distribution output
+* Range cuts to distribution output.
+* More detailed naming of FITS output files.
 
 Fixed:
 

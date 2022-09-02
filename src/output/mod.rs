@@ -60,6 +60,7 @@ impl ParticleOutputType {
 /// The default Filter accepts all particles.
 struct Filter {
     func: Option<ParticleOutput>,
+    name: String,
     min: f64,
     max: f64,
 }
@@ -75,8 +76,10 @@ impl Filter {
         let mut word = prefix.split_whitespace();
 
         // First word must be a ParticleOutput
-        let (func, func_type) = word.next()
-            .and_then(|name| functions::identify(name))
+        let (func, func_type, name) = word.next()
+            .and_then(|name|
+                functions::identify(name).and_then(|(f, ftype)| Some((f, ftype, name)))
+            )
             .ok_or_else(error)?;
 
         // Next word must be 'in'
@@ -106,6 +109,7 @@ impl Filter {
 
         let filter = Self {
             func: Some(func),
+            name: name.to_owned(),
             min,
             max,
         };
@@ -128,6 +132,7 @@ impl Default for Filter {
     fn default() -> Self {
         Self {
             func: None,
+            name: "no".to_owned(),
             min: std::f64::NEG_INFINITY,
             max: std::f64::INFINITY,
         }
@@ -259,9 +264,15 @@ impl DistributionFunction {
                 if self.weight != "weight" && self.weight != "auto" {
                     suffix.push('_');
                     suffix.push_str(&self.weight);
+                    suffix.push_str("-weight");
                 }
                 if self.bspec == BinSpec::LogScaled {
                     suffix.push_str("_log");
+                }
+                if self.filter.func.is_some() {
+                    suffix.push('_');
+                    suffix.push_str(&self.filter.name);
+                    suffix.push_str("-cut");
                 }
                 (hgram, suffix)
             },
@@ -282,9 +293,15 @@ impl DistributionFunction {
                 if self.weight != "weight" && self.weight != "auto" {
                     suffix.push('_');
                     suffix.push_str(&self.weight);
+                    suffix.push_str("-weight");
                 }
                 if self.bspec == BinSpec::LogScaled {
                     suffix.push_str("_log");
+                }
+                if self.filter.func.is_some() {
+                    suffix.push('_');
+                    suffix.push_str(&self.filter.name);
+                    suffix.push_str("-cut");
                 }
                 (hgram, suffix)
             },
