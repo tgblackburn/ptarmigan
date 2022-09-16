@@ -7,6 +7,8 @@ use crate::constants::*;
 use crate::geometry::{FourVector, ThreeVector, StokesVector};
 use crate::lcfa;
 
+use super::{RadiationMode, EquationOfMotion};
+
 /// Represents a focusing laser pulse, including
 /// the fast oscillating carrier wave
 pub struct FastFocusedLaser {
@@ -138,9 +140,11 @@ impl FastFocusedLaser {
     /// which has been accelerated in an electric field `E` and magnetic field `B`
     /// over a time interval `dt`.
     /// Assumes that ui is defined at t = 0, and r, E, B are defined at t = dt/2.
+    /// If `with_rr` is true, the energy loss due to radiation emission is handled
+    /// as part of the particle push, following the classical LL prescription.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, with_rr: bool) -> (FourVector, FourVector, f64) {
         // velocity in SI units
         let u = ThreeVector::from(ui);
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
@@ -150,7 +154,24 @@ impl FastFocusedLaser {
         let alpha = rqm * dt / (2.0 * SPEED_OF_LIGHT);
         let u_half = u + alpha * (E + v.cross(B));
 
-        // u' =  u_{i-1/2} + (q dt/2 m c) (2 E + v_{i-1/2} x B)
+        // (classical) radiated momentum
+        let u_rad = if with_rr {
+            let gamma = (1.0 + u_half * u_half).sqrt();
+            let u_half_mag = u_half.norm_sqr().sqrt();
+            let beta = u_half / u_half_mag;
+            let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
+            let chi = if E_rf_sqd > 0.0 {
+                gamma * E_rf_sqd.sqrt() / CRITICAL_FIELD
+            } else {
+                0.0
+            };
+            let power = 2.0 * ALPHA_FINE * chi * chi / (3.0 * COMPTON_TIME);
+            power * dt * u_half / u_half_mag
+        } else {
+            [0.0; 3].into()
+        };
+
+        // u' =  u_{i-1/2} + (q dt/2 m c) E
         let u_prime = u_half + alpha * E;
         let gamma_prime_sqd = 1.0 + u_prime * u_prime;
 
@@ -169,6 +190,7 @@ impl FastFocusedLaser {
         let s = 1.0 / (1.0 + t * t);
 
         let u_new = s * (u_prime + (u_prime * t) * t + u_prime.cross(t));
+        let u_new = u_new - u_rad;
         let gamma = (1.0 + u_new * u_new).sqrt();
 
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
@@ -182,7 +204,7 @@ impl FastFocusedLaser {
     /// magnetic field `B`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector)> {
+    pub fn emit_photon<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R, classical: bool) -> Option<(FourVector, StokesVector)> {
         let beta = ThreeVector::from(u) / u[0];
         let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
         let chi = if E_rf_sqd > 0.0 {
@@ -190,11 +212,20 @@ impl FastFocusedLaser {
         } else {
             0.0
         };
-        let prob = dt * lcfa::photon_emission::rate(chi, u[0]);
+
+        let prob = if classical {
+            dt * lcfa::photon_emission::classical::rate(chi, u[0])
+        } else {
+            dt * lcfa::photon_emission::rate(chi, u[0])
+        };
+
         if rng.gen::<f64>() < prob {
-            let (omega_mc2, theta, cphi) = lcfa::photon_emission::sample(
-                chi, u[0], rng.gen(), rng.gen(), rng.gen()
-            );
+            let (omega_mc2, theta, cphi) = if classical {
+                lcfa::photon_emission::classical::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen())
+            } else {
+                lcfa::photon_emission::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen())
+            };
+
             if let Some(theta) = theta {
                 let long: ThreeVector = beta.normalize();
                 let w = -(E - (long * E) * long / E.norm_sqr().sqrt() + SPEED_OF_LIGHT * beta.cross(B)).normalize();
@@ -202,6 +233,7 @@ impl FastFocusedLaser {
                 let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
                 let k = FourVector::lightlike(k[0], k[1], k[2]);
                 let pol = lcfa::photon_emission::stokes_parameters(k, chi, u[0], beta, w);
+                // todo: classical stokes vectors!
                 Some((k, pol))
             } else {
                 None
@@ -269,17 +301,17 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
-        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
+        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn == EquationOfMotion::LandauLifshitz)
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        FastFocusedLaser::emit_photon(u, E, B, dt, rng)
+        FastFocusedLaser::emit_photon(u, E, B, dt, rng, mode == RadiationMode::Classical)
             .map(|(k, pol)| (k, pol, u - k, a))
     }
 
@@ -306,7 +338,7 @@ mod tests {
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
 
         for _i in 0..(20*2*5) {
-            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
             r = new.0;
             u = new.1;
         }

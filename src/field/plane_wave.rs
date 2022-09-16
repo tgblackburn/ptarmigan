@@ -8,6 +8,8 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
+use super::{RadiationMode, EquationOfMotion};
+
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
 pub struct PlaneWave {
@@ -101,7 +103,7 @@ impl Field for PlaneWave {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, _eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -131,7 +133,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, _mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -200,7 +202,7 @@ mod tests {
         
         while laser.contains(r) {
         //for _k in 0..17 {
-            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
             r = new.0;
             u = new.1;
             let phase = laser.k() * r;

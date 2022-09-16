@@ -66,6 +66,8 @@ struct CollideOptions {
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Use classical emission rates
+    classical: bool,
 }
 
 /// Propagates a single particle through a region of EM field, returning a Shower containing
@@ -78,6 +80,20 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
     let dt = dt * options.dt_multiplier;
     let primary_id = incident.id();
 
+    let eqn = if options.classical && options.rr {
+        EquationOfMotion::LandauLifshitz
+    } else {
+        EquationOfMotion::Lorentz
+    };
+
+    let mode = if options.classical {
+        RadiationMode::Classical
+    } else {
+        RadiationMode::Quantum
+    };
+
+    let electron_recoils = !options.classical && options.rr;
+
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
             Species::Electron | Species::Positron => {
@@ -86,10 +102,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
-                        dt
+                        dt,
+                        eqn,
                     );
 
-                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
+                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -101,7 +118,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
-                        if options.rr {
+                        if electron_recoils {
                             u = u_prime;
                         }
 
@@ -221,8 +238,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     let rng_seed = input.read("control:rng_seed").unwrap_or(0usize);
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
-    let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
     let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
+    // use qed rates by default
+    let classical = input.read("control:classical")
+        .map(|c|
+            if !using_lcfa {
+                eprintln!("Warning: classical emission rates available only under LCFA, continuing with QED rates...");
+                false
+            } else {
+                c
+            }
+        )
+        .unwrap_or(false);
+    // pair creation is enabled by default, unless classical = true
+    let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
 
     let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
@@ -641,6 +670,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         discard_bg_ph,
         rr,
         tracking_photons,
+        classical,
     };
 
     let (mut electrons, mut photons, mut positrons) = primaries
@@ -762,6 +792,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             conf.new_group("control")?
                 .new_dataset("dt_multiplier")?.write(&dt_multiplier)?
                 .new_dataset("radiation_reaction")?.write(&rr)?
+                .new_dataset("classical")?.write(&classical)?
                 .new_dataset("pair_creation")?.write(&tracking_photons)?
                 .new_dataset("lcfa")?.write(&using_lcfa)?
                 .new_dataset("rng_seed")?.write(&rng_seed)?

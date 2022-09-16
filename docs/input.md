@@ -7,6 +7,7 @@ Ptarmigan takes as its single argument the path to a YAML file describing the in
 * `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
 * `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
 * `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
+* `classical` (optional, default = `false`): use the classical photon emission rate. If `radiation_reaction` is enabled, electrons and positrons lose energy smoothly, following the Landau-Lifshitz equation. Disables pair creation unless otherwise specified.
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 * `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG

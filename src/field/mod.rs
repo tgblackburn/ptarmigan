@@ -36,6 +36,18 @@ impl Hdf5Type for Polarization {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum EquationOfMotion {
+    Lorentz,
+    LandauLifshitz,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum RadiationMode {
+    Quantum,
+    Classical,
+}
+
 /// Specific field structures, i.e. types that implement `trait Field`.
 #[enum_dispatch]
 pub enum Laser {
@@ -64,7 +76,7 @@ pub trait Field {
     /// by a timestep `dt`, returning a tuple of the new
     /// position and momentum, as well as the change in
     /// lab time (which may differ from `dt`)
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64);
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64);
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
@@ -72,7 +84,7 @@ pub trait Field {
     /// its polarization,
     /// the new momentum of the electron,
     /// and the effective a0 of the interaction.
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)>;
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
@@ -108,7 +120,7 @@ mod tests {
         let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
         let mut pond = (r, u, dt);
         for _i in 0..(20*2*2) {
-            pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let pond = pond.1;
 
@@ -117,7 +129,7 @@ mod tests {
         let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
         let mut lorentz = (r, u, dt);
         for _i in 0..(20*2*100) {
-            lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let lorentz = lorentz.1;
 
@@ -145,7 +157,7 @@ mod tests {
         let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
         let mut pond = (r, u, dt);
         for _i in 0..(20*2*2) {
-            pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let pond = pond.1;
 
@@ -154,7 +166,7 @@ mod tests {
         let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
         let mut lorentz = (r, u, dt);
         for _i in 0..(20*2*100) {
-            lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let lorentz = lorentz.1;
 

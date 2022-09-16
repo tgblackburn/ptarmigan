@@ -8,6 +8,8 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
+use super::{RadiationMode, EquationOfMotion};
+
 /// Represents the envelope of a focusing laser pulse, i.e.
 /// the field after cycle averaging
 pub struct FocusedLaser {
@@ -159,7 +161,7 @@ impl Field for FocusedLaser {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, _eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -189,7 +191,7 @@ impl Field for FocusedLaser {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, _mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
@@ -235,7 +237,7 @@ mod tests {
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
 
         for _i in 0..(20*2*5) {
-            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+            let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
             r = new.0;
             u = new.1;
         }
@@ -261,7 +263,7 @@ mod tests {
             let mut u = FourVector::new(gamma, 0.0, 0.0, -(gamma * gamma - 1.0).sqrt());
             let mut r = FourVector::new(0.0, b, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
             while laser.contains(r) {
-                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
                 r = new.0;
                 u = new.1;
             }

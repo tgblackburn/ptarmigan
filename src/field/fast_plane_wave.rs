@@ -5,6 +5,8 @@ use crate::field::{Field, Polarization, FastFocusedLaser};
 use crate::constants::*;
 use crate::geometry::{FourVector, ThreeVector, StokesVector};
 
+use super::{RadiationMode, EquationOfMotion};
+
 /// Represents a plane-wave laser pulse, including the
 /// fast oscillating carrier wave
 pub struct FastPlaneWave {
@@ -101,17 +103,17 @@ impl Field for FastPlaneWave {
     }
 
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
-        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt)
+        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn == EquationOfMotion::LandauLifshitz)
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        FastFocusedLaser::emit_photon(u, E, B, dt, rng)
+        FastFocusedLaser::emit_photon(u, E, B, dt, rng, mode == RadiationMode::Classical)
             .map(|(k, pol)| (k, pol, u - k, a))
     }
 
@@ -150,7 +152,7 @@ mod tests {
 
         for _k in 0..2 {
             for _i in 0..800 {
-                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt);
+                let new = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
                 r = new.0;
                 u = new.1;
                 let u_perp = u[1].hypot(u[2]);
