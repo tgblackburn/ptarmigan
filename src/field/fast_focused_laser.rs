@@ -232,8 +232,11 @@ impl FastFocusedLaser {
                 let perp: ThreeVector = w.rotate_around(long, cphi);
                 let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
                 let k = FourVector::lightlike(k[0], k[1], k[2]);
-                let pol = lcfa::photon_emission::stokes_parameters(k, chi, u[0], beta, w);
-                // todo: classical stokes vectors!
+                let pol = if classical {
+                    lcfa::photon_emission::classical::stokes_parameters(k, chi, u[0], beta, w)
+                } else {
+                    lcfa::photon_emission::stokes_parameters(k, chi, u[0], beta, w)
+                };
                 Some((k, pol))
             } else {
                 None
