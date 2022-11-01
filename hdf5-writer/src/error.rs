@@ -8,7 +8,6 @@ use libc;
 use hdf5_sys::{
     h5,
     h5e,
-    h5i,
 };
 
 /// Wraps a call to an libhdf5 function, returning a Result which is either
@@ -98,18 +97,12 @@ impl fmt::Display for OutputError {
 
 impl Error for OutputError {}
 
-pub trait Checkable: Copy {
-    fn is_error_code(&self) -> bool;
+pub trait Checkable {
+    fn is_error_code(self) -> bool;
 }
 
-impl Checkable for h5i::hid_t {
-    fn is_error_code(&self) -> bool {
-        *self < 0
-    }
-}
-
-impl Checkable for h5::herr_t {
-    fn is_error_code(&self) -> bool {
-        *self < 0
+impl<T> Checkable for T where T: Copy + From<i32> + Ord {
+    fn is_error_code(self) -> bool {
+        self < 0.into()
     }
 }
