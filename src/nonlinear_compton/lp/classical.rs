@@ -280,7 +280,7 @@ mod tests {
         }
 
         let pts: Vec<(usize, f64, [[f64; 2]; 16])> = pool.install(|| {
-            pts.into_par_iter()
+            pts.into_par_iter().rev()
             .map(|(j, a, n_max)| {
                 let mut cumsum = 0.0;
                 let rates: Vec<[f64; 2]> = (1..=n_max)
@@ -288,6 +288,10 @@ mod tests {
                         let (rate, _) = partial_rate(n, a);
                         let rate = (n as f64) * rate;
                         cumsum = cumsum + rate;
+                        let interval = if a > 15.0 {100} else {20};
+                        if a > 8.0 && n % (n_max / interval) == 0 {
+                            println!("\t Progress report from [{:>3}], a = {:.3e}: done {} of {} ({:.0}%)...", rayon::current_thread_index().unwrap_or(1), a, n, n_max, 100.0 * (n as f64) / (n_max as f64));
+                        }
                         [n as f64, cumsum]
                     })
                     .collect();
