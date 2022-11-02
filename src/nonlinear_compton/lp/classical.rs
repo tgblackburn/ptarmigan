@@ -16,7 +16,7 @@ fn double_diff_partial_rate(a: f64, v: f64, theta: f64, dj: &mut DoubleBessel) -
     let n = dj.n();
 
     // opposite sign! cos theta > 0 in 0 < theta < pi/2
-    let x =2.0 * (n as f64) * a * theta.cos() * (v * (1.0 - v) / (1.0 + 0.5 * a * a)).sqrt();
+    let x = 2.0 * (n as f64) * a * theta.cos() * (v * (1.0 - v) / (1.0 + 0.5 * a * a)).sqrt();
     let y = 0.25 * (n as f64) * a * a * v / (1.0 + 0.5 * a * a);
 
     // need to correct for x being negative, using
@@ -109,6 +109,7 @@ mod tests {
     use std::io::Write;
     use rand::prelude::*;
     use rand_xoshiro::*;
+    use rayon::prelude::*;
     use super::*;
 
     #[test]
@@ -234,7 +235,7 @@ mod tests {
         ];
 
         for (a, eta) in &pts {
-            let n_max = (5_f64 * (1.0 + 2.0 * a * a)).ceil() as i32;
+            let n_max = crate::nonlinear_compton::lp::sum_limit(*a, *eta);
             let target = (1..=n_max).map(|n| crate::nonlinear_compton::lp::partial_rate(n, *a, *eta).0).sum::<f64>();
             let qed = crate::nonlinear_compton::lp::rate(*a, *eta).unwrap();
             let prefactor = 2.0 * eta / (1.0 + 0.5 * a * a);
@@ -246,5 +247,127 @@ mod tests {
                 a, eta, target, qed, 100.0 * qed_error, classical, 100.0 * classical_error,
             );
         }
+    }
+
+    #[test]
+    fn create_rate_table() {
+        use crate::pwmci;
+        use super::super::{
+            sum_limit,
+        };
+
+        const LOW_A_LIMIT: f64 = 0.02;
+        const A_DENSITY: usize = 20; // points per order of magnitude
+        const N_COLS: usize = 61; // pts in a0 direction
+        let mut table = [0.0; N_COLS];
+
+        let num: usize = std::env::var("RAYON_NUM_THREADS")
+            .map(|s| s.parse().unwrap_or(1))
+            .unwrap_or(1);
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num)
+            .build()
+            .unwrap();
+
+        println!("Running on {:?}", pool);
+
+        let mut pts: Vec<(usize, f64, i32)> = Vec::new();
+        for j in 0..N_COLS {
+            let a = LOW_A_LIMIT * 10.0f64.powf((j as f64) / (A_DENSITY as f64));
+            let n_max = sum_limit(a, 0.0);
+            pts.push((j, a, n_max));
+        }
+
+        let pts: Vec<(usize, f64, [[f64; 2]; 16])> = pool.install(|| {
+            pts.into_par_iter()
+            .map(|(j, a, n_max)| {
+                let mut cumsum = 0.0;
+                let rates: Vec<[f64; 2]> = (1..=n_max)
+                    .map(|n| {
+                        let (rate, _) = partial_rate(n, a);
+                        let rate = (n as f64) * rate;
+                        cumsum = cumsum + rate;
+                        [n as f64, cumsum]
+                    })
+                    .collect();
+
+                // Total rate
+                let rate: f64 = rates.last().unwrap()[1];
+
+                let mut cdf: [[f64; 2]; 16] = [[0.0, 0.0]; 16];
+                cdf[0] = [rates[0][0], rates[0][1] / rate];
+                if n_max <= 16 {
+                    // Write all the rates
+                    for i in 1..=15 {
+                        cdf[i] = rates.get(i)
+                            .map(|r| [r[0], r[1] / rate])
+                            .unwrap_or_else(|| [(i+1) as f64, 1.0]);
+                    }
+                } else if n_max < 100 {
+                    // first 4 four harmonics
+                    for i in 1..=3 {
+                        cdf[i] = [rates[i][0], rates[i][1] / rate];
+                    }
+                    // log-spaced for n >= 5
+                    let delta = ((n_max as f64).ln() - 5_f64.ln()) / 11.0;
+                    for i in 4..=15 {
+                        let n = (5_f64.ln() + ((i - 4) as f64) * delta).exp();
+                        let limit = rates.last().unwrap()[0];
+                        let n = n.min(limit);
+                        cdf[i][0] = n;
+                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                    }
+                } else {
+                    // Sample CDF at 16 log-spaced points
+                    let delta = (n_max as f64).ln() / 15.0;
+                    for i in 1..=15 {
+                        let n = ((i as f64) * delta).exp();
+                        let limit = rates.last().unwrap()[0];
+                        let n = n.min(limit);
+                        cdf[i][0] = n;
+                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                    }
+                }
+
+                println!("LP classical NLC [{:>3}]: a = {:.3e}, ln(rate) = {:.6e}", rayon::current_thread_index().unwrap_or(1), a, rate.ln());
+                (j, rate, cdf)
+            })
+            .collect()
+        });
+
+        for (j, rate, _) in &pts {
+            table[*j] = *rate;
+        }
+
+        let mut file = File::create("output/classical_rate_table.rs").unwrap();
+        //writeln!(file, "use std::f64::NEG_INFINITY;").unwrap();
+        writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+        writeln!(file, "pub const MIN: f64 = {:.12e};", LOW_A_LIMIT.ln()).unwrap();
+        writeln!(file, "pub const STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
+        writeln!(file, "pub const TABLE: [f64; {}] = [", N_COLS).unwrap();
+        for row in table.iter() {
+            let val = row.ln();
+            if val.is_finite() {
+                write!(file, "\t{:>18.12e},", val).unwrap();
+            } else {
+                write!(file, "\t{:>18},", "NEG_INFINITY").unwrap();
+            }
+        }
+        writeln!(file, "];").unwrap();
+
+        let mut file = File::create("output/classical_cdf_table.rs").unwrap();
+        writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
+        writeln!(file, "pub const MIN: f64 = {:.12e};", LOW_A_LIMIT.ln()).unwrap();
+        writeln!(file, "pub const STEP: f64 = {:.12e};", consts::LN_10 / (A_DENSITY as f64)).unwrap();
+        writeln!(file, "pub const TABLE: [[[f64; 2]; 16]; {}] = [", N_COLS).unwrap();
+        for (_, _, cdf) in &pts {
+            write!(file, "\t[").unwrap();
+            for entry in cdf.iter().take(15) {
+                write!(file, "[{:>18.12e}, {:>18.12e}], ", entry[0], entry[1]).unwrap();
+            }
+            writeln!(file, "[{:>18.12e}, {:>18.12e}]],", cdf[15][0], cdf[15][1]).unwrap();
+        }
+        writeln!(file, "];").unwrap();
     }
 }
