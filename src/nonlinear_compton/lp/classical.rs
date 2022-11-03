@@ -251,6 +251,7 @@ mod tests {
 
     #[test]
     fn create_rate_table() {
+        use indicatif::{ProgressStyle, ParallelProgressIterator};
         use crate::pwmci;
         use super::super::{
             sum_limit,
@@ -279,20 +280,27 @@ mod tests {
             pts.push((j, a, n_max));
         }
 
+        let style = ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})").unwrap();
+
         let pts: Vec<(usize, f64, [[f64; 2]; 16])> = pool.install(|| {
-            pts.into_par_iter().rev()
+            pts.into_iter()
             .map(|(j, a, n_max)| {
-                let mut cumsum = 0.0;
-                let rates: Vec<[f64; 2]> = (1..=n_max)
+                let rates: Vec<[f64; 2]> = (1..(n_max+1))
+                    .into_par_iter()
+                    .progress_with_style(style.clone())
                     .map(|n| {
                         let (rate, _) = partial_rate(n, a);
                         let rate = (n as f64) * rate;
-                        cumsum = cumsum + rate;
-                        let interval = if a > 15.0 {100} else {20};
-                        if a > 8.0 && n % (n_max / interval) == 0 {
-                            println!("\t Progress report from [{:>3}], a = {:.3e}: done {} of {} ({:.0}%)...", rayon::current_thread_index().unwrap_or(1), a, n, n_max, 100.0 * (n as f64) / (n_max as f64));
-                        }
-                        [n as f64, cumsum]
+                        [n as f64, rate]
+                    })
+                    .collect();
+
+                // Cumulative sum
+                let rates: Vec<[f64; 2]> = rates
+                    .into_iter()
+                    .scan(0.0, |cs, [n, r]| {
+                        *cs = *cs + r;
+                        Some([n, *cs])
                     })
                     .collect();
 
@@ -334,7 +342,7 @@ mod tests {
                     }
                 }
 
-                println!("LP classical NLC [{:>3}]: a = {:.3e}, ln(rate) = {:.6e}", rayon::current_thread_index().unwrap_or(1), a, rate.ln());
+                println!("LP classical NLC: a = {:.3e}, ln(rate) = {:.6e}", a, rate.ln());
                 (j, rate, cdf)
             })
             .collect()
@@ -353,9 +361,9 @@ mod tests {
         for row in table.iter() {
             let val = row.ln();
             if val.is_finite() {
-                write!(file, "\t{:>18.12e},", val).unwrap();
+                writeln!(file, "\t{:>18.12e},", val).unwrap();
             } else {
-                write!(file, "\t{:>18},", "NEG_INFINITY").unwrap();
+                writeln!(file, "\t{:>18},", "NEG_INFINITY").unwrap();
             }
         }
         writeln!(file, "];").unwrap();
