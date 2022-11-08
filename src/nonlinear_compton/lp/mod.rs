@@ -311,7 +311,7 @@ fn single_diff_partial_rate(a: f64, eta: f64, s: f64, theta_max: f64, dj: &mut D
 
 /// Integrates `double_diff_partial_rate` over s and theta, returning
 /// the value of the integral and the largest value of the integrand.
-/// Multiply by alpha / eta to get dP/(ds dtheta dphase)
+/// Multiply by alpha / eta to get dP/dphase
 #[allow(unused)]
 fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
     let sn = 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a);
@@ -416,7 +416,7 @@ fn sum_limit(a: f64, eta: f64) -> i32 {
 /// let rate = (1..=nmax).map(|n| partial_rate(n, a, eta)).sum::<f64>();
 /// ```
 /// but implemented as a table lookup.
-/// Multiply by alpha / eta to get dP/(ds dtheta dphase).
+/// Multiply by alpha / eta to get dP/dphase.
 #[allow(unused_parens)]
 pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     let (x, y) = (a.ln(), eta.ln());

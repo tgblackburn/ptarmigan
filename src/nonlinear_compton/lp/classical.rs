@@ -7,6 +7,9 @@ use super::{
     GAUSS_32_NODES, GAUSS_32_WEIGHTS,
 };
 
+mod rate_table;
+mod cdf_table;
+
 /// Rate, differential in v ( = s/s_max, where s is the fractional lightfront momentum
 /// transfer) and theta (azimuthal angle).
 /// Result valid only for 0 < v < 1 and 0 < theta < pi/2.
@@ -103,6 +106,39 @@ fn partial_rate(n: i32, a: f64) -> (f64, f64) {
     (lower.0 + middle.0 + upper.0, upper.1.max(middle.1).max(lower.1))
 }
 
+/// Returns the total rate of nonlinear Compton scattering.
+/// Equivalent to calling
+/// ```
+/// let nmax = sum_limit(a, eta);
+/// let rate = (1..=nmax).map(|n| 2.0 * (n as f64) * eta / (1.0 + 0.5 * a * a) * partial_rate(n, a)).sum::<f64>();
+/// ```
+/// but implemented as a table lookup.
+/// Multiply by alpha / eta to get dP/dphase.
+#[allow(unused_parens)]
+pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
+    let x = a.ln();
+
+    if x < rate_table::MIN {
+        // linear Thomson scattering
+        Some(a * a * eta / 3.0)
+    } else {
+        let ix = ((x - rate_table::MIN) / rate_table::STEP) as usize;
+
+        if ix < rate_table::N_COLS - 1 {
+            let dx = (x - rate_table::MIN) / rate_table::STEP - (ix as f64);
+            let f = (
+                (1.0 - dx) * rate_table::TABLE[ix]
+                + dx * rate_table::TABLE[ix+1]
+            );
+            let prefactor = 2.0 * eta / (1.0 + 0.5 * a * a);
+            Some(prefactor * f.exp())
+        } else {
+            eprintln!("NLC (classical LP) rate lookup out of bounds: a = {:.3e}", a);
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs::File;
@@ -157,7 +193,7 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn total_rate_accuracy() {
+    fn partial_rate_accuracy() {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         let pts = [
@@ -219,37 +255,52 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn qed_vs_classical() {
+    fn total_rate_accuracy() {
         let pts = [
-            (0.1, 1.0e-3),
-            (0.1, 3.0e-4),
-            (0.1, 1.0e-4),
-            (1.0, 1.0e-3),
-            (1.0, 3.0e-4),
-            (1.0, 1.0e-4),
-            (3.0, 1.0e-3),
-            (3.0, 3.0e-4),
-            (3.0, 1.0e-4),
-            (10.0, 1.0e-4),
+            (0.1,  1.0e-3, 3.328348674e-6),
+            (0.3,  1.0e-3, 2.960584967e-5),
+            (1.0,  1.0e-3, 2.943962548e-4),
+            (3.0,  1.0e-3, 1.711123935e-3),
+            (5.0,  1.0e-3, 3.382663412e-3),
+            (8.0,  1.0e-3, 6.000395217e-3),
+            (12.0, 1.0e-3, 9.562344320e-3),
+            (15.0, 1.0e-3, 1.225662395e-2),
         ];
 
-        for (a, eta) in &pts {
-            let n_max = crate::nonlinear_compton::lp::sum_limit(*a, *eta);
-            let target = (1..=n_max).map(|n| crate::nonlinear_compton::lp::partial_rate(n, *a, *eta).0).sum::<f64>();
-            let qed = crate::nonlinear_compton::lp::rate(*a, *eta).unwrap();
-            let prefactor = 2.0 * eta / (1.0 + 0.5 * a * a);
-            let classical = prefactor * (1..=n_max).map(|n| (n as f64) * partial_rate(n, *a).0).sum::<f64>();
-            let qed_error = (qed - target).abs() / target;
+        // let num: usize = std::env::var("RAYON_NUM_THREADS")
+        //     .map(|s| s.parse().unwrap_or(1))
+        //     .unwrap_or(1);
+
+        // let pool = rayon::ThreadPoolBuilder::new()
+        //     .num_threads(num)
+        //     .build()
+        //     .unwrap();
+
+        for (a, eta, total_rate) in &pts {
+            // let target = {
+            //     let n_max = crate::nonlinear_compton::lp::sum_limit(*a, 0.0);
+            //     let prefactor = 2.0 * eta / (1.0 + 0.5 * a * a);
+            //     pool.install(||
+            //         prefactor * (1..=n_max).into_par_iter().map(|n| (n as f64) * partial_rate(n, *a).0).sum::<f64>()
+            //     )
+            // };
+            let target = *total_rate;
+            let classical = rate(*a, *eta).unwrap();
             let classical_error = (classical - target).abs() / target;
+            let qed = crate::nonlinear_compton::lp::rate(*a, *eta).unwrap();
+            let qed_error = (qed - target).abs() / target;
             println!(
-                "a = {:>4}, eta = {:>6.2e}: target = {:>9.3e}, qed = {:>9.3e} [diff = {:.2}%], classical = {:>9.3e} [diff = {:.2}%]",
-                a, eta, target, qed, 100.0 * qed_error, classical, 100.0 * classical_error,
+                "a = {:>4}, eta = {:>6.2e}: target = {:>15.9e}, predicted = {:>9.3e} [diff = {:.2}%], qed = {:>9.3e} [diff = {:.2}%]",
+                a, eta, target,
+                classical, 100.0 * classical_error,
+                qed, 100.0 * qed_error,
             );
+            assert!(classical_error < 1.0e-3);
         }
     }
 
     #[test]
+    #[ignore]
     fn create_rate_table() {
         use indicatif::{ProgressStyle, ParallelProgressIterator};
         use crate::pwmci;
