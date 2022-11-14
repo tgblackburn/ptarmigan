@@ -1,4 +1,3 @@
-pub const N_COLS: usize = 61;
 pub const MIN: f64 = -3.912023005428e0;
 pub const STEP: f64 = 1.151292546497e-1;
 pub const TABLE: [[[f64; 2]; 16]; 61] = [

@@ -193,7 +193,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
     let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
-    let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
     } else {
@@ -240,16 +240,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
     let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
     // use qed rates by default
-    let classical = input.read("control:classical")
-        .map(|c|
-            if !using_lcfa {
-                eprintln!("Warning: classical emission rates available only under LCFA, continuing with QED rates...");
-                false
-            } else {
-                c
-            }
-        )
-        .unwrap_or(false);
+    let classical = input.read("control:classical").unwrap_or(false);
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
 
@@ -271,6 +262,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         })
         ?;
+
+    if classical && pol == Polarization::Circular {
+        eprintln!("Warning: classical LMA rates available only for linear polarization, continuing with QED rates...");
+    }
 
     let (focusing, waist) = input
         .read("laser:waist")

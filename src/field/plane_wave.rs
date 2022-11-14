@@ -84,6 +84,14 @@ impl PlaneWave {
             -grad,
         )
     }
+
+    /// Returns the cycle-averaged radiation reaction force, du/dτ
+    #[inline]
+    fn landau_lifshitz_force(&self, r: FourVector, u: FourVector) -> FourVector {
+        // du/tau = -(2 ɑ / 3 tau_C) a_rms^2 (k.u/m)^2 u
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
+        -2.0 * ALPHA_FINE * self.a_sqd(r) * eta.powi(2) * u / (3.0 * COMPTON_TIME)
+    }
 }
 
 impl Field for PlaneWave {
@@ -103,7 +111,7 @@ impl Field for PlaneWave {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, _eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -113,13 +121,28 @@ impl Field for PlaneWave {
         let dtau = dt / u[0];
         let scale = (rqm / (ELECTRON_CHARGE / ELECTRON_MASS)).powi(2);
 
+        // estimate u at midpoint, only needed for CRR
+        let u_mid = match eqn {
+            EquationOfMotion::Lorentz => [0.0; 4].into(),
+            EquationOfMotion::LandauLifshitz => {
+                let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
+                let g = scale.powi(2) * self.landau_lifshitz_force(r, u);
+                u + 0.5 * (f + g) * dtau
+            },
+        };
+
         // r_{n+1/2} = r_n + c u_n * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
         let dt_actual = 0.5 * u[0] * dtau;
 
         // u_{n+1} = u_n + f(r_{n+1/2}) * dtau
         let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
-        let u = u + f * dtau;
+        // RR contribution
+        let g: FourVector = match eqn {
+            EquationOfMotion::Lorentz => [0.0; 4].into(),
+            EquationOfMotion::LandauLifshitz =>  scale.powi(2) * self.landau_lifshitz_force(r, u_mid),
+        };
+        let u = u + (f + g) * dtau;
 
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
@@ -133,7 +156,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, _mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -148,9 +171,10 @@ impl Field for PlaneWave {
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp * width;
-        let prob = nonlinear_compton::probability(kappa, u, dt, self.pol).unwrap_or(0.0);
+        let prob = nonlinear_compton::probability(kappa, u, dt, self.pol, mode).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, rng);
+            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, mode, rng);
+            // u' is ignored if recoil is disabled, so we may as well calculate it
             Some((k, pol, u + (n as f64) * kappa - k, a))
         } else {
             None

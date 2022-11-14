@@ -10,7 +10,7 @@ use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 mod rate_table;
 mod cdf_table;
 mod linear;
-mod classical;
+pub mod classical;
 
 /// Rate, differential in s (fractional lightfront momentum transfer)
 /// and theta (azimuthal angle).
@@ -276,13 +276,17 @@ impl ThetaBound {
         (2.0 / (consts::PI * f2.norm())).sqrt().ln() + phase.re + Complex::new(phase.im, 0.0).cos().ln().re
     }
 
-    fn at(&self, s: f64) -> f64 {
+    /// Returns the largest theta that contributes meaningfully to the
+    /// partial rate at *fixed s* (if ThetaBound was constructed using
+    /// [`for_harmonic`] or *fixed v* (if ThetaBound was constructed using
+    /// [`for_harmonic_low_eta`])
+    fn at(&self, arg: f64) -> f64 {
         let mut val = self.f[15];
 
         for i in 1..16 {
             // s[i] is stored backwards, decreasing from s_max
-            if s > self.s[i] {
-                let weight = (s - self.s[i-1]) / (self.s[i] - self.s[i-1]);
+            if arg > self.s[i] {
+                let weight = (arg - self.s[i-1]) / (self.s[i] - self.s[i-1]);
                 val = weight * self.f[i] + (1.0 - weight) * self.f[i-1];
                 break;
             }
