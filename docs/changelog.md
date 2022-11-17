@@ -13,6 +13,7 @@ Added:
 Fixed:
 
 * Upgraded to mpi v0.6.
+* Compile error for HDF5 versions < 1.10.
 
 ## v0.11.3
 
