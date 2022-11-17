@@ -6,6 +6,7 @@ In progress.
 
 Added:
 
+* Classical radiation reaction.
 * Range cuts to distribution output.
 * More detailed naming of FITS output files.
 
