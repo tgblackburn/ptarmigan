@@ -263,10 +263,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    if classical && pol == Polarization::Circular {
-        eprintln!("Warning: classical LMA rates available only for linear polarization, continuing with QED rates...");
-    }
-
     let (focusing, waist) = input
         .read("laser:waist")
         .map(|w| (true, w))

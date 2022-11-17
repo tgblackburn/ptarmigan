@@ -29,7 +29,8 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization, mod
     let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
     let f = match (pol, mode) {
-        (Circular, _) => cp::rate(a, eta).unwrap(),
+        (Circular, Quantum) => cp::rate(a, eta).unwrap(),
+        (Circular, Classical) => cp::classical::rate(a, eta).unwrap(),
         (Linear, Quantum) => lp::rate(a * consts::SQRT_2, eta).unwrap(),
         (Linear, Classical) => lp::classical::rate(a * consts::SQRT_2, eta).unwrap(),
     };
@@ -61,7 +62,8 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: R
     let eta = k * q;
 
     let (n, s, cphi_zmf, sv) = match (pol, mode) {
-        (Circular, _) => cp::sample(a, eta, rng, None),
+        (Circular, Quantum) => cp::sample(a, eta, rng, None),
+        (Circular, Classical) => cp::classical::sample(a, eta, rng, None),
         (Linear, Quantum) => lp::sample(a * consts::SQRT_2, eta, rng, None),
         (Linear, Classical) => lp::classical::sample(a * consts::SQRT_2, eta, rng, None),
     };
