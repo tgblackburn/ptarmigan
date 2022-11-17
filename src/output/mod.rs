@@ -78,7 +78,7 @@ impl Filter {
         // First word must be a ParticleOutput
         let (func, func_type, name) = word.next()
             .and_then(|name|
-                functions::identify(name).and_then(|(f, ftype)| Some((f, ftype, name)))
+                functions::identify(name).map(|(f, ftype)| (f, ftype, name))
             )
             .ok_or_else(error)?;
 

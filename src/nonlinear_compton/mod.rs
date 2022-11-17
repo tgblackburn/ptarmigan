@@ -4,7 +4,7 @@ use std::f64::consts;
 use rand::prelude::*;
 use crate::constants::*;
 use crate::geometry::*;
-use crate::field::Polarization;
+use crate::field::{Polarization, RadiationMode};
 
 mod cp;
 mod lp;
@@ -16,7 +16,9 @@ mod lp;
 ///
 /// Both `k` and `q` are expected to be normalized
 /// to the electron mass.
-pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> Option<f64> {
+pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization, mode: RadiationMode) -> Option<f64> {
+    use {Polarization::*, RadiationMode::*};
+
     let a_sqd = q * q - 1.0;
     let a = if a_sqd >= 0.0 {
         a_sqd.sqrt()
@@ -26,10 +28,20 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
     let eta = k * q;
     let dphi = dt * eta / (COMPTON_TIME * q[0]);
 
-    let f = match pol {
-        Polarization::Circular => cp::rate(a, eta).unwrap(),
-        Polarization::Linear => lp::rate(a * consts::SQRT_2, eta).unwrap(),
+    let f = match (pol, mode) {
+        (Circular, Quantum) => cp::rate(a, eta).unwrap(),
+        (Circular, Classical) => cp::classical::rate(a, eta).unwrap(),
+        (Linear, Quantum) => lp::rate(a * consts::SQRT_2, eta).unwrap(),
+        (Linear, Classical) => lp::classical::rate(a * consts::SQRT_2, eta).unwrap(),
     };
+
+    // let f = match pol {
+    //     Polarization::Circular => cp::rate(a, eta).unwrap(),
+    //     Polarization::Linear => match mode {
+    //         RadiationMode::Quantum => lp::rate(a * consts::SQRT_2, eta).unwrap(),
+    //         RadiationMode::Classical => lp::classical::rate(a * consts::SQRT_2, eta).unwrap()
+    //     },
+    // };
 
     Some(ALPHA_FINE * f * dphi / eta)
 }
@@ -43,31 +55,49 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization) -> 
 /// Returns the harmonic index of the photon,
 /// the normalized momentum,
 /// and the polarization (if applicable).
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, rng: &mut R) -> (i32, FourVector, StokesVector) {
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: RadiationMode, rng: &mut R) -> (i32, FourVector, StokesVector) {
+    use {Polarization::*, RadiationMode::*};
+
     let a = (q * q - 1.0).sqrt(); // rms value!
     let eta = k * q;
 
-    let (n, s, cphi_zmf, sv) = match pol {
-        Polarization::Circular => cp::sample(a, eta, rng, None),
-        Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng, None),
+    let (n, s, cphi_zmf, sv) = match (pol, mode) {
+        (Circular, Quantum) => cp::sample(a, eta, rng, None),
+        (Circular, Classical) => cp::classical::sample(a, eta, rng, None),
+        (Linear, Quantum) => lp::sample(a * consts::SQRT_2, eta, rng, None),
+        (Linear, Classical) => lp::classical::sample(a * consts::SQRT_2, eta, rng, None),
     };
 
     let ell = n as f64;
 
     // Scattering momentum (/m) and angles in zero momentum frame
-    let p_zmf = ell * eta / (1.0 + a * a + 2.0 * ell * eta).sqrt();
-    let cos_theta_zmf = 1.0 - s * (1.0 + a * a + 2.0 * ell * eta) / (ell * eta);
+    let p_zmf = match mode {
+        Classical => ell * eta / (1.0 + a * a).sqrt(),
+        Quantum => ell * eta / (1.0 + a * a + 2.0 * ell * eta).sqrt(),
+    };
+
+    let cos_theta_zmf = match mode {
+        Classical => 1.0 - s * (1.0 + a * a) / (ell * eta),
+        Quantum => 1.0 - s * (1.0 + a * a + 2.0 * ell * eta) / (ell * eta),
+    };
 
     assert!(cos_theta_zmf <= 1.0);
     assert!(cos_theta_zmf >= -1.0);
 
     // Four-velocity of ZMF (normalized)
-    let u_zmf = (q + ell * k) / (q + ell * k).norm_sqr().sqrt();
+    let u_zmf = match mode {
+        Classical => q / q.norm_sqr().sqrt(),
+        Quantum => (q + ell * k) / (q + ell * k).norm_sqr().sqrt(),
+    };
 
     // Unit vectors pointed antiparallel to electron momentum in ZMF
     // and perpendicular to it
-    //println!("ZMF: q = [{}], ell k = [{}], |q| = {}", q.boost_by(u_zmf), (ell * k).boost_by(u_zmf), p_zmf);
-    let along = -ThreeVector::from(q.boost_by(u_zmf)).normalize();
+    // println!("ZMF: q = [{}], ell k = [{}], |q| = {}", q.boost_by(u_zmf), (ell * k).boost_by(u_zmf), p_zmf);
+    let along = match mode {
+        // need to avoid that q = (0, 0, o) because ZMF coincides with RF in classical mode
+        Classical => ThreeVector::from((ell * k).boost_by(u_zmf)).normalize(),
+        Quantum => -ThreeVector::from(q.boost_by(u_zmf)).normalize()
+    };
     let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
     let epsilon = {
         let k = along;
@@ -132,6 +162,7 @@ mod tests {
         let theta = 30_f64.to_radians();
         let u = FourVector::new(0.0, u * theta.sin(), 0.0, -u * theta.cos()).unitize();
         let q = u + 0.5 * a * a * k / (2.0 * k * u);
+        let mode = RadiationMode::Quantum;
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
             .map(|s| s.parse().unwrap_or(1))
@@ -149,7 +180,7 @@ mod tests {
         let vs: Vec<_> = pool.install(|| {
             (0..1000).into_par_iter().map(|_i| {
                 let mut rng = thread_rng();
-                let (n, k_prime, sv) = generate(k, q, Polarization::Linear, &mut rng);
+                let (n, k_prime, sv) = generate(k, q, Polarization::Linear, mode, &mut rng);
                 let weight = sv.project_onto(ThreeVector::from(k_prime).normalize(), [0.0, 1.0, 0.0].into());
                 (k * k_prime / (k * q), k_prime[1], k_prime[2], n, sv[1], weight)
             })

@@ -7,6 +7,7 @@ use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 // Lookup tables
 mod total;
+pub mod classical;
 
 /// Returns the sum, over harmonic index, of the partial nonlinear
 /// Compton rates. Equivalent to calling
@@ -125,7 +126,7 @@ fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
     let smax = sn / (1.0 + sn);
     let vsmax = v * smax;
     let z = (
-        ((4 * n * n) as f64)
+        4.0 * (n as f64).powi(2)
         * (a * a / (1.0 + a * a))
         * (vsmax / (sn * (1.0 - vsmax)))
         * (1.0 - vsmax / (sn * (1.0 - vsmax)))
@@ -140,13 +141,12 @@ fn spectrum(n: i32, a: f64, eta: f64, v: f64) -> f64 {
 }
 
 /// Equivalent to `spectrum(n, a, eta, v) / eta` for eta -> 0.
-#[allow(unused)]
 fn spectrum_low_eta(n: i32, a: f64, v: f64) -> f64 {
     if v < 0.0 || v >= 1.0 {
         return 0.0;
     }
 
-    let z = (4.0 * a * a * ((n * n) as f64) * v * (1.0-v) / (1.0 + a * a)).sqrt();
+    let z = (4.0 * a * a * (n as f64).powi(2) * v * (1.0-v) / (1.0 + a * a)).sqrt();
     let (j_nm1, j_n, j_np1) = z.j_pm(n);
     (n as f64) * (a * a * j_nm1.powi(2) - 2.0 * (1.0 + a * a) * j_n.powi(2) + a * a * j_np1.powi(2)) / (1.0 + a * a)
 }
