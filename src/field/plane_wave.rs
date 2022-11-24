@@ -157,10 +157,6 @@ impl PlaneWave {
 }
 
 impl Field for PlaneWave {
-    fn total_energy(&self) -> f64 {
-        0.0
-    }
-
     fn max_timestep(&self) -> Option<f64> {
         Some( 1.0 / (SPEED_OF_LIGHT * self.wavevector[0]) )
     }

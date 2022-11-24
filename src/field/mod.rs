@@ -80,9 +80,6 @@ pub enum Laser {
 /// Represents the electromagnetic field in a spatiotemporal domain.
 #[enum_dispatch(Laser)]
 pub trait Field {
-    /// Returns the total electromagnetic energy in joules
-    fn total_energy(&self) -> f64;
-
     /// Returns the largest usuable value of the timestep `dt`
     /// used in the particle push, or `None` if there is no
     /// particular restriction

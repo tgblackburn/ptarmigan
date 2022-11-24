@@ -284,10 +284,6 @@ impl FastFocusedLaser {
 }
 
 impl Field for FastFocusedLaser {
-    fn total_energy(&self) -> f64 {
-        0.0
-    }
-
     fn max_timestep(&self) -> Option<f64> {
         Some(0.1 / self.omega())
     }

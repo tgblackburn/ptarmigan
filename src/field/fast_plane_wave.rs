@@ -124,10 +124,6 @@ impl FastPlaneWave {
 }
 
 impl Field for FastPlaneWave {
-    fn total_energy(&self) -> f64 {
-        0.0
-    }
-
     fn max_timestep(&self) -> Option<f64> {
         let chirp = if cfg!(feature = "compensating-chirp") {
             1.0 + self.a0.powi(2)
