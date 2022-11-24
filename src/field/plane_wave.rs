@@ -88,8 +88,8 @@ impl PlaneWave {
                 if phase.abs() > consts::PI * (self.n_cycles + 1.0) {
                     0.0
                 } else if phase.abs() > consts::PI * (self.n_cycles - 1.0) {
-                    let arg = 0.25 * (phase + consts::PI);
-                    norm * self.a0.powi(2) * arg.sin().powi(4)
+                    let arg = 0.25 * (phase.abs() - (self.n_cycles - 1.0) * consts::PI);
+                    norm * self.a0.powi(2) * arg.cos().powi(4)
                 } else {
                     norm * self.a0.powi(2)
                 }
@@ -114,7 +114,7 @@ impl PlaneWave {
 
         let phase = self.wavevector * r;
 
-        // ∂/∂z <a^2>
+        // ∂/∂z ⟨a^2⟩ = -∂/∂t ⟨a^2⟩ = -ω0/c ∂/∂ϕ ⟨a^2⟩
         let grad = match self.envelope {
             Envelope::CosSquared => {
                 if phase.abs() < consts::PI * self.n_cycles {
@@ -128,14 +128,14 @@ impl PlaneWave {
                 if phase.abs() > consts::PI * (self.n_cycles + 1.0) || phase.abs() < consts::PI * (self.n_cycles - 1.0) {
                     0.0
                 } else {
-                    let arg = 0.25 * (phase + consts::PI);
-                    norm * self.wavevector[0] * self.a0.powi(2) * arg.cos() * arg.sin().powi(3)
+                    let arg = 0.25 * (phase.abs() - (self.n_cycles - 1.0) * consts::PI);
+                    norm * self.wavevector[0] * self.a0.powi(2) * phase.signum() * arg.sin() * arg.cos().powi(3)
                 }
             },
 
             Envelope::Gaussian => {
                 let arg = -(phase / (consts::PI * self.n_cycles)).powi(2);
-                -norm * self.wavevector[0] * self.a0.powi(2) * 2.0 * consts::LN_2 * phase * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
+                norm * self.wavevector[0] * self.a0.powi(2) * 2.0 * consts::LN_2 * phase * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
             }
         };
 
@@ -158,7 +158,11 @@ impl PlaneWave {
 
 impl Field for PlaneWave {
     fn max_timestep(&self) -> Option<f64> {
-        Some( 1.0 / (SPEED_OF_LIGHT * self.wavevector[0]) )
+        let dt = match self.envelope {
+            Envelope::CosSquared | Envelope::Gaussian => 1.0 / (SPEED_OF_LIGHT * self.wavevector[0]),
+            Envelope::Flattop => 0.2 / (SPEED_OF_LIGHT * self.wavevector[0]),
+        };
+        Some(dt)
     }
 
     fn contains(&self, r: FourVector) -> bool {
@@ -288,9 +292,10 @@ mod tests {
     fn plane_wave_cp() {
         let n_cycles = 8.0;
         let wavelength = 0.8e-6;
-        let t_start = -0.25 * n_cycles * wavelength / (SPEED_OF_LIGHT);
-        let dt = 0.25 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0);
+        let t_start = -0.25 * (n_cycles + 2.0) * wavelength / (SPEED_OF_LIGHT);
+        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0)
+            .with_envelope(Envelope::Flattop);
+        let dt = laser.max_timestep().unwrap();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -200.0).unitize();
         let mut r = FourVector::new(0.0, 0.0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
@@ -316,7 +321,7 @@ mod tests {
             );
             assert!(error[0].abs() < 1.0e-3);
             assert!(error[3].abs() < 1.0e-3);
-            println!("phase = 2 pi {:+.3}, error in u = [{:+.3e}, ..., ..., {:+.3e}]", phase / (2.0 * consts::PI), error[0], error[3]);
+            println!("phase = 2 pi {:+.3}, uz = {:+.3e} [{:+.3e}], error in u = [{:+.3e}, ..., ..., {:+.3e}]", phase / (2.0 * consts::PI), u[3], u_expected[3], error[0], error[3]);
         }
 
         assert!(u[1] < 1.0e-3);

@@ -95,8 +95,8 @@ impl FastPlaneWave {
                 if phi.abs() > consts::PI * (self.n_cycles + 1.0) {
                     (0.0, 0.0)
                 } else if phi.abs() > consts::PI * (self.n_cycles - 1.0) {
-                    let arg = 0.25 * (phi.abs() + consts::PI);
-                    (arg.sin().powi(2), phi.signum() * 0.25 * (0.5 * phi.abs()).cos())
+                    let arg = 0.25 * (phi.abs() - (self.n_cycles - 1.0) * consts::PI);
+                    (arg.cos().powi(2), -phi.signum() * 0.25 * (2.0 * arg).sin())
                 } else {
                     (1.0, 0.0)
                 }

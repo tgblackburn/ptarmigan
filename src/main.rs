@@ -281,8 +281,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
 
     let n_cycles: f64 = match envelope {
-        Envelope::CosSquared | Envelope::Flattop => {
-            input.read("laser:n_cycles")?
+        Envelope::CosSquared => input.read("laser:n_cycles")?,
+        Envelope::Flattop => {
+            input.read("laser:n_cycles")
+                .and_then(|n: f64| if n < 1.0 {
+                    eprintln!("'n_cycles' must be >= 1.0 for flattop lasers.");
+                    Err(InputError::conversion("laser:envelope", "envelope"))
+                } else {
+                    Ok(n)
+                })?
         },
         Envelope::Gaussian => {
             input.read("laser:fwhm_duration")
