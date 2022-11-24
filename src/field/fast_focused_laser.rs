@@ -21,7 +21,8 @@ pub struct FastFocusedLaser {
 
 impl FastFocusedLaser {
     #[allow(unused)]
-    pub fn new(a0: f64, wavelength: f64, waist: f64, duration: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization) -> Self {
+        let duration = n_cycles * wavelength / SPEED_OF_LIGHT;
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FastFocusedLaser {
             a0,
@@ -324,6 +325,10 @@ impl Field for FastFocusedLaser {
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);
         (prob, frac, momenta.map(|(p1, p2)| (p1, p2, a)))
+    }
+
+    fn ideal_initial_z(&self) -> f64 {
+        2.0 * SPEED_OF_LIGHT * self.duration
     }
 }
 

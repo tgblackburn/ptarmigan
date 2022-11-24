@@ -21,8 +21,12 @@ Ptarmigan takes as its single argument the path to a YAML file describing the in
 * `wavelength`: of the carrier wave, in metres, or
 * `omega`: the equivalent photon energy, in joules. The conversion constants `eV` etc are provided for convenience.
 * `waist` (optional): if specified, the laser pulse will be focused to a spot size of `waist`, which defines the radius at which the intensity falls to 1/e^2 of its maximum value. Otherwise the laser is modelled as a plane wave.
-* `fwhm_duration` (if `waist` is specified): if focusing, the laser pulse has a Gaussian temporal profile in intensity, with the specified duration (full width at half max) in seconds.
-* `n_cycles` (if `waist` is not specified): if not focusing, the laser pulse has a cos^2 envelope in electric field, with total duration equal to the given number of wavelengths.
+* `envelope` (optional, default is `cos^2` in 1D and `gaussian` in 3D): the temporal envelope of the laser pulse. Select one of:
+    * `cos^2`
+    * `flattop` (constant intensity over the specified number of cycles, with a one-wavelength long, smooth ramp-up and ramp-down)
+    * `gaussian`
+* `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
+* `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
 * `polarization`: the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
 

@@ -268,10 +268,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
-    let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
-        input.read("laser:fwhm_duration")?
-    } else {
-        input.read("laser:n_cycles")?
+    let envelope = input.read::<String, _>("laser:envelope")
+        .and_then(|s| match s.as_str() {
+            "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
+            "flattop" | "flat-top" => Ok(Envelope::Flattop),
+            "gauss" | "gaussian" => Ok(Envelope::Gaussian),
+            _ => {
+                eprintln!("Laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
+                Err(InputError::conversion("laser:envelope", "envelope"))
+            }
+        })
+        .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
+
+    let n_cycles: f64 = match envelope {
+        Envelope::CosSquared | Envelope::Flattop => {
+            input.read("laser:n_cycles")?
+        },
+        Envelope::Gaussian => {
+            input.read("laser:fwhm_duration")
+                .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
+                .or_else(|_e| input.read("laser:n_cycles"))?
+        }
     };
 
     let chirp_b = if !focusing {
@@ -564,25 +581,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
         }
-        #[cfg(feature = "cos2-envelope-in-3d")] {
-            if focusing {
-                println!("\t* with cos^2 temporal envelope");
-            }
-        }
         if pair_rate_increase > 1.0 {
             println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
         }
     }
 
-    let initial_z = if focusing {
-        if cfg!(feature = "cos2-envelope-in-3d") {
-            wavelength * tau + 3.0 * length
-        } else {
-            2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
-        }
+    let laser: Laser = if focusing && !using_lcfa {
+        FocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            .with_finite_bandwidth(finite_bandwidth)
+            .into()
+    } else if focusing {
+        FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            .into()
+    } else if !using_lcfa {
+        PlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            .with_envelope(envelope)
+            .with_finite_bandwidth(finite_bandwidth)
+            .into()
     } else {
-        0.5 * wavelength * tau
+        FastPlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            .with_envelope(envelope)
+            .into()
     };
+
+    let initial_z = laser.ideal_initial_z() + 3.0 * length;
+    // let initial_z = if focusing {
+    //     if cfg!(feature = "cos2-envelope-in-3d") {
+    //         wavelength * tau + 3.0 * length
+    //     } else {
+    //         2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
+    //     }
+    // } else {
+    //     0.5 * wavelength * tau
+    // };
 
     let builder = BeamBuilder::new(species, num, initial_z)
         .with_weight(weight)
@@ -632,26 +663,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let runtime = std::time::Instant::now();
-
-    let laser: Laser = if focusing && !using_lcfa {
-        let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        if finite_bandwidth {
-            laser.with_finite_bandwidth()
-        } else {
-            laser
-        }.into()
-    } else if focusing {
-        FastFocusedLaser::new(a0, wavelength, waist, tau, pol).into()
-    } else if !using_lcfa {
-        let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        if finite_bandwidth {
-            laser.with_finite_bandwidth()
-        } else {
-            laser
-        }.into()
-    } else {
-        FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
-    };
 
     let options = CollideOptions {
         dt_multiplier,
@@ -807,6 +818,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .new_dataset("focusing")?
                     .with_desc("true/false => pulse is modelled in 3d/1d")?
                     .write(&focusing)?
+                .new_dataset("envelope")?
+                    .with_desc("pulse envelope of the laser vector potential")?
+                    .write(&envelope)?
                 .new_dataset("chirp_b")?
                     .with_unit("1")?
                     .with_desc("parameter that appears in carrier phase = phi + b phi^2")?
@@ -819,13 +833,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .new_dataset("fwhm_duration")?
                     .with_unit("s")?
                     .with_desc("full width at half maximum of the temporal intensity profile")?
-                    .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
-                    .write(&tau)?
+                    .with_condition(|| envelope == Envelope::Gaussian)
+                    .write(&(n_cycles * wavelength / SPEED_OF_LIGHT))?
                 .new_dataset("n_cycles")?
                     .with_unit("1")?
                     .with_desc("number of wavelengths corresponding to the total pulse duration")?
-                    .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
-                    .write(&tau)?;
+                    .with_condition(|| matches!(envelope, Envelope::CosSquared | Envelope::Flattop))
+                    .write(&n_cycles)?;
 
             let charge = match species {
                 Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,

@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion};
+use super::{RadiationMode, EquationOfMotion, Envelope};
 
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
@@ -19,6 +19,7 @@ pub struct PlaneWave {
     pol: Polarization,
     chirp_b: f64,
     bandwidth: f64,
+    envelope: Envelope,
 }
 
 impl PlaneWave {
@@ -32,14 +33,28 @@ impl PlaneWave {
             pol,
             chirp_b,
             bandwidth: 0.0,
+            envelope: Envelope::CosSquared,
         }
     }
 
-    pub fn with_finite_bandwidth(self) -> Self {
+    pub fn with_envelope(self, envelope: Envelope) -> Self {
         let mut cpy = self;
-        // n_fwhm = 2 n acos[1/2^(1/4)] / pi
-        let n_fwhm = 0.36405666377387671305 * cpy.n_cycles;
-        cpy.bandwidth = (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm);
+        cpy.envelope = envelope;
+        cpy
+    }
+
+    pub fn with_finite_bandwidth(self, on: bool) -> Self {
+        let mut cpy = self;
+        let n_fwhm = match cpy.envelope {
+            // n_fwhm = 2 n acos[1/2^(1/4)] / pi
+            Envelope::CosSquared => 0.36405666377387671305 * cpy.n_cycles,
+            Envelope::Flattop | Envelope::Gaussian => cpy.n_cycles,
+        };
+        cpy.bandwidth = if on {
+            (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm)
+        } else {
+            0.0
+        };
         cpy
     }
     
@@ -53,12 +68,38 @@ impl PlaneWave {
             Polarization::Linear => 0.5,
             Polarization::Circular => 1.0,
         };
+
         let phase = self.wavevector * r;
-        if phase.abs() < consts::PI * self.n_cycles {
-            // a = a0 {sin(phi), cos(phi)} cos[phi/(2n)]^2
-            norm * self.a0.powi(2) * (phase / (2.0 * self.n_cycles)).cos().powi(4)
-        } else {
-            0.0
+
+        match self.envelope {
+            // a = a0 {sin(phi), cos(phi)} cos[phi/(2n)]^2, |phi| < pi n
+            Envelope::CosSquared => {
+                if phase.abs() < consts::PI * self.n_cycles {
+                    norm * self.a0.powi(2) * (phase / (2.0 * self.n_cycles)).cos().powi(4)
+                } else {
+                    0.0
+                }
+            },
+
+            // a = a0 for |phi| < pi (n - 1),
+            //   = a0 sin^2[(phi + pi) / 4)] for pi (n-1) < |phi| < pi (n+1)
+            //   = 0 for |phi| > pi (n + 1)
+            Envelope::Flattop => {
+                if phase.abs() > consts::PI * (self.n_cycles + 1.0) {
+                    0.0
+                } else if phase.abs() > consts::PI * (self.n_cycles - 1.0) {
+                    let arg = 0.25 * (phase + consts::PI);
+                    norm * self.a0.powi(2) * arg.sin().powi(4)
+                } else {
+                    norm * self.a0.powi(2)
+                }
+            },
+
+            // a = a0 exp[-ln 2 phi^2 / (2 pi^2 n^2)]
+            Envelope::Gaussian => {
+                let arg = -(phase / (consts::PI * self.n_cycles)).powi(2);
+                norm * self.a0.powi(2) * arg.exp2()
+            },
         }
     }
 
@@ -70,13 +111,34 @@ impl PlaneWave {
             Polarization::Linear => 0.5,
             Polarization::Circular => 1.0,
         };
+
         let phase = self.wavevector * r;
+
         // ∂/∂z <a^2>
-        let grad = if phase.abs() < consts::PI * self.n_cycles {
-            norm * self.wavevector[0] * self.a0.powi(2) * (phase/self.n_cycles).sin() * (phase/(2.0 * self.n_cycles)).cos().powi(2) / self.n_cycles
-        } else {
-            0.0
+        let grad = match self.envelope {
+            Envelope::CosSquared => {
+                if phase.abs() < consts::PI * self.n_cycles {
+                    norm * self.wavevector[0] * self.a0.powi(2) * (phase/self.n_cycles).sin() * (phase/(2.0 * self.n_cycles)).cos().powi(2) / self.n_cycles
+                } else {
+                    0.0
+                }
+            },
+
+            Envelope::Flattop => {
+                if phase.abs() > consts::PI * (self.n_cycles + 1.0) || phase.abs() < consts::PI * (self.n_cycles - 1.0) {
+                    0.0
+                } else {
+                    let arg = 0.25 * (phase + consts::PI);
+                    norm * self.wavevector[0] * self.a0.powi(2) * arg.cos() * arg.sin().powi(3)
+                }
+            },
+
+            Envelope::Gaussian => {
+                let arg = -(phase / (consts::PI * self.n_cycles)).powi(2);
+                -norm * self.wavevector[0] * self.a0.powi(2) * 2.0 * consts::LN_2 * phase * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
+            }
         };
+
         FourVector::new(
             -grad,
             0.0,
@@ -105,7 +167,12 @@ impl Field for PlaneWave {
 
     fn contains(&self, r: FourVector) -> bool {
         let phase = self.wavevector * r;
-        phase < consts::PI * self.n_cycles
+        let max_phase = match self.envelope {
+            Envelope::CosSquared => consts::PI * self.n_cycles,
+            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles, // = 3 omega tau
+        };
+        phase < max_phase
     }
 
     /// Advances particle position and momentum using a leapfrog method
@@ -204,6 +271,15 @@ impl Field for PlaneWave {
             (prob, 1.0 / rate_increase, Some((ell + (n as f64) * kappa - q_p, q_p, a)))
         } else {
             (prob, 0.0, None)
+        }
+    }
+
+    fn ideal_initial_z(&self) -> f64 {
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        match self.envelope {
+            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles,
+            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
         }
     }
 }

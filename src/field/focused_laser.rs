@@ -22,7 +22,8 @@ pub struct FocusedLaser {
 }
 
 impl FocusedLaser {
-    pub fn new(a0: f64, wavelength: f64, waist: f64, duration: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization) -> Self {
+        let duration = n_cycles * wavelength / SPEED_OF_LIGHT;
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FocusedLaser {
             a0,
@@ -34,10 +35,14 @@ impl FocusedLaser {
         }
     }
 
-    pub fn with_finite_bandwidth(self) -> Self {
+    pub fn with_finite_bandwidth(self, on: bool) -> Self {
         let mut cpy = self;
         let n_fwhm = SPEED_OF_LIGHT * cpy.duration * cpy.wavevector[0] / (2.0 * consts::PI);
-        cpy.bandwidth = (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm);
+        cpy.bandwidth = if on {
+            (0.5 * consts::LN_2).sqrt() / (consts::PI * n_fwhm)
+        } else {
+            0.0
+        };
         cpy
     }
 
@@ -246,6 +251,10 @@ impl Field for FocusedLaser {
         } else {
             (prob, 0.0, None)
         }
+    }
+
+    fn ideal_initial_z(&self) -> f64 {
+        2.0 * SPEED_OF_LIGHT * self.duration
     }
 }
 

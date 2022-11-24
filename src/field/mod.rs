@@ -36,6 +36,26 @@ impl Hdf5Type for Polarization {
     }
 }
 
+/// Temporal profile of the laser
+#[derive(Copy, Clone, Eq, PartialEq)]
+#[repr(u8)]
+pub enum Envelope {
+    CosSquared = 0,
+    Flattop = 1,
+    Gaussian = 2,
+}
+
+#[cfg(feature = "hdf5-output")]
+impl Hdf5Type for Envelope {
+    fn new() -> Datatype {
+        unsafe { Datatype::enumeration(&[
+            ("cos^2", Envelope::CosSquared as u8),
+            ("flattop", Envelope::Flattop as u8),
+            ("gaussian", Envelope::Gaussian as u8),
+        ])}
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum EquationOfMotion {
     Lorentz,
@@ -98,6 +118,10 @@ pub trait Field {
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>);
+
+    /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
+    /// sufficiently distant from the laser so as not to be affected by it.
+    fn ideal_initial_z(&self) -> f64;
 }
 
 #[cfg(test)]
