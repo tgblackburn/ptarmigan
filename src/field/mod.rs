@@ -128,8 +128,9 @@ mod tests {
 
     #[test]
     fn cp_deflection() {
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, 30.0e-15, Polarization::Circular);
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, 30.0e-15, Polarization::Circular);
+        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular);
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular);
 
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let x0 = 2.0e-6;
@@ -138,9 +139,9 @@ mod tests {
         let r = FourVector::new(0.0, x0, 0.0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
 
         // ponderomotive solver
-        let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = laser.max_timestep().unwrap();
         let mut pond = (r, u, dt);
-        for _i in 0..(20*2*2) {
+        while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let pond = pond.1;
@@ -165,8 +166,9 @@ mod tests {
 
     #[test]
     fn lp_deflection() {
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, 30.0e-15, Polarization::Linear);
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, 30.0e-15, Polarization::Linear);
+        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear);
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear);
 
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let y0 = 2.0e-6;
@@ -175,9 +177,9 @@ mod tests {
         let r = FourVector::new(0.0, 0.0, y0, 0.0) + u * SPEED_OF_LIGHT * t_start / u[0];
 
         // ponderomotive solver
-        let dt = 0.5 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = laser.max_timestep().unwrap();
         let mut pond = (r, u, dt);
-        for _i in 0..(20*2*2) {
+        while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let pond = pond.1;
