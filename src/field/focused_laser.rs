@@ -267,7 +267,12 @@ impl Field for FocusedLaser {
     }
 
     fn ideal_initial_z(&self) -> f64 {
-        2.0 * SPEED_OF_LIGHT * self.duration
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        match self.envelope {
+            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles(),
+            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles() + 1.0),
+            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles(),
+        }
     }
 }
 

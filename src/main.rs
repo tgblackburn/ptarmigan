@@ -600,6 +600,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .into()
     } else if focusing {
         FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            .with_envelope(envelope)
             .into()
     } else if !using_lcfa {
         PlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
@@ -613,15 +614,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let initial_z = laser.ideal_initial_z() + 3.0 * length;
-    // let initial_z = if focusing {
-    //     if cfg!(feature = "cos2-envelope-in-3d") {
-    //         wavelength * tau + 3.0 * length
-    //     } else {
-    //         2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
-    //     }
-    // } else {
-    //     0.5 * wavelength * tau
-    // };
 
     let builder = BeamBuilder::new(species, num, initial_z)
         .with_weight(weight)
