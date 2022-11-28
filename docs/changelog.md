@@ -7,7 +7,7 @@ In progress.
 Added:
 
 * Classical radiation reaction.
-* Choice of laser temporal envelope in 1D.
+* Choice of laser temporal envelope.
 * Range cuts to distribution output.
 * More detailed naming of FITS output files.
 
@@ -15,6 +15,7 @@ Fixed:
 
 * Upgraded to mpi v0.6.
 * Compile error for HDF5 versions < 1.10.
+* Incorrect unit conversion.
 
 ## v0.11.3
 
