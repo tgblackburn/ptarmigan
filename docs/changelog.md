@@ -7,6 +7,7 @@ In progress.
 Added:
 
 * Classical radiation reaction.
+* Choice of laser temporal envelope in 1D.
 * Range cuts to distribution output.
 * More detailed naming of FITS output files.
 

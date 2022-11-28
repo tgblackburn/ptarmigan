@@ -171,7 +171,7 @@ mod tests {
         let unit: Unit = "kg/m/s".parse().unwrap();
         let p2 = p.convert(&unit);
         println!("p[0] = {:.3e} MeV/c = {:.3e} {}", p[0], p2[0], unit.name());
-        assert_eq!(p[0] * 1.0e3 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, p2[0]);
+        assert_eq!(p[0] * 1.0e6 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, p2[0]);
 
         let x = 1.5e-6;
         let unit: Unit = "mm".parse().unwrap();
