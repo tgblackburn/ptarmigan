@@ -128,9 +128,13 @@ mod tests {
 
     #[test]
     fn cp_deflection() {
-        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular);
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular);
+        let n_cycles = 10.0;
+        let envelope = Envelope::Flattop;
+
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+            .with_envelope(envelope);
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+            .with_envelope(envelope);
 
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let x0 = 2.0e-6;
@@ -148,27 +152,36 @@ mod tests {
 
         // Lorentz force solve
         // ponderomotive solver
-        let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = fast_laser.max_timestep().unwrap();
         let mut lorentz = (r, u, dt);
-        for _i in 0..(20*2*100) {
+        while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let lorentz = lorentz.1;
 
-        let theory = 2.0 * 3.63189;
+        let theory = 2.0 * match envelope {
+            Envelope::CosSquared => 1.13724,
+            Envelope::Flattop => 2.95684,
+            Envelope::Gaussian => 3.22816,
+        };
+
         let pond_angle = 1.0e3 * pond[1].atan2(-pond[3]);
         let lorentz_angle = 1.0e3 * lorentz[1].atan2(-lorentz[3]);
         let error = ((pond_angle - lorentz_angle) / lorentz_angle).abs();
 
-        println!("angle [PF] = {:.3e}, angle [LF] = {:.3e}, error = {:.3}%, predicted = {:.3e}", pond_angle, lorentz_angle, 100.0 * error, theory);
+        println!("angle [PF] = {:.3e} [{:.3e}], angle [LF] = {:.3e} [{:.3e}], error = {:.3}%, predicted = {:.3e}", pond_angle, 1.0e3 * pond[2].atan2(-pond[3]), lorentz_angle, 1.0e3 * lorentz[2].atan2(-lorentz[3]), 100.0 * error, theory);
         assert!(error < 1.0e-2);
     }
 
     #[test]
     fn lp_deflection() {
-        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear);
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear);
+        let n_cycles = 10.0;
+        let envelope = Envelope::Gaussian;
+
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear)
+            .with_envelope(envelope);
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear)
+            .with_envelope(envelope);
 
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let y0 = 2.0e-6;
@@ -186,14 +199,19 @@ mod tests {
 
         // Lorentz force solve
         // ponderomotive solver
-        let dt = 0.01 * 0.8e-6 / (SPEED_OF_LIGHT);
+        let dt = fast_laser.max_timestep().unwrap();
         let mut lorentz = (r, u, dt);
-        for _i in 0..(20*2*100) {
+        while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
         let lorentz = lorentz.1;
 
-        let theory = 3.63189;
+        let theory = match envelope {
+            Envelope::CosSquared => 1.13724,
+            Envelope::Flattop => 2.95684,
+            Envelope::Gaussian => 3.22816,
+        };
+
         let pond_angle = 1.0e3 * pond[2].atan2(-pond[3]);
         let lorentz_angle = 1.0e3 * lorentz[2].atan2(-lorentz[3]);
         let error = ((pond_angle - lorentz_angle) / lorentz_angle).abs();

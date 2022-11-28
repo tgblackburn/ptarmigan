@@ -54,7 +54,7 @@ impl FastFocusedLaser {
     /// at four position `r`, assuming a given carrier envelope `phase`.
     /// The beam is linearly polarized along the x axis.
     #[allow(non_snake_case)]
-    fn beam(&self, r: FourVector, phase: f64) -> (ThreeVector, ThreeVector) {
+    fn beam(&self, r: FourVector, phase: f64) -> (ThreeVector, ThreeVector, ThreeVector, ThreeVector) {
         let x = r[1] / self.waist;
         let y = r[2] / self.waist;
         let z = r[3] / self.rayleigh_range();
@@ -95,10 +95,14 @@ impl FastFocusedLaser {
         );
         
         let E0 = ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0 / ELEMENTARY_CHARGE;
-        let E = E0 * ThreeVector::new(Ex.re, Ey.re, Ez.re);
-        let B = E0 * ThreeVector::new(Bx.re, By.re, Bz.re) / SPEED_OF_LIGHT;
+        let B0 = E0 / SPEED_OF_LIGHT;
 
-        (E, B)
+        (
+            E0 * ThreeVector::new(Ex.re, Ey.re, Ez.re),
+            E0 * ThreeVector::new(Ex.im, Ey.im, Ez.im),
+            B0 * ThreeVector::new(Bx.re, By.re, Bz.re),
+            B0 * ThreeVector::new(Bx.im, By.im, Bz.im),
+        )
     }
 
     /// Returns the number of wavelengths corresponding to the pulse
@@ -108,9 +112,41 @@ impl FastFocusedLaser {
         SPEED_OF_LIGHT * self.duration * self.wavevector[0] / (2.0 * consts::PI)
     }
 
+    /// Returns the pulse envelope f(ϕ) and its gradient
+    /// df(ϕ)/dϕ at the given phase ϕ
+    fn envelope_and_grad(&self, phase: f64) -> (f64, f64) {
+        match self.envelope {
+            Envelope::CosSquared => {
+                if phase.abs() < consts::PI * self.n_cycles() {
+                    let envelope = (phase / (2.0 * self.n_cycles())).cos().powi(2);
+                    (envelope, -1.0 * (phase / (2.0 * self.n_cycles())).tan() * envelope / self.n_cycles())
+                } else {
+                    (0.0, 0.0)
+                }
+            },
+
+            Envelope::Flattop => {
+                if phase.abs() > consts::PI * (self.n_cycles() + 1.0) {
+                    (0.0, 0.0)
+                } else if phase.abs() > consts::PI * (self.n_cycles() - 1.0) {
+                    let arg = 0.25 * (phase.abs() - (self.n_cycles() - 1.0) * consts::PI);
+                    (arg.cos().powi(2), -0.25 * phase.signum() * (2.0 * arg).sin())
+                } else {
+                    (1.0, 0.0)
+                }
+            },
+
+            Envelope::Gaussian => {
+                let tau = self.omega() * self.duration;
+                let envelope = (-2.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp();
+                (envelope, -4.0 * consts::LN_2 * phase * envelope / tau.powi(2))
+            }
+        }
+    }
+
     /// Returns a tuple of the electric and magnetic fields E and B
     /// at the specified four position.
-    /// 
+    ///
     /// The result is accurate to fourth order in the diffraction angle
     /// ϵ = w0 / zR, where w0 is the waist and zR the Rayleigh range,
     /// using the analytical results given in Salamin,
@@ -118,51 +154,29 @@ impl FastFocusedLaser {
     /// Appl. Phys. B 86, 319 (2007).
     #[allow(non_snake_case)]
     fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector) {
-        let (E, B) = match self.pol {
-            Polarization::Linear => self.beam(r, 0.0),
+        let phase = self.wavevector * r;
+        let (f, df_phi) = self.envelope_and_grad(phase);
+
+        // field components from A_x
+        let (re_E, im_E, re_B, im_B) = self.beam(r, 0.0);
+        // pulsed E = (f - i f') psi e^(i phi) => Re(pulsed E) = f Re(E) + f' Im(E)
+        let (E_x, B_x) = (f * re_E + df_phi * im_E, f * re_B + df_phi * im_B);
+
+        // field components from A_y
+        let (E_y, B_y) = match self.pol {
+            Polarization::Linear => ([0.0; 3].into(), [0.0; 3].into()),
             Polarization::Circular => {
-                let (Ex, Bx) = self.beam(r, 0.0);
                 let axis = ThreeVector::from(self.wavevector).normalize();
                 // need to swap definitions of x and y, as well as rotating the E, B vectors
                 let r_prime = ThreeVector::from(r).rotate_around(axis, -consts::FRAC_PI_2);
                 let r_prime = FourVector::new(r[0], r_prime[0], r_prime[1], r_prime[2]);
-                let (Ey, By) = self.beam(r_prime, consts::FRAC_PI_2);
-                let Ey = Ey.rotate_around(axis, consts::FRAC_PI_2);
-                let By = By.rotate_around(axis, consts::FRAC_PI_2);
-                (Ex + Ey, Bx + By)
+                let (re_E, im_E, re_B, im_B) = self.beam(r_prime, 0.0);
+                let (E_y, B_y) = (f * im_E - df_phi * re_E, f * im_B - df_phi * re_B);
+                (E_y.rotate_around(axis, consts::FRAC_PI_2), B_y.rotate_around(axis, consts::FRAC_PI_2))
             }
         };
 
-        // Field profile - compare to FocusedLaser, which is for the intensity profile
-        let phase = self.wavevector * r;
-
-        let envelope = match self.envelope {
-            Envelope::CosSquared => {
-                if phase.abs() < consts::PI * self.n_cycles() {
-                    (phase / (2.0 * self.n_cycles())).cos().powi(2)
-                } else {
-                    0.0
-                }
-            },
-
-            Envelope::Flattop => {
-                if phase.abs() > consts::PI * (self.n_cycles() + 1.0) {
-                    0.0
-                } else if phase.abs() > consts::PI * (self.n_cycles() - 1.0) {
-                    let arg = 0.25 * (phase.abs() - (self.n_cycles() - 1.0) * consts::PI);
-                    arg.cos().powi(2)
-                } else {
-                    1.0
-                }
-            },
-
-            Envelope::Gaussian => {
-                let tau = self.omega() * self.duration;
-                (-2.0 * consts::LN_2 * phase.powi(2) / tau.powi(2)).exp()
-            },
-        };
-
-        (envelope * E, envelope * B)
+        (E_x + E_y, B_x + B_y)
     }
 
     /// Returns the position and momentum of a particle with charge-to-mass ratio `rqm`,
@@ -366,8 +380,9 @@ mod tests {
     #[test]
     fn on_axis() {
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
-        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
-        let laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular);
+        let n_cycles = 10.0; // SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
+        let laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+            .with_envelope(Envelope::Gaussian);
         let dt = laser.max_timestep().unwrap();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
@@ -380,8 +395,8 @@ mod tests {
         }
 
         println!("final u_perp = ({:.3e}, {:.3e}), u^2 = {:.3e}", u[1], u[2], u * u);
-        assert!(u[1] < 1.0e-3);
-        assert!(u[2] < 1.0e-3);
+        assert!(u[1].abs() < 1.0e-3);
+        assert!(u[2].abs() < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
     }
 }
