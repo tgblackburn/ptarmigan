@@ -42,10 +42,10 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "r_y" | "ry" => Some(
             (r_y as ParticleOutput, Dimensionless)
         ),
-        "p^-" | "p-" => Some(
+        "p^-" | "p-" | "p_minus" => Some(
             (p_minus as ParticleOutput, Momentum)
         ),
-        "p^+" | "p+" => Some(
+        "p^+" | "p+" | "p_plus" => Some(
             (p_plus as ParticleOutput, Momentum)
         ),
         "gamma" => Some(

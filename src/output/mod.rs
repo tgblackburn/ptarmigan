@@ -77,9 +77,14 @@ impl Filter {
 
         // First word must be a ParticleOutput
         let (func, func_type, name) = word.next()
-            .and_then(|name|
+            .and_then(|name| {
+                let name = match name {
+                    "p^-" | "p-" => "p_minus",
+                    "p^+" | "p+" => "p_plus",
+                    _ => name,
+                };
                 functions::identify(name).map(|(f, ftype)| (f, ftype, name))
-            )
+            })
             .ok_or_else(error)?;
 
         // Next word must be 'in'
