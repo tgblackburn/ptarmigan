@@ -350,6 +350,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 Err(InputError::conversion("beam:radius", "radius"))
                 //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
             }
+        })
+        .or_else(|e| {
+            // if radius is just missing (as opposed to malformed), return 0.0
+            if e.kind() == InputErrorKind::Conversion {
+                Err(e)
+            } else {
+                Ok((0.0, true, None))
+            }
         })?;
 
     let species = input.read::<String,_>("beam:species")

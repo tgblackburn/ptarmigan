@@ -17,6 +17,10 @@ Fixed:
 * Compile error for HDF5 versions < 1.10.
 * Incorrect unit conversion.
 
+Removed:
+
+* Requirement to specify beam radius (default is zero).
+
 ## v0.11.3
 
 2022-07-25
