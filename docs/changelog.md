@@ -2,7 +2,7 @@
 
 ## v1.0.0
 
-In progress.
+2022-12-01
 
 Added:
 
