@@ -147,12 +147,12 @@ impl fmt::Display for Histogram {
     }
 }
 
-fn min_max_by<T>(base: &[T], f: &impl Fn(&T) -> f64, wrapper: impl Fn(f64) -> f64) -> Option<(f64, f64)> {
+fn min_max_by<T>(base: &[T], f: &impl Fn(&T) -> f64, filter: &impl Fn(&T) -> bool, wrapper: impl Fn(f64) -> f64) -> Option<(f64, f64)> {
     let mut min: Option<f64> = None;
     let mut max: Option<f64> = None;
     for t in base.iter() {
         let v = wrapper(f(t));
-        if v.is_finite() {
+        if v.is_finite() && filter(t) {
             min = min.map_or(Some(v), |x| Some(x.min(v)));
             max = max.map_or(Some(v), |x| Some(x.max(v)));
         }
@@ -209,6 +209,7 @@ impl Histogram {
     pub fn generate_1d<T>(
         comm: &impl Communicator,
         base: &[T], accessor: &impl Fn(&T) -> f64, weight: &impl Fn(&T) -> f64,
+        filter: &impl Fn(&T) -> bool,
         name: &str, unit: &str,
         bspec: BinSpec, hspec: HeightSpec) -> Option<Histogram> {
         //let rank = comm.rank();
@@ -216,9 +217,9 @@ impl Histogram {
         // Local min and max
         // Adjust for log-scaling!
         let (min, max) = if bspec == BinSpec::LogScaled {
-            min_max_by(base, accessor, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, accessor, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
-            min_max_by(base, accessor, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, accessor, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
         };
         //let min = base.iter().map(accessor).min_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(std::f64::MAX);
         //let max = base.iter().map(accessor).max_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(-std::f64::MAX);
@@ -273,6 +274,10 @@ impl Histogram {
                 continue;
             }
 
+            if !filter(e) {
+                continue;
+            }
+
             // adjust weight to include actual size of bin / log-scaled size
             let w = if bspec == BinSpec::LogScaled && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
                 w * bin_vol / linear_bin_vol(gmin, bin_vol, bin)
@@ -321,6 +326,7 @@ impl Histogram {
     pub fn generate_2d<T>(
         comm: &impl Communicator,
         base: &[T], fx: &impl Fn(&T) -> f64, fy: &impl Fn(&T) -> f64, weight: &impl Fn(&T) -> f64,
+        filter: &impl Fn(&T) -> bool,
         name: [&str; 2], unit: [&str; 2],
         bspec: [BinSpec; 2], hspec: HeightSpec) -> Option<Histogram> {
         //let rank = comm.rank();
@@ -328,15 +334,15 @@ impl Histogram {
         // Local min and max
 
         let (xmin, xmax) = if bspec[0] == BinSpec::LogScaled {
-            min_max_by(base, fx, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fx, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
-            min_max_by(base, fx, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fx, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
         };
 
         let (ymin, ymax) = if bspec[1] == BinSpec::LogScaled {
-            min_max_by(base, fy, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fy, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
-            min_max_by(base, fy, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fy, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
         };
 
         let min = [xmin, ymin];
@@ -381,6 +387,10 @@ impl Histogram {
 
             if value.iter().any(|&x| !x.is_finite()) {
                 continue; // all of value[i] must be finite
+            }
+
+            if !filter(e) {
+                continue;
             }
 
             let bin = [
@@ -584,7 +594,8 @@ mod tests {
         let fx = Box::new(|pt: &[f64; 3]| pt[0]) as Accessor<[f64; 3]>;
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
+        let filter = |_pt: &[f64; 3]| true;
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
@@ -610,7 +621,8 @@ mod tests {
         let fx = Box::new(|pt: &[f64; 3]| pt[0]) as Accessor<[f64; 3]>;
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, ["x", "y"], ["1", "1"], [BinSpec::LogScaled; 2], HeightSpec::Density);
+        let filter = |_pt: &[f64; 3]| true;
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::LogScaled; 2], HeightSpec::Density);
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
@@ -636,7 +648,8 @@ mod tests {
         let fx = Box::new(|pt: &[f64; 3]| pt[0]) as Accessor<[f64; 3]>;
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
+        let filter = |_pt: &[f64; 3]| true;
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
         assert!(hgram.is_none());
     }
 }

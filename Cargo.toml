@@ -1,6 +1,6 @@
 [package]
 name = "ptarmigan"
-version = "0.11.3"
+version = "1.0.0"
 authors = ["tgblackburn"]
 edition = "2018"
 publish = false
@@ -10,7 +10,7 @@ build = "build.rs"
 rust-version = "1.60"
 
 [dependencies]
-mpi = {version = "0.5", optional = true, default-features = false}
+mpi = {version = "0.6", optional = true, default-features = false}
 rand = "0.7"
 rand_xoshiro = "0.4"
 rand_distr = "0.2"
@@ -18,7 +18,7 @@ meval = "0.2.0"
 yaml-rust = "0.4.5"
 num-complex = "0.4.0"
 enum_dispatch = "0.3"
-hdf5-writer = {path = "./hdf5-writer", version = "0.1", optional = true}
+hdf5-writer = {path = "./hdf5-writer", version = "0.2", optional = true}
 unzip-n = {version = "0.1.2", optional = true}
 no-mpi = {path = "./no-mpi", version = "0.1"}
 
@@ -30,7 +30,6 @@ default = []
 hdf5-output = ["hdf5-writer", "unzip-n"]
 with-mpi = ["mpi", "hdf5-writer?/with-mpi"]
 compensating-chirp = []
-cos2-envelope-in-3d = []
 leading-order-only = []
 
 [build-dependencies]
@@ -38,7 +37,7 @@ vergen = "4.0.3"
 
 [dev-dependencies]
 rayon = "1.5.1"
+indicatif = {version = "0.17", features = ["rayon"]}
 
 [patch.crates-io]
-mpi = {git = "https://github.com/tgblackburn/rsmpi", branch = "patch"}
-mpi-sys = {git = "https://github.com/tgblackburn/rsmpi", branch = "patch"}
+hdf5-sys = {git = "https://github.com/tgblackburn/hdf5-rust", branch = "patch"}

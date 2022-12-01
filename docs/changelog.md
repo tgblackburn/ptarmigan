@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.0.0
+
+2022-12-01
+
+Added:
+
+* Classical radiation reaction.
+* Choice of laser temporal envelope.
+* Range cuts to distribution output.
+* More detailed naming of FITS output files.
+
+Fixed:
+
+* Upgraded to mpi v0.6.
+* Compile error for HDF5 versions < 1.10.
+* Incorrect unit conversion.
+
+Removed:
+
+* Requirement to specify beam radius (default is zero).
+
 ## v0.11.3
 
 2022-07-25

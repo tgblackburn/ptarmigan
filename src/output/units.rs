@@ -10,12 +10,19 @@ pub trait HasUnit {
     /// Converts a quantity from the default system of units
     /// to the target unit
     fn convert(self, unit: &Unit) -> Self::Output;
+
+    /// Converts a quantity from SI to the default system of units
+    fn from_si(self, unit: &Unit) -> Self::Output;
 }
 
 impl<T> HasUnit for T where T: Mul<f64> {
     type Output = T::Output;
     fn convert(self, unit: &Unit) -> Self::Output {
         self * unit.scale
+    }
+
+    fn from_si(self, unit: &Unit) -> Self::Output {
+        self * unit.scale.recip()
     }
 }
 
@@ -99,7 +106,7 @@ impl Unit {
     /// Joules (energy unit)
     #[allow(non_snake_case)]
     pub fn J() -> Self {
-        Self::new(1.0e3 * ELEMENTARY_CHARGE, "J")
+        Self::new(1.0e6 * ELEMENTARY_CHARGE, "J")
     }
 
     /// MeV (energy unit)
@@ -116,7 +123,7 @@ impl Unit {
 
     /// kg/m/s (momentum unit)
     pub fn kg_m_s() -> Self {
-        Self::new(1.0e3 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, "kg/m/s")
+        Self::new(1.0e6 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, "kg/m/s")
     }
 
     /// MeV/c (momentum unit)
@@ -164,7 +171,7 @@ mod tests {
         let unit: Unit = "kg/m/s".parse().unwrap();
         let p2 = p.convert(&unit);
         println!("p[0] = {:.3e} MeV/c = {:.3e} {}", p[0], p2[0], unit.name());
-        assert_eq!(p[0] * 1.0e3 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, p2[0]);
+        assert_eq!(p[0] * 1.0e6 * ELEMENTARY_CHARGE / SPEED_OF_LIGHT, p2[0]);
 
         let x = 1.5e-6;
         let unit: Unit = "mm".parse().unwrap();

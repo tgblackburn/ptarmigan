@@ -4,24 +4,38 @@ Ptarmigan takes as its single argument the path to a YAML file describing the in
 
 ## control
 
-* `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
+Physics:
+
 * `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
 * `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
-* `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
+* `classical` (optional, default = `false`): use the classical photon emission rate. If `radiation_reaction` is enabled, electrons and positrons lose energy smoothly, following the Landau-Lifshitz equation. Disables pair creation unless otherwise specified.
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
-* `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG
-* `bandwidth_correction` (optional, default = `false`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
+* `bandwidth_correction` (optional, default = `false`, ignored if `lcfa: true`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
+
+Numerics:
+
+* `dt_multiplier` (optional, default = `1.0`): the size of the timestep is set automatically by the code to ensure accuracy of the particle pusher; this applies a scaling factor to it.
 * `increase_pair_rate_by` (optional, default = `1.0`): if specified, increases the pair creation rate, while decreasing the weight of any created electrons and positrons, by the same factor. This helps resolve the positron spectrum when the total probability is much smaller than 1/N, where N is the number of primary particles. A setting of `auto` will be replaced by a suitable default value, as determined from the laser amplitude and particle energy. In principle, an arbitrarily large increase may be specified, because the code automatically adjusts it if the probability per timestep becomes too large. However, this will mean that a very large number of (low-weight) electrons and positrons will be generated and tracked.
+* `rng_seed` (optional, default = `0`): an unsigned integer that, if specified, is used as the basis for seeding the PRNG.
+
+Tracking:
+
+* `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
 * `stop_at_time` (optional): if specified, stops tracking at the given instant of time. Otherwise, the simulation tracks particles until they have travelled through the entire laser pulse. Time zero corresponds to the point at which the peak of the laser passes through the focal plane.
 
 ## laser
 
 * `a0`: the laser strength parameter, normalized amplitude, etc.
+Defined by the peak electric field, so a0 is sqrt(2) larger for LP than for CP at fixed intensity.
 * `wavelength`: of the carrier wave, in metres, or
 * `omega`: the equivalent photon energy, in joules. The conversion constants `eV` etc are provided for convenience.
 * `waist` (optional): if specified, the laser pulse will be focused to a spot size of `waist`, which defines the radius at which the intensity falls to 1/e^2 of its maximum value. Otherwise the laser is modelled as a plane wave.
-* `fwhm_duration` (if `waist` is specified): if focusing, the laser pulse has a Gaussian temporal profile in intensity, with the specified duration (full width at half max) in seconds.
-* `n_cycles` (if `waist` is not specified): if not focusing, the laser pulse has a cos^2 envelope in electric field, with total duration equal to the given number of wavelengths.
+* `envelope` (optional, default is `cos^2` in 1D and `gaussian` in 3D): the temporal envelope of the laser pulse. Select one of:
+    * `cos^2`
+    * `flattop` (constant intensity over the specified number of cycles, with a one-wavelength long, smooth ramp-up and ramp-down)
+    * `gaussian`
+* `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
+* `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
 * `polarization`: the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
 
@@ -34,7 +48,7 @@ Ptarmigan takes as its single argument the path to a YAML file describing the in
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
 * `bremsstrahlung_source` (optional, if primary particles are photons, default = `false`): switches energy spectrum from Gaussian to mimic a bremsstrahlung source.
 * `gamma_min` (required if `bremsstrahlung_source` is `true`): lower bound for the bremsstrahlung energy spectrum.
-* `radius`: if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
+* `radius` (optional, default = `0.0`): if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 The distribution (if normal) may be optionally truncated by specifying `[radius, normally_distributed, max_radius]`.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `energy_chirp` (optional, default = `0.0`): if specified, introduces a correlation of the requested magnitude between the particle's energy and its longitudinal offset from the beam centroid. A positive chirp means that the head of the beam (which hits the laser first) has higher energy than the tail. The specified value must be between -1 and +1.
@@ -83,13 +97,22 @@ either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value,
 * `S_1`, `S_2` and `S_3`: the Stokes parameters associated with the particle polarization. `S_1` is associated with linear polarization along x (+1) or y (-1); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
 In the current version of Ptarmigan, these are meaningful only for photons.
 
-It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing a third, bracketed, argument to the output specifier.
+It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing an additional, bracketed, argument to the output specifier.
 The possible weight functions are:
 
 * `auto`: the particle weight (default)
 * `energy`: particle energy, in MeV
 * `pol_x`: the projection of the particle polarization along the global x-axis
-* `pol_x`: the projection of the particle polarization along the global y-axis
+* `pol_y`: the projection of the particle polarization along the global y-axis
+
+The number of bins, or whether they should be log-scaled, is controlled by adding an integer or `log` *before* the weight specification.
+The weight function must be given explicitly in this case, e.g. `energy:(log;auto)`.
+
+A simple range cut can be applied before binning by adding a third argument inside the brackets, e.g. `energy:(auto; auto; angle in 0, max)`.
+Both the number of bins and the weight must be given (though they can be replaced with `auto`).
+The syntax is `var in min, max`, where `var` is one of the particle properties given above and `min`, `max` are math expressions evaluated at run time.
+Only particles that are within the given bounds are binned.
+All particles below or above can be accepted by replacing the relevant bound with `auto`.
 
 ## stats
 

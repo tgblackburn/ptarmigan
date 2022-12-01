@@ -2,7 +2,6 @@
 //! and other output
 
 use std::fmt;
-use std::str::FromStr;
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
@@ -43,6 +42,108 @@ pub enum ParticleOutputType {
     Momentum,
 }
 
+impl ParticleOutputType {
+    fn into_unit(self, us: &UnitSystem) -> Unit {
+        match self {
+            ParticleOutputType::Dimensionless => Unit::new(1.0, "1"),
+            ParticleOutputType::Angle => Unit::new(1.0, "rad"),
+            ParticleOutputType::Length => us.length.clone(),
+            ParticleOutputType::Energy => us.energy.clone(),
+            ParticleOutputType::Momentum => us.momentum.clone(),
+        }
+    }
+}
+
+/// Represents a range cut on the particle output.
+/// A given particle `pt` will only contribute if
+/// `min <= func(pt) < max`.
+/// The default Filter accepts all particles.
+struct Filter {
+    func: Option<ParticleOutput>,
+    name: String,
+    min: f64,
+    max: f64,
+}
+
+impl Filter {
+    fn from_str<F: Fn(&str) -> Option<f64>>(s: &str, parser: F) -> Result<Self, OutputError> {
+        // just in case
+        let error = || OutputError::Conversion(s.to_owned(), "filter".to_owned());
+
+        // s is a string like 'op in min, max'
+        let (prefix, suffix) = s.split_once(',').ok_or_else(error)?;
+
+        let mut word = prefix.split_whitespace();
+
+        // First word must be a ParticleOutput
+        let (func, func_type, name) = word.next()
+            .and_then(|name| {
+                let name = match name {
+                    "p^-" | "p-" => "p_minus",
+                    "p^+" | "p+" => "p_plus",
+                    _ => name,
+                };
+                functions::identify(name).map(|(f, ftype)| (f, ftype, name))
+            })
+            .ok_or_else(error)?;
+
+        // Next word must be 'in'
+        word.next()
+            .map(|s| s == "in")
+            .ok_or_else(error)?;
+
+        // All remaining words (up to the comma) form a math expression
+        let min_expr: String = word.collect();
+        let min = if min_expr.as_str() == "auto" {
+            std::f64::NEG_INFINITY
+        } else {
+            parser(&min_expr).ok_or_else(error)?
+        };
+
+        // Everything after the comma should be a math expression as well
+        let max = if suffix.trim() == "auto" {
+            std::f64::INFINITY
+        } else {
+            parser(suffix).ok_or_else(error)?
+        };
+
+        // f(pt) returns a quantity in the default unit system, whereas min, max are in SI
+        let unit = func_type.into_unit(&UnitSystem::si());
+        let min = min.from_si(&unit);
+        let max = max.from_si(&unit);
+
+        let filter = Self {
+            func: Some(func),
+            name: name.to_owned(),
+            min,
+            max,
+        };
+
+        // println!("got filter {{..., {:.3e}, {:.3e}}} from \"{}\"", filter.min, filter.max, s);
+
+        Ok(filter)
+    }
+
+    fn accepts(&self, pt: &Particle) -> bool {
+        if let Some(f) = self.func {
+            f(pt) >= self.min && f(pt) < self.max
+        } else {
+            true
+        }
+    }
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            func: None,
+            name: "no".to_owned(),
+            min: std::f64::NEG_INFINITY,
+            max: std::f64::INFINITY,
+        }
+    }
+}
+
 pub struct DistributionFunction {
     dim: usize,
     bspec: BinSpec,
@@ -53,6 +154,7 @@ pub struct DistributionFunction {
     fweight: ParticleOutput,
     funcs: Vec<ParticleOutput>,
     func_types: Vec<ParticleOutputType>,
+    filter: Filter,
 }
 
 impl fmt::Debug for DistributionFunction {
@@ -67,26 +169,25 @@ impl fmt::Debug for DistributionFunction {
     }
 }
 
-impl FromStr for DistributionFunction {
-    type Err = OutputError;
-
-    fn from_str(spec: &str) -> Result<Self, Self::Err> {
+impl DistributionFunction {
+    pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
         // break into substrings, separated by colons
         let mut ss: Vec<&str> = spec.split(':').collect();
 
         // if the final string is bracketed AND there are at least
-        // two substrings, that final string might be (bspec; hspec)
-        let (bspec, hspec, weight) = if ss.len() >= 2 && ss.last().unwrap().starts_with('(') && ss.last().unwrap().ends_with(')') {
+        // two substrings, that final string might be (bspec; hspec; filter)
+        let (bspec, hspec, weight, filter) = if ss.len() >= 2 && ss.last().unwrap().starts_with('(') && ss.last().unwrap().ends_with(')') {
             let last = ss.pop().unwrap().trim_start_matches('(').trim_end_matches(')');
             // break this into substrings, separated by ';'
             let last: Vec<&str> = last.split(';').collect();
             match last.len() {
-                1 => (BinSpec::Automatic, HeightSpec::Density, last[0]),
-                2 => (last[0].into(), HeightSpec::Density, last[1]),
-                _ => (BinSpec::Automatic, HeightSpec::Density, "weight"),
+                1 => (BinSpec::Automatic, HeightSpec::Density, last[0].trim(), None),
+                2 => (last[0].trim().into(), HeightSpec::Density, last[1].trim(), None),
+                3 => (last[0].trim().into(), HeightSpec::Density, last[1].trim(), Some(last[2])),
+                _ => (BinSpec::Automatic, HeightSpec::Density, "weight", None),
             }
         } else {
-            (BinSpec::Automatic, HeightSpec::Density, "weight")
+            (BinSpec::Automatic, HeightSpec::Density, "weight", None)
         };
 
         // Convert strings to closures, associated units and names.
@@ -120,7 +221,12 @@ impl FromStr for DistributionFunction {
             _ => None,
         };
 
-        if funcs.iter().all(Option::is_some) && weight_function.is_some() {
+        let filter = match filter {
+            Some(s) => Filter::from_str(s, parser),
+            None => Ok(Filter::default())
+        };
+
+        if funcs.iter().all(Option::is_some) && weight_function.is_some() && filter.is_ok() {
             // successfully obtained a distribution function!
             Ok(DistributionFunction {
                 dim: funcs.len(),
@@ -132,6 +238,7 @@ impl FromStr for DistributionFunction {
                 fweight: weight_function.unwrap(),
                 funcs: funcs.into_iter().flatten().collect(),
                 func_types: func_types.into_iter().map(|u| u.unwrap()).collect(),
+                filter: filter.unwrap(),
             })
         } else {
             Err(OutputError::Conversion(spec.to_owned(), "distribution function".to_owned()))
@@ -142,13 +249,7 @@ impl FromStr for DistributionFunction {
 impl DistributionFunction {
     pub fn write(&self, world: &impl Communicator, pt: &[Particle], us: &UnitSystem, prefix: &str, file_format: FileFormat) -> Result<(),OutputError> {
         let units: Vec<Unit> = self.func_types.iter()
-            .map(|t| match t {
-                    ParticleOutputType::Dimensionless => Unit::new(1.0, "1"),
-                    ParticleOutputType::Angle => Unit::new(1.0, "rad"),
-                    ParticleOutputType::Length => us.length.clone(),
-                    ParticleOutputType::Energy => us.energy.clone(),
-                    ParticleOutputType::Momentum => us.momentum.clone(),
-                })
+            .map(|t| t.into_unit(us))
             .collect();
 
         let (hgram, suffix) = match self.dim {
@@ -158,6 +259,7 @@ impl DistributionFunction {
                     pt,
                     &|pt| {self.funcs[0](pt).convert(&units[0])},
                     &self.fweight,
+                    &|pt| self.filter.accepts(pt),
                     &self.names[0],
                     units[0].name(),
                     self.bspec,
@@ -167,9 +269,15 @@ impl DistributionFunction {
                 if self.weight != "weight" && self.weight != "auto" {
                     suffix.push('_');
                     suffix.push_str(&self.weight);
+                    suffix.push_str("-weight");
                 }
                 if self.bspec == BinSpec::LogScaled {
                     suffix.push_str("_log");
+                }
+                if self.filter.func.is_some() {
+                    suffix.push('_');
+                    suffix.push_str(&self.filter.name);
+                    suffix.push_str("-cut");
                 }
                 (hgram, suffix)
             },
@@ -180,6 +288,7 @@ impl DistributionFunction {
                     &|pt| {self.funcs[0](pt).convert(&units[0])},
                     &|pt| {self.funcs[1](pt).convert(&units[1])},
                     &self.fweight,
+                    &|pt| self.filter.accepts(pt),
                     [&self.names[0], &self.names[1]],
                     [units[0].name(), units[1].name()],
                     [self.bspec; 2],
@@ -189,9 +298,15 @@ impl DistributionFunction {
                 if self.weight != "weight" && self.weight != "auto" {
                     suffix.push('_');
                     suffix.push_str(&self.weight);
+                    suffix.push_str("-weight");
                 }
                 if self.bspec == BinSpec::LogScaled {
                     suffix.push_str("_log");
+                }
+                if self.filter.func.is_some() {
+                    suffix.push('_');
+                    suffix.push_str(&self.filter.name);
+                    suffix.push_str("-cut");
                 }
                 (hgram, suffix)
             },
@@ -218,7 +333,8 @@ mod tests {
     #[test]
     fn read_ospec() {
         let test = "angle_x:angle_y:(100;auto)";
-        let dstr = DistributionFunction::from_str(test);
+        let parser = |_: &str| {None};
+        let dstr = DistributionFunction::load(test, parser);
         println!("{:?}", dstr);
         assert!(dstr.is_ok());
     }

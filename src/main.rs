@@ -66,6 +66,8 @@ struct CollideOptions {
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Use classical emission rates
+    classical: bool,
 }
 
 /// Propagates a single particle through a region of EM field, returning a Shower containing
@@ -78,6 +80,20 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
     let dt = dt * options.dt_multiplier;
     let primary_id = incident.id();
 
+    let eqn = if options.classical && options.rr {
+        EquationOfMotion::LandauLifshitz
+    } else {
+        EquationOfMotion::Lorentz
+    };
+
+    let mode = if options.classical {
+        RadiationMode::Classical
+    } else {
+        RadiationMode::Quantum
+    };
+
+    let electron_recoils = !options.classical && options.rr;
+
     while let Some(mut pt) = primaries.pop() {
         match pt.species() {
             Species::Electron | Species::Positron => {
@@ -86,10 +102,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
-                        dt
+                        dt,
+                        eqn,
                     );
 
-                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng) {
+                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -101,7 +118,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_normalized_momentum(k);
                         primaries.push(photon);
 
-                        if options.rr {
+                        if electron_recoils {
                             u = u_prime;
                         }
 
@@ -176,7 +193,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
     let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
-    let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol);
+    let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
     if pair_rate.is_none() || photon_rate.is_none() {
         1.0
     } else {
@@ -221,8 +238,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let rng_seed = input.read("control:rng_seed").unwrap_or(0usize);
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
-    let tracking_photons = input.read("control:pair_creation").unwrap_or(true);
     let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
+    // use qed rates by default
+    let classical = input.read("control:classical").unwrap_or(false);
+    // pair creation is enabled by default, unless classical = true
+    let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
 
     let a0: f64 = input.read("laser:a0")?;
     let wavelength: f64 = input
@@ -248,10 +268,34 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|w| (true, w))
         .unwrap_or((false, std::f64::INFINITY));
 
-    let tau: f64 = if focusing && !cfg!(feature = "cos2-envelope-in-3d") {
-        input.read("laser:fwhm_duration")?
-    } else {
-        input.read("laser:n_cycles")?
+    let envelope = input.read::<String, _>("laser:envelope")
+        .and_then(|s| match s.as_str() {
+            "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
+            "flattop" | "flat-top" => Ok(Envelope::Flattop),
+            "gauss" | "gaussian" => Ok(Envelope::Gaussian),
+            _ => {
+                eprintln!("Laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
+                Err(InputError::conversion("laser:envelope", "envelope"))
+            }
+        })
+        .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
+
+    let n_cycles: f64 = match envelope {
+        Envelope::CosSquared => input.read("laser:n_cycles")?,
+        Envelope::Flattop => {
+            input.read("laser:n_cycles")
+                .and_then(|n: f64| if n < 1.0 {
+                    eprintln!("'n_cycles' must be >= 1.0 for flattop lasers.");
+                    Err(InputError::conversion("laser:envelope", "envelope"))
+                } else {
+                    Ok(n)
+                })?
+        },
+        Envelope::Gaussian => {
+            input.read("laser:fwhm_duration")
+                .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
+                .or_else(|_e| input.read("laser:n_cycles"))?
+        }
     };
 
     let chirp_b = if !focusing {
@@ -305,6 +349,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                             \tradius: [2.0e-6, normally_distributed].");
                 Err(InputError::conversion("beam:radius", "radius"))
                 //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+            }
+        })
+        .or_else(|e| {
+            // if radius is just missing (as opposed to malformed), return 0.0
+            if e.kind() == InputErrorKind::Conversion {
+                Err(e)
+            } else {
+                Ok((0.0, true, None))
             }
         })?;
 
@@ -426,21 +478,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
     
     let gospec: Vec<String> = input.read("output:photon")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let gospec: Vec<DistributionFunction> = gospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
 
     let pospec: Vec<String> = input.read("output:positron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
-        .map(|s| s.parse())
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
 
     let file_format = input.read::<String,_>("output:file_format")
@@ -544,25 +596,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(feature = "hdf5-output")] {
             println!("\t* writing HDF5 output");
         }
-        #[cfg(feature = "cos2-envelope-in-3d")] {
-            if focusing {
-                println!("\t* with cos^2 temporal envelope");
-            }
-        }
         if pair_rate_increase > 1.0 {
             println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
         }
     }
 
-    let initial_z = if focusing {
-        if cfg!(feature = "cos2-envelope-in-3d") {
-            wavelength * tau + 3.0 * length
-        } else {
-            2.0 * SPEED_OF_LIGHT * tau + 3.0 * length
-        }
+    let laser: Laser = if focusing && !using_lcfa {
+        FocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            .with_envelope(envelope)
+            .with_finite_bandwidth(finite_bandwidth)
+            .into()
+    } else if focusing {
+        FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            .with_envelope(envelope)
+            .into()
+    } else if !using_lcfa {
+        PlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            .with_envelope(envelope)
+            .with_finite_bandwidth(finite_bandwidth)
+            .into()
     } else {
-        0.5 * wavelength * tau
+        FastPlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            .with_envelope(envelope)
+            .into()
     };
+
+    let initial_z = laser.ideal_initial_z() + 3.0 * length;
 
     let builder = BeamBuilder::new(species, num, initial_z)
         .with_weight(weight)
@@ -613,26 +672,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let runtime = std::time::Instant::now();
 
-    let laser: Laser = if focusing && !using_lcfa {
-        let laser = FocusedLaser::new(a0, wavelength, waist, tau, pol);
-        if finite_bandwidth {
-            laser.with_finite_bandwidth()
-        } else {
-            laser
-        }.into()
-    } else if focusing {
-        FastFocusedLaser::new(a0, wavelength, waist, tau, pol).into()
-    } else if !using_lcfa {
-        let laser = PlaneWave::new(a0, wavelength, tau, pol, chirp_b);
-        if finite_bandwidth {
-            laser.with_finite_bandwidth()
-        } else {
-            laser
-        }.into()
-    } else {
-        FastPlaneWave::new(a0, wavelength, tau, pol, chirp_b).into()
-    };
-
     let options = CollideOptions {
         dt_multiplier,
         rate_increase: pair_rate_increase,
@@ -641,6 +680,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         discard_bg_ph,
         rr,
         tracking_photons,
+        classical,
     };
 
     let (mut electrons, mut photons, mut positrons) = primaries
@@ -762,6 +802,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             conf.new_group("control")?
                 .new_dataset("dt_multiplier")?.write(&dt_multiplier)?
                 .new_dataset("radiation_reaction")?.write(&rr)?
+                .new_dataset("classical")?.write(&classical)?
                 .new_dataset("pair_creation")?.write(&tracking_photons)?
                 .new_dataset("lcfa")?.write(&using_lcfa)?
                 .new_dataset("rng_seed")?.write(&rng_seed)?
@@ -785,6 +826,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .new_dataset("focusing")?
                     .with_desc("true/false => pulse is modelled in 3d/1d")?
                     .write(&focusing)?
+                .new_dataset("envelope")?
+                    .with_desc("pulse envelope of the laser vector potential")?
+                    .write(&envelope)?
                 .new_dataset("chirp_b")?
                     .with_unit("1")?
                     .with_desc("parameter that appears in carrier phase = phi + b phi^2")?
@@ -797,13 +841,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .new_dataset("fwhm_duration")?
                     .with_unit("s")?
                     .with_desc("full width at half maximum of the temporal intensity profile")?
-                    .with_condition(|| focusing && !cfg!(feature = "cos2-envelope-in-3d"))
-                    .write(&tau)?
+                    .with_condition(|| envelope == Envelope::Gaussian)
+                    .write(&(n_cycles * wavelength / SPEED_OF_LIGHT))?
                 .new_dataset("n_cycles")?
                     .with_unit("1")?
                     .with_desc("number of wavelengths corresponding to the total pulse duration")?
-                    .with_condition(|| !focusing || cfg!(feature = "cos2-envelope-in-3d"))
-                    .write(&tau)?;
+                    .with_condition(|| matches!(envelope, Envelope::CosSquared | Envelope::Flattop))
+                    .write(&n_cycles)?;
 
             let charge = match species {
                 Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
