@@ -214,10 +214,9 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
 /// Collects the values of a variable to be simulated over into a vector based
 /// on the presence or absence of a nested loop for that variable.
 fn get_value_as_vector(input: &Config, path: &str) -> Result<Vec<f64>, Box<dyn Error>> {
-    let long_path: &str = format!("{}{}", path, ":start").as_str();
-    if input.read(long_path).is_err() {       // no 'start' value
-        let value: f64 = input.read(path)?;   // if a single value exists,
-                                              // return a single element vector.
+    if input.read::<f64, &str>(format!("{}{}", path, ":start").as_str()).is_err() {       // no 'start' value
+        let value: f64 = input.read(path)?;                                                    // if a single value exists,
+                                                                                               // return a single element vector.
         let v: Vec<f64> = vec![value; 1];
         Ok(v)
     }
@@ -1072,10 +1071,34 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::*;
+    use super::*;
 
     #[test]
-    fn values_as_vector_test() {
+    fn extract_single_value() {
+        // Test extraction of single value
+        let text: &str = "---
+        laser:
+            a0: 10.0
+        ";
+        let mut config = Config::from_string(&text).unwrap();
+        config.with_context("constants");
+        let a0_values1 = get_value_as_vector(&config, "laser:a0").unwrap();
+        assert_eq!(a0_values1, vec![10.0; 1]);
+    }
 
+    #[test]
+    fn extract_loop_values() {
+        // Test extraction of looped values
+        let text: &str = "---
+        laser:
+            a0:
+                start: 1.0
+                stop: 10.0
+                step: 2.0
+        ";
+        let mut config = Config::from_string(&text).unwrap();
+        config.with_context("constants");
+        let a0_values = get_value_as_vector(&config, "laser:a0").unwrap();
+        assert_eq!(a0_values, vec![1.0, 3.0, 5.0, 7.0, 9.0]);
     }
 }
