@@ -1,0 +1,42 @@
+# Ptarmigan input YAML file for linear polarisation LMA simulations
+# Pencil electron beam, fixed laser waist
+---
+control:
+  lcfa: false # if omitted or false, use LMA
+  radiation_reaction: true
+  pair_creation: false
+  rng_seed: 2
+
+laser:
+  a0: 
+    start: 0.5
+    stop: 2.0
+    step: 0.5
+  wavelength: wavelength
+  fwhm_duration: tau * femto
+  waist: 25.0 * micro
+  polarization: linear # must be given explicitly
+
+beam:
+  n: 100
+  species: electron
+  charge: 1.5e9 * e
+  gamma: initial_gamma
+  sigma: 0.0
+  radius: [0.1 * micro, uniformly_distributed]
+  length: 0.1 * micro
+  collision_angle: -17.2 * degree
+  rms_divergence: 8.672 * micro
+
+output:
+  ident: auto
+  discard_background_e: true
+  dump_all_particles: hdf5
+  coordinate_system: beam
+  units: hep
+
+constants:
+  laser_energy: 1.2 # joules
+  wavelength: 0.8 * micro
+  tau: 100.0 # fs
+  initial_gamma: 16.5 * GeV / (me * c^2)
