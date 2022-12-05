@@ -1074,7 +1074,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_single_value() {
+    fn extract_values() {
         // Test extraction of single value
         let text: &str = "---
         laser:
@@ -1084,10 +1084,7 @@ mod tests {
         config.with_context("constants");
         let a0_values1 = get_value_as_vector(&config, "laser:a0").unwrap();
         assert_eq!(a0_values1, vec![10.0; 1]);
-    }
-
-    #[test]
-    fn extract_loop_values() {
+        
         // Test extraction of looped values
         let text: &str = "---
         laser:
@@ -1096,7 +1093,7 @@ mod tests {
                 stop: 10.0
                 step: 2.0
         ";
-        let mut config = Config::from_string(&text).unwrap();
+        config = Config::from_string(&text).unwrap();
         config.with_context("constants");
         let a0_values = get_value_as_vector(&config, "laser:a0").unwrap();
         assert_eq!(a0_values, vec![1.0, 3.0, 5.0, 7.0, 9.0]);
