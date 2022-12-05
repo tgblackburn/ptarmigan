@@ -211,6 +211,31 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     photon_rate / pair_rate
 }
 
+/// Collects the values of a variable to be simulated over into a vector based
+/// on the presence or absence of a nested loop for that variable.
+fn get_value_as_vector(input: &Config, path: &str) -> Result<Vec<f64>, Box<dyn Error>> {
+    let long_path: &str = format!("{}{}", path, ":start").as_str();
+    if input.read(long_path).is_err() {       // no 'start' value
+        let value: f64 = input.read(path)?;   // if a single value exists,
+                                              // return a single element vector.
+        let v: Vec<f64> = vec![value; 1];
+        Ok(v)
+    }
+    else { // 'start' value found
+        let start: f64 = input.read(format!("{}{}", path, ":start").as_str())?;
+        let stop: f64 = input.read(format!("{}{}", path, ":stop").as_str())?;
+        let step: f64 = input.read(format!("{}{}", path, ":step").as_str())?;
+
+        let mut v: Vec<f64> = Vec::new();
+        let mut x: f64 = start;
+        while x <= stop {
+            v.push(x);
+            x += step;
+        }
+        Ok(v)
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
@@ -1042,4 +1067,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn values_as_vector_test() {
+
+    }
 }
