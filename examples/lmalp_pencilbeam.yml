@@ -8,25 +8,40 @@ control:
   rng_seed: 2
 
 laser:
+  # New looping feature for a0
   a0: 
-    start: 0.5
-    stop: 2.0
-    step: 0.5
+    start: 0.1
+    stop: 1.0
+    step: 0.1
   wavelength: wavelength
   fwhm_duration: tau * femto
   waist: 25.0 * micro
   polarization: linear # must be given explicitly
 
 beam:
-  n: 100
+  n: 1000000   # 10**6
   species: electron
   charge: 1.5e9 * e
   gamma: initial_gamma
-  sigma: 0.0
+  sigma: 0.0 
   radius: [0.1 * micro, uniformly_distributed]
   length: 0.1 * micro
-  collision_angle: -17.2 * degree
-  rms_divergence: 8.672 * micro
+  # collision_angle: -17.2 * degree
+  # rms_divergence: 8.672 * micro
+
+stats:
+  electron:
+    - mean gamma
+  photon:
+    - variance angle_x
+    - variance angle_y
+    - variance angle_x`energy
+    - variance angle_y`energy
+    # With energy cut
+    - variance angle_x for energy in (1 * MeV; auto)
+    - variance angle_y for energy in (1 * MeV; auto)
+    - variance angle_x`energy for energy in (1 * MeV; auto)
+    - variance angle_y`energy for energy in (1 * MeV; auto)
 
 output:
   ident: auto
