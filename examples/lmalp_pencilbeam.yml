@@ -38,10 +38,10 @@ stats:
     - variance angle_x`energy
     - variance angle_y`energy
     # With energy cut
-    - variance angle_x for energy in (1 * MeV; auto)
-    - variance angle_y for energy in (1 * MeV; auto)
-    - variance angle_x`energy for energy in (1 * MeV; auto)
-    - variance angle_y`energy for energy in (1 * MeV; auto)
+    - variance angle_x for energy in (1.0; auto)
+    - variance angle_y for energy in (1.0; auto)
+    - variance angle_x`energy for energy in (1.0; auto)
+    - variance angle_y`energy for energy in (1.0; auto)
 
 output:
   ident: auto
