@@ -10,16 +10,16 @@ control:
 laser:
   # New looping feature for a0
   a0: 
-    start: 5.5
-    stop: 10.0
-    step: 0.5
+    start: 0.1
+    stop: 1.0
+    step: 0.1
   wavelength: wavelength
   fwhm_duration: tau * femto
   waist: 25.0 * micro
   polarization: linear # must be given explicitly
 
 beam:
-  n: 100000   # 1 x 10**6
+  n: 1000000   # 1 x 10**6
   species: electron
   charge: 1.5e9 * e
   gamma: initial_gamma
