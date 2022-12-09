@@ -10,16 +10,16 @@ control:
 laser:
   # New looping feature for a0
   a0: 
-    start: 0.1
-    stop: 1.0
-    step: 0.1
+    start: 5.5
+    stop: 10.0
+    step: 0.5
   wavelength: wavelength
   fwhm_duration: tau * femto
   waist: 25.0 * micro
   polarization: linear # must be given explicitly
 
 beam:
-  n: 1000000   # 1 x 10**5
+  n: 100000   # 1 x 10**6
   species: electron
   charge: 1.5e9 * e
   gamma: initial_gamma
@@ -33,11 +33,13 @@ stats:
   electron:
     - mean gamma
   photon:
+    - total number
     - variance angle_x
     - variance angle_y
     - variance angle_x`energy
     - variance angle_y`energy
     # With energy cut
+    - total number for energy in (1.0; auto)
     - variance angle_x for energy in (1.0; auto)
     - variance angle_y for energy in (1.0; auto)
     - variance angle_x`energy for energy in (1.0; auto)
@@ -46,7 +48,7 @@ stats:
 output:
   ident: auto
   discard_background_e: true
-  #dump_all_particles: hdf5
+  dump_all_particles: hdf5
   coordinate_system: beam
   units: hep
 
