@@ -3,7 +3,7 @@ use std::f64::consts;
 use rand::prelude::*;
 use crate::special_functions::*;
 use crate::geometry::StokesVector;
-use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
+use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS, GAUSS_16_NODES};
 
 // Lookup tables
 mod tables;
@@ -32,6 +32,43 @@ fn diff_partial_rate(n: i32, a: f64, eta: f64, v: f64) -> f64 {
         + 0.5 * a * a * (1.0 + 0.5 * vsmax.powi(2) / (1.0 - vsmax))
         * (2.0 * j_n.powi(2) - j_np1.powi(2) - j_nm1.powi(2))
     )
+}
+
+/// Returns the largest value of the differential partial rate, d W_n / d v,
+/// multiplied by a small safety factor.
+fn ceiling_diff_partial_rate(n: i32, a: f64, eta: f64) -> f64 {
+    let sn = 2.0 * (n as f64) * eta / (1.0 + a * a);
+    // approx harmonic index when sigma / mu < 0.25
+    let n_switch = (32.3 * (1.0 + 0.476 * a.powf(1.56))) as i32;
+
+    if sn < 2.0 || n < n_switch {
+        let v_opt = (1.0 + sn) / (2.0 + sn);
+        let lower = (0..16)
+            .map(|i| (i as f64) * v_opt / 16.0)
+            .map(|v| diff_partial_rate(n, a, eta, v))
+            .reduce(f64::max)
+            .unwrap();
+        let upper = (0..16)
+            .map(|i| v_opt + (i as f64) * (1.0 - v_opt) / 16.0)
+            .map(|v| diff_partial_rate(n, a, eta, v))
+            .reduce(f64::max)
+            .unwrap();
+        1.2 * lower.max(upper)
+    } else {
+        // Partition the range into 0 < u < 1 + sn, and
+        // 1 + sn < u < 3(1 + sn)
+        let lower: f64 = GAUSS_16_NODES.iter()
+            .map(|x| 0.5 * (1.0 + sn) * (x + 1.0))
+            .map(|u| diff_partial_rate(n, a, eta, u / (1.0 + u)))
+            .reduce(f64::max)
+            .unwrap();
+        let upper: f64 = GAUSS_16_NODES.iter()
+            .map(|x| (1.0 + sn) + 0.5 * 2.0 * (1.0 + sn) * (x + 1.0))
+            .map(|u| diff_partial_rate(n, a, eta, u / (1.0 + u)))
+            .reduce(f64::max)
+            .unwrap();
+        1.2 * lower.max(upper)
+    }
 }
 
 /// Equivalent to `spectrum(n, a, eta, v) / eta` for eta -> 0.
@@ -141,32 +178,10 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
 pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i32, f64, f64, StokesVector) {
     let n = fixed_n.unwrap_or_else(|| {
         tables::invert(a, eta, rng.gen())
-        // let nmax = (10.0 * (1.0 + a * a * a)) as i32;
-        // let frac = rng.gen::<f64>();
-        // let target = frac * rate(a, eta).unwrap();
-        // let mut cumsum: f64 = 0.0;
-        // let mut n: Option<i32> = None;
-        // for k in 1..=nmax {
-        //     cumsum += partial_rate(k, a, eta);
-        //     if cumsum > target {
-        //         n = Some(k);
-        //         break;
-        //     }
-        // }
-
-        // // interpolation errors mean that even after the sum, cumsum could be < target
-        // n.unwrap_or_else(|| {
-        //     eprintln!("cp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
-        //     nmax - 1
-        // })
     });
 
     // Approximate maximum value of the probability density:
-    let max: f64 = GAUSS_32_NODES.iter()
-        .map(|x| diff_partial_rate(n, a, eta, 0.5 * (x + 1.0)))
-        .reduce(f64::max)
-        .map(|max| 1.5 * max)
-        .unwrap();
+    let max: f64 = ceiling_diff_partial_rate(n, a, eta);
 
     // Rejection sampling
     let v = loop {
@@ -223,6 +238,46 @@ mod tests {
     use rand_xoshiro::*;
     use rayon::prelude::*;
     use super::*;
+
+    #[test]
+    fn rate_ceiling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let mut err_ceiling = -1_f64;
+
+        for _i in 0..100 {
+            let a = (0.2_f64.ln() + (20_f64.ln() - 0.2_f64.ln()) * rng.gen::<f64>()).exp();
+            let eta = (0.001_f64.ln() + (1.0_f64.ln() - 0.001_f64.ln()) * rng.gen::<f64>()).exp();
+            let n_max = (10.0 * (1.0 + a.powi(3))) as i32;
+            let harmonics: Vec<_> = if n_max > 200 {
+                (0..=10).map(|i| (2_f64.ln() + 0.1 * (i as f64) * ((n_max as f64).ln() - 2_f64.ln())).exp() as i32).collect()
+            } else if n_max > 10 {
+                let mut low = vec![1, 2, 3];
+                let mut high: Vec<_> = (0..=4).map(|i| (5_f64.ln() + 0.25 * (i as f64) * ((n_max as f64).ln() - 5_f64.ln())).exp() as i32).collect();
+                low.append(&mut high);
+                low
+            } else {
+                (1..n_max).collect()
+            };
+
+            for n in &harmonics {
+                let true_max: f64 = (0..10_000)
+                    .map(|i| (i as f64) / 10000.0)
+                    .map(|v| diff_partial_rate(*n, a, eta, v))
+                    .reduce(f64::max)
+                    .unwrap();
+                let max = ceiling_diff_partial_rate(*n, a, eta);
+                let err = (true_max - max) / true_max;
+                err_ceiling = err_ceiling.max(err);
+                println!(
+                    "a = {:>9.3e}, eta = {:>9.3e}, n = {:>4} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                    a, eta, n, true_max, max, 100.0 * err,
+                );
+                assert!(err < 0.0);
+            }
+        }
+
+        println!("Largest error detected was {:.2}%", 100.0 * err_ceiling);
+    }
 
     #[test]
     #[ignore]
