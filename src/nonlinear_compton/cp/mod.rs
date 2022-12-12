@@ -544,7 +544,7 @@ mod tests {
                         let limit = rates.last().unwrap()[0];
                         let n = n.min(limit);
                         cdf[i][0] = n;
-                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                        cdf[i][1] = pwmci::Interpolant::new(&rates[..]).evaluate(n).unwrap() / rate;
                     }
                 } else {
                     // Sample CDF at 32 log-spaced points
@@ -554,7 +554,7 @@ mod tests {
                         let limit = rates.last().unwrap()[0];
                         let n = n.min(limit);
                         cdf[i][0] = n;
-                        cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / rate;
+                        cdf[i][1] = pwmci::Interpolant::new(&rates[..]).evaluate(n).unwrap() / rate;
                     }
                 }
 

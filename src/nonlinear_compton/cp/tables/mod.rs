@@ -55,7 +55,7 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
                 let n = if frac <= table[0][1] {
                     0.9
                 } else {
-                    pwmci::invert(frac, table).unwrap().0
+                    pwmci::Interpolant::new(table).invert(frac).unwrap()
                 };
                 n * w
             })
@@ -90,7 +90,7 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
                 let n = if frac <= table[0][1] {
                     0.9
                 } else {
-                    pwmci::invert(frac, table).unwrap().0
+                    pwmci::Interpolant::new(table).invert(frac).unwrap()
                 };
                 n * w
             })
