@@ -40,7 +40,7 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
     let r_zero = if local_zero < cdf.table[0][0] {
         cdf.coeff * (local_zero - global_zero).powf(cdf.power)
     } else {
-        let tmp = pwmci::evaluate(local_zero, &cdf.table);
+        let tmp = pwmci::Interpolant::new(&cdf.table).evaluate(local_zero);
 
         // none if local_zero is larger than the last entry in the table
         if tmp.is_none() {
@@ -58,8 +58,8 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
     let y = if r <= cdf.table[0][1] {
         let tmp = (r.ln() - cdf.coeff.ln()) / cdf.power; // ln(y-global_zero)
         tmp.exp() + global_zero
-    } else if let Some(result) = pwmci::invert(r, &cdf.table) {
-        result.0
+    } else if let Some(result) = pwmci::Interpolant::new(&cdf.table).invert(r) {
+        result
     } else {
         local_zero // cdf.table[30][0]
     };
@@ -99,8 +99,8 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         //println!("lrand = {:e}, bounds = {:e}, {:e}", rand1.ln(), lower.table[0][1], lower.table[30][1]);
         let ln_u_lower = if rand1.ln() <= lower.table[0][1] {
             (rand1.ln() - lower.coeff.ln()) / lower.power
-        } else if let Some(result) = pwmci::invert(rand1.ln(), &lower.table) {
-            result.0
+        } else if let Some(result) = pwmci::Interpolant::new(&lower.table).invert(rand1.ln()) {
+            result
         } else {
             lower.table[30][0] // clip to last tabulated ln_u
         };
@@ -108,8 +108,8 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         let upper = &QUANTUM_CDF[index+1];
         let ln_u_upper = if rand1.ln() <= upper.table[0][1] {
             (rand1.ln() - upper.coeff.ln()) / upper.power
-        } else if let Some(result) = pwmci::invert(rand1.ln(), &upper.table) {
-            result.0
+        } else if let Some(result) = pwmci::Interpolant::new(&upper.table).invert(rand1.ln()) {
+            result
         } else {
             upper.table[30][0]
         };
