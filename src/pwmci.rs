@@ -239,8 +239,6 @@ struct FitParameters {
 impl FitParameters {
     fn construct(i: usize, table: &[[f64; 2]]) -> FitParameters {
         let len = table.len();
-        // all accesses are within bounds
-        assert!(i < len - 1);
 
         // Slopes of the secant lines between x_{i-2}, x_{i-1}, x_i and x_{i+1}
         let secant = if i == 1 {
@@ -256,6 +254,8 @@ impl FitParameters {
                 (table[i  ][1] - table[i-1][1]) / (table[i  ][0] - table[i-1][0]),
             ]
         } else {
+            // all accesses are within bounds
+            assert!(i > 0 && i < len - 1);
             [
                 (table[i-1][1] - table[i-2][1]) / (table[i-1][0] - table[i-2][0]),
                 (table[i  ][1] - table[i-1][1]) / (table[i  ][0] - table[i-1][0]),
