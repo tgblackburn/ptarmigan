@@ -34,6 +34,16 @@ pub fn interpolate(a: f64, eta: f64) -> f64 {
     f.exp()
 }
 
+fn rescale(frac: f64, table: &[[f64; 2]; 32]) -> (f64, [[f64; 2]; 31]) {
+    let mut output = [[0.0; 2]; 31];
+    for i in 0..31 {
+        output[i][0] = table[i][0].ln();
+        output[i][1] = (-1.0 * (1.0 - table[i][1]).ln()).ln();
+    }
+    let frac2 = (-1.0 * (1.0 - frac).ln()).ln();
+    (frac2, output)
+}
+
 pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
     use cdf::*;
 
@@ -55,7 +65,12 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
                 let n = if frac <= table[0][1] {
                     0.9
                 } else {
-                    pwmci::Interpolant::new(table).invert(frac).unwrap()
+                    let (rs_frac, rs_table) = rescale(frac, table);
+                    pwmci::Interpolant::new(&rs_table)
+                        .extrapolate(true)
+                        .invert(rs_frac)
+                        .map(f64::exp)
+                        .unwrap()
                 };
                 n * w
             })
@@ -90,7 +105,12 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
                 let n = if frac <= table[0][1] {
                     0.9
                 } else {
-                    pwmci::Interpolant::new(table).invert(frac).unwrap()
+                    let (rs_frac, rs_table) = rescale(frac, table);
+                    pwmci::Interpolant::new(&rs_table)
+                        .extrapolate(true)
+                        .invert(rs_frac)
+                        .map(f64::exp)
+                        .unwrap()
                 };
                 n * w
             })
