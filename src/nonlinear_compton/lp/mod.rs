@@ -457,6 +457,16 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     }
 }
 
+fn rescale(frac: f64, table: &[[f64; 2]; 16]) -> (f64, [[f64; 2]; 15]) {
+    let mut output = [[0.0; 2]; 15];
+    for i in 0..15 {
+        output[i][0] = table[i][0].ln();
+        output[i][1] = (-1.0 * (1.0 - table[i][1]).ln()).ln();
+    }
+    let frac2 = (-1.0 * (1.0 - frac).ln()).ln();
+    (frac2, output)
+}
+
 /// Obtain harmonic index by inverting frac = cdf(n), where 0 <= frac < 1 and
 /// the cdf is tabulated.
 #[cfg(not(feature = "explicit-harmonic-summation"))]
@@ -478,8 +488,15 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
                 let table = &cdf_table::TABLE[*i];
                 let n = if frac <= table[0][1] {
                     0.9
-                } else {
+                } else if a < 5.0 {
                     pwmci::Interpolant::new(table).invert(frac).unwrap()
+                } else {
+                    let (rs_frac, rs_table) = rescale(frac, table);
+                    pwmci::Interpolant::new(&rs_table)
+                        .extrapolate(true)
+                        .invert(rs_frac)
+                        .map(f64::exp)
+                        .unwrap()
                 };
                 n * w
             })
@@ -512,8 +529,15 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
                 let table = &cdf_table::TABLE[*i];
                 let n = if frac <= table[0][1] {
                     0.9
-                } else {
+                } else if a < 5.0 {
                     pwmci::Interpolant::new(table).invert(frac).unwrap()
+                } else {
+                    let (rs_frac, rs_table) = rescale(frac, table);
+                    pwmci::Interpolant::new(&rs_table)
+                        .extrapolate(true)
+                        .invert(rs_frac)
+                        .map(f64::exp)
+                        .unwrap()
                 };
                 n * w
             })
