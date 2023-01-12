@@ -1,0 +1,32 @@
+---
+# Switch between 'classical: gaunt_factor_corrected' and
+# 'classical: false' (i.e. QED) to isolate stochastic effects
+# and straggling in radiation reaction.
+# See Figs 2 and 4 in Blackburn et al, PRL 112, 015001 (2014),
+# arXiv:1503.01009.
+
+control:
+  classical: gaunt_factor_corrected # gaunt_factor_corrected | false
+  lcfa: true
+  # enable to see straggling enhancement of positron yield
+  pair_creation: false
+  increase_pair_rate_by: 1.0e6
+
+laser:
+  a0: sqrt(1.0e22 / 1.36e18)
+  wavelength: 1.0 * micro
+  fwhm_duration: 30.0 * femto
+  envelope: gaussian
+  polarization: linear
+
+beam:
+  ne: 100000
+  charge: e
+  gamma: 2000.0
+
+output:
+  ident: mcl # e.g. qed | mcl
+  file_format: fits
+  electron: [energy]
+  photon: [energy]
+  positron: [energy]
