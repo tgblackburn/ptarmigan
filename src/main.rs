@@ -68,6 +68,8 @@ struct CollideOptions {
     tracking_photons: bool,
     /// Use classical emission rates
     classical: bool,
+    /// Correct classical spectrum using Gaunt factor
+    gaunt_factor: bool,
 }
 
 /// Propagates a single particle through a region of EM field, returning a Shower containing
@@ -81,12 +83,16 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
     let primary_id = incident.id();
 
     let eqn = if options.classical && options.rr {
-        EquationOfMotion::LandauLifshitz
+        if options.gaunt_factor {
+            EquationOfMotion::ModifiedLandauLifshitz
+        } else {
+            EquationOfMotion::LandauLifshitz
+        }
     } else {
         EquationOfMotion::Lorentz
     };
 
-    let mode = if options.classical {
+    let mode = if options.classical && !options.gaunt_factor {
         RadiationMode::Classical
     } else {
         RadiationMode::Quantum
@@ -239,8 +245,34 @@ fn main() -> Result<(), Box<dyn Error>> {
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
     let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
-    // use qed rates by default
-    let classical = input.read("control:classical").unwrap_or(false);
+
+    let (classical, gaunt_factor) = input.read::<String, _>("control:classical")
+        .and_then(|s| match s.as_str() {
+            "true" => Ok((true, false)),
+            "false" => Ok((false, false)),
+            "gaunt_factor_corrected" => Ok((true, true)),
+            _ => {
+                eprintln!("control:classical must be one of 'true', 'false' or 'gaunt_factor_corrected'.");
+                Err(InputError::conversion("control:classical", "classical"))
+            }
+        })
+        // Gaunt factor correction is available only under LCFA
+        .and_then(|(classical, gaunt_factor)| {
+            if gaunt_factor && !using_lcfa {
+                eprintln!("Gaunt factor correction is only available under the LCFA.");
+                Err(InputError::conversion("control:classical", "classical"))
+            } else {
+                Ok((classical, gaunt_factor))
+            }
+        })
+        .or_else(|e| match e.kind() {
+            // preserve error if 'control:classical' is present, but parsing failed
+            InputErrorKind::Conversion => Err(e),
+            // if 'control:classical' is not present, default to qed rates
+            _ => Ok((false, false)),
+        })
+        ?;
+
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
 
@@ -681,6 +713,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         rr,
         tracking_photons,
         classical,
+        gaunt_factor,
     };
 
     let (mut electrons, mut photons, mut positrons) = primaries

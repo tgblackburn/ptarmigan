@@ -93,7 +93,7 @@ pub fn invert(a: f64, eta: f64, frac: f64) -> i32 {
                 table[i+1][1] = src[i][1];
             }
 
-            let delta = pwmci::invert(frac, &table).unwrap().0;
+            let delta = pwmci::Interpolant::new(&table).invert(frac).unwrap();
 
             (delta * w, shift * w)
         })

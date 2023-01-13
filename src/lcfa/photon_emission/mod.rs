@@ -40,7 +40,7 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
     let r_zero = if local_zero < cdf.table[0][0] {
         cdf.coeff * (local_zero - global_zero).powf(cdf.power)
     } else {
-        let tmp = pwmci::evaluate(local_zero, &cdf.table);
+        let tmp = pwmci::Interpolant::new(&cdf.table).evaluate(local_zero);
 
         // none if local_zero is larger than the last entry in the table
         if tmp.is_none() {
@@ -58,8 +58,8 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
     let y = if r <= cdf.table[0][1] {
         let tmp = (r.ln() - cdf.coeff.ln()) / cdf.power; // ln(y-global_zero)
         tmp.exp() + global_zero
-    } else if let Some(result) = pwmci::invert(r, &cdf.table) {
-        result.0
+    } else if let Some(result) = pwmci::Interpolant::new(&cdf.table).invert(r) {
+        result
     } else {
         local_zero // cdf.table[30][0]
     };
@@ -99,8 +99,8 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         //println!("lrand = {:e}, bounds = {:e}, {:e}", rand1.ln(), lower.table[0][1], lower.table[30][1]);
         let ln_u_lower = if rand1.ln() <= lower.table[0][1] {
             (rand1.ln() - lower.coeff.ln()) / lower.power
-        } else if let Some(result) = pwmci::invert(rand1.ln(), &lower.table) {
-            result.0
+        } else if let Some(result) = pwmci::Interpolant::new(&lower.table).invert(rand1.ln()) {
+            result
         } else {
             lower.table[30][0] // clip to last tabulated ln_u
         };
@@ -108,8 +108,8 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         let upper = &QUANTUM_CDF[index+1];
         let ln_u_upper = if rand1.ln() <= upper.table[0][1] {
             (rand1.ln() - upper.coeff.ln()) / upper.power
-        } else if let Some(result) = pwmci::invert(rand1.ln(), &upper.table) {
-            result.0
+        } else if let Some(result) = pwmci::Interpolant::new(&upper.table).invert(rand1.ln()) {
+            result
         } else {
             upper.table[30][0]
         };
@@ -216,6 +216,54 @@ pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w:
 
     // println!("after rotation: |xi| = {:.3e}, xi = [{:.3e} {:.3e} {:.3e}]", xi.norm_sqr().sqrt(), xi[0], xi[1], xi[2]);
     [1.0, xi[0], xi[1], xi[2]].into()
+}
+
+static GAUNT_FACTOR_TABLE: [[f64; 2]; 25] = [
+    [-6.907755278982137, -0.005923910174592344],
+    [-6.332109005733626, -0.01049345707375475],
+    [-5.756462732485114, -0.01853326677632520],
+    [-5.180816459236603, -0.03256813342821585],
+    [-4.605170185988091, -0.05674922246157141],
+    [-4.029523912739580, -0.09754530350543557],
+    [-3.453877639491069, -0.1642291108677053],
+    [-2.878231366242557, -0.2685646952510789],
+    [-2.302585092994046, -0.4231867286719710],
+    [-1.726938819745534, -0.6390383238080004],
+    [-1.151292546497023, -0.9232385209997736],
+    [-0.575646273248511, -1.278436642040118],
+    [ 0.000000000000000, -1.703334719200724],
+    [ 0.575646273248511, -2.193501426179741],
+    [ 1.151292546497023, -2.742164851781891],
+    [ 1.726938819745534, -3.341092923053680],
+    [ 2.302585092994046, -3.981546623633449],
+    [ 2.878231366242557, -4.655120578676737],
+    [ 3.453877639491069, -5.354319063765299],
+    [ 4.029523912739580, -6.072838862057530],
+    [ 4.605170185988091, -6.805618017945314],
+    [ 5.180816459236603, -7.548736622847868],
+    [ 5.756462732485114, -8.299245624917244],
+    [ 6.332109005733626, -9.054976772950048],
+    [ 6.907755278982137, -9.814364636712657],
+];
+
+/// Returns the Gaunt factor `g(χ)`, the ratio between the radiated power in the quantum and
+/// classical cases.
+pub fn gaunt_factor(chi: f64) -> f64 {
+    if chi <= 1.0e-3 {
+        1.0 - 55.0 * 3_f64.sqrt() * chi / 16.0 + 48.0 * chi * chi
+    } else if chi > 500.0 {
+        let coeff = 0.5563810015417746;
+        let chi_1_3 = chi.cbrt();
+        let g = -1.0000341464898563 + coeff * chi_1_3 * chi_1_3;
+        let g = 2.6235881916750565 + chi_1_3 * chi_1_3 * g;
+        let g = -3.8106418922532588 + chi_1_3 * g;
+        g / chi.powi(3)
+    } else {
+        pwmci::Interpolant::new(&GAUNT_FACTOR_TABLE)
+            .evaluate(chi.ln())
+            .map(f64::exp)
+            .unwrap()
+    }
 }
 
 #[cfg(test)]
@@ -333,6 +381,29 @@ mod tests {
         let pol_y = photon.polarization_along_y();
         println!("Projected onto x = {:.3e}, y = {:.3e}, total = {:.3e}", pol_x, pol_y, pol_x + pol_y);
         assert!(pol_x + pol_y == 1.0);
+    }
+
+    #[test]
+    fn gaunt_factor_table() {
+        let pts = [
+            (0.0025, 0.98540791120703309744),
+            (0.012, 0.93473708092320246516),
+            (0.12, 0.61600532094295304700),
+            (0.7, 0.23882354190470674907),
+            (2.5, 0.081136810639749760802),
+            (7.0, 0.027867522424020332230),
+            (12.0, 0.015120883496044083748),
+            (25.0, 0.0063062413153582144900),
+            (70.0, 0.0017465062499607358868),
+            (250.0, 0.00033811666381767191642),
+        ];
+
+        for (chi, target) in pts.iter() {
+            let result = gaunt_factor(*chi);
+            let error = (result - target).abs() / target;
+            println!("g({:>6}) = {:.6e} [expected {:.6e}], error = {:.3}%", chi, result, target, 100.0 * error);
+            assert!(error < 1.0e-3);
+        }
     }
 
     // #[test]

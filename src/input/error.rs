@@ -21,7 +21,7 @@ pub struct InputError {
 
 impl fmt::Debug for InputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let help_msg = "Usage: mpirun -n np ./opal input-file";
+        let help_msg = "Usage: mpirun -n np ./ptarmigan input-file";
         match self.kind {
             InputErrorKind::File => write!(f, "Unable to open configuration file.\n{}", help_msg),
             InputErrorKind::Location => write!(f, "Failed to follow specified path \"{}\": component \"{}\" is missing.\n{}", self.path, self.cause, help_msg),
