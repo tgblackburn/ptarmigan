@@ -147,7 +147,7 @@ impl Field for FastPlaneWave {
     fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
-        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn == EquationOfMotion::LandauLifshitz)
+        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn)
     }
 
     #[allow(non_snake_case)]

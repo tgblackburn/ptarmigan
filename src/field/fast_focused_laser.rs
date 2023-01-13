@@ -187,7 +187,7 @@ impl FastFocusedLaser {
     /// as part of the particle push, following the classical LL prescription.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, with_rr: bool) -> (FourVector, FourVector, f64) {
+    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         // velocity in SI units
         let u = ThreeVector::from(ui);
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
@@ -198,7 +198,7 @@ impl FastFocusedLaser {
         let u_half = u + alpha * (E + v.cross(B));
 
         // (classical) radiated momentum
-        let u_rad = if with_rr {
+        let u_rad = if eqn.includes_rr() {
             let gamma = (1.0 + u_half * u_half).sqrt();
             let u_half_mag = u_half.norm_sqr().sqrt();
             let beta = u_half / u_half_mag;
@@ -209,7 +209,11 @@ impl FastFocusedLaser {
                 0.0
             };
             let power = 2.0 * ALPHA_FINE * chi * chi / (3.0 * COMPTON_TIME);
-            power * dt * u_half / u_half_mag
+            let g_chi = match eqn {
+                EquationOfMotion::ModifiedLandauLifshitz => lcfa::photon_emission::gaunt_factor(chi),
+                _ => 1.0,
+            };
+            g_chi * power * dt * u_half / u_half_mag
         } else {
             [0.0; 3].into()
         };
@@ -344,7 +348,7 @@ impl Field for FastFocusedLaser {
     fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
         let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
-        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn == EquationOfMotion::LandauLifshitz)
+        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn)
     }
 
     #[allow(non_snake_case)]

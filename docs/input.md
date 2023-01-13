@@ -9,6 +9,9 @@ Physics:
 * `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
 * `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
 * `classical` (optional, default = `false`): use the classical photon emission rate. If `radiation_reaction` is enabled, electrons and positrons lose energy smoothly, following the Landau-Lifshitz equation. Disables pair creation unless otherwise specified.
+A modified classical model can be chosen by setting `classical` to `gaunt_factor_corrected`.
+In this model the instantaneous radiated power is reduced by the Gaunt factor g(χ) and the upper bound on the photon spectrum corrected to the electron energy.
+This option is only available under the LCFA.
 * `lcfa` (optional, default = `false`): if `true`, use rates calculated in the locally constant, crossed fields approximation to model QED processes.
 * `bandwidth_correction` (optional, default = `false`, ignored if `lcfa: true`): if `true`, correct the photon momentum sampling algorithm to account for the laser pulse's finite bandwidth. Has no effect if LCFA rates are selected.
 

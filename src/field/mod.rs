@@ -60,6 +60,16 @@ impl Hdf5Type for Envelope {
 pub enum EquationOfMotion {
     Lorentz,
     LandauLifshitz,
+    ModifiedLandauLifshitz,
+}
+
+impl EquationOfMotion {
+    fn includes_rr(&self) -> bool {
+        match self {
+            EquationOfMotion::LandauLifshitz | EquationOfMotion::ModifiedLandauLifshitz => true,
+            EquationOfMotion::Lorentz => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
