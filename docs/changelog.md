@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.1.0
+
+2023-01-13
+
+Added:
+
+* Modified (quantum-corrected) classical RR.
+* Faster photon generation in CP backgrounds, under LMA.
+
+Fixed:
+
+* Error messages.
+
 ## v1.0.0
 
 2022-12-01
