@@ -392,7 +392,7 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
                 let limit = rates.last().unwrap()[0];
                 let n = n.min(limit);
                 cdf[i][0] = n;
-                cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
+                cdf[i][1] = pwmci::Interpolant::new(&rates[..]).evaluate(n).unwrap() / total;
             }
         } else {
             // n_mode >= n_min + 4
@@ -411,7 +411,7 @@ fn rate_by_summation(a: f64, eta: f64) -> (f64, [[f64; 2]; 16]) {
                 let limit = rates.last().unwrap()[0];
                 let n = n.min(limit);
                 cdf[i][0] = n;
-                cdf[i][1] = pwmci::evaluate(n, &rates[..]).unwrap() / total;
+                cdf[i][1] = pwmci::Interpolant::new(&rates[..]).evaluate(n).unwrap() / total;
             }
         }
     }

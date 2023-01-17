@@ -205,6 +205,7 @@ impl Field for FocusedLaser {
                 let g = scale.powi(2) * self.landau_lifshitz_force(r, u);
                 u + 0.5 * (f + g) * dtau
             },
+            EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
         };
 
         // r_{n+1/2} = r_n + c u_n * dtau / 2
@@ -218,6 +219,7 @@ impl Field for FocusedLaser {
         let g: FourVector = match eqn {
             EquationOfMotion::Lorentz => [0.0; 4].into(),
             EquationOfMotion::LandauLifshitz =>  scale.powi(2) * self.landau_lifshitz_force(r, u_mid),
+            EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
         };
 
         let u = u + (f + g) * dtau;

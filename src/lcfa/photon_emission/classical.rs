@@ -38,8 +38,9 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         1.020377255 * rand1.powf(0.6)
     } else {
         //println!("Inverting ln(rand = {}) = {}", rand1, ln_rand);
-        let (ln_x, _) = pwmci::invert(ln_rand, &tables::CLASSICAL_SPECTRUM_TABLE)
-            .unwrap_or( (tables::CLASSICAL_SPECTRUM_TABLE.last().unwrap()[0],1) );
+        let ln_x = pwmci::Interpolant::new(&tables::CLASSICAL_SPECTRUM_TABLE)
+            .invert(ln_rand)
+            .unwrap_or(tables::CLASSICAL_SPECTRUM_TABLE.last().unwrap()[0]);
         ln_x.exp()
     };
 
