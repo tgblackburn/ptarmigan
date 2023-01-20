@@ -212,7 +212,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
 fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
     let chi = 2.0 * gamma * a0 * omega_mc2;
-    let pair_rate = lcfa::pair_creation::rate(chi, gamma);
+    let pair_rate = lcfa::pair_creation::rate(chi, gamma, 0.5, 0.5);
     let photon_rate = lcfa::photon_emission::rate(chi, gamma);
     photon_rate / pair_rate
 }

@@ -5,38 +5,48 @@ use crate::constants::*;
 
 mod tables;
 
-/// Auxiliary function used in calculation of LCFA pair creation
-/// rate, defined
-/// T(chi) = 1/(6 sqrt3 pi chi) int_1^\infty (8u + 1)/\[u^(3/2) sqrt(u-1)\] K_{2/3}\[8u/(3chi)\] du
-fn auxiliary_t(chi: f64) -> f64 {
+/// Returns the value of the auxiliary function T for photons that are polarized parallel,
+/// and perpendicular to, the instantaneous acceleration (respectively).
+fn auxiliary_t(chi: f64) -> (f64, f64) {
     use tables::*;
     if chi <= 0.01 {
         // if chi < 5e-3, T(chi) < 1e-117, so ignore
         // 3.0 * 3.0f64.sqrt() / (8.0 * consts::SQRT_2) * (-4.0 / (3.0 * chi)).exp()
-        0.0
+        (0.0, 0.0)
     } else if chi < 1.0 {
         // use exp(-f/chi) fit
         let i = ((chi.ln() - LN_T_CHI_TABLE[0][0]) / DELTA_LN_CHI) as usize;
         let dx = (chi - LN_T_CHI_TABLE[i][0].exp()) / (LN_T_CHI_TABLE[i+1][0].exp() - LN_T_CHI_TABLE[i][0].exp());
-        let tmp = (1.0 - dx) / LN_T_CHI_TABLE[i][1] + dx / LN_T_CHI_TABLE[i+1][1];
-        (1.0 / tmp).exp()
+        let par = (1.0 - dx) / LN_T_CHI_TABLE[i][1] + dx / LN_T_CHI_TABLE[i+1][1];
+        let perp = (1.0 - dx) / LN_T_CHI_TABLE[i][2] + dx / LN_T_CHI_TABLE[i+1][2];
+        ((1.0 / par).exp(), (1.0 / perp).exp())
     } else if chi < 100.0 {
         // use power-law fit
         let i = ((chi.ln() - LN_T_CHI_TABLE[0][0]) / DELTA_LN_CHI) as usize;
         let dx = (chi.ln() - LN_T_CHI_TABLE[i][0]) / DELTA_LN_CHI;
-        ((1.0 - dx) * LN_T_CHI_TABLE[i][1] + dx * LN_T_CHI_TABLE[i+1][1]).exp()
+        let par = (1.0 - dx) * LN_T_CHI_TABLE[i][1] + dx * LN_T_CHI_TABLE[i+1][1];
+        let perp= (1.0 - dx) * LN_T_CHI_TABLE[i][2] + dx * LN_T_CHI_TABLE[i+1][2];
+        (par.exp(), perp.exp())
     } else {
         // use asymptotic expression, which is accurate to better than 0.3%
         // for chi > 100:
         //   T(x) = [C - C_1 x^(-2/3)] x^(-1/3)
-        // where C = 5 Gamma(5/6) (2/3)^(1/3) / [14 Gamma(7/6)] and C_1 = 2/3
-        (0.37961230854357103776 - 2.0 * chi.powf(-2.0/3.0) / 3.0) * chi.powf(-1.0/3.0)
+        // where <C> = 5 Gamma(5/6) (2/3)^(1/3) / [14 Gamma(7/6)] and C_1 = 2/3
+        (0.3036898468348568 / chi.cbrt() - 2.0 / (3.0 * chi), 0.4555347702522852 / chi.cbrt() - 2.0 / (3.0 * chi))
     }
 }
 
-/// Returns the nonlinear Breit-Wheeler rate, per unit time (in seconds)
-pub fn rate(chi: f64, gamma: f64) -> f64 {
-    ALPHA_FINE * chi * auxiliary_t(chi) / (COMPTON_TIME * gamma)
+/// Returns the nonlinear Breit-Wheeler rate, per unit time (in seconds),
+/// for a polarized photon with quantum parameter `chi` and normalized energy `gamma`.
+///
+/// The photon polarization is defined by  `parallel_proj` and `perp_proj`,
+/// the projections of the polarization on `w` and `n × w`, respectively,
+/// where `w` is the instantaneous acceleration and `n` is the photon direction.
+///
+/// The polarization-averaged rate is recovered by setting both projections to 0.5.
+pub fn rate(chi: f64, gamma: f64, parallel_proj: f64, perp_proj: f64) -> f64 {
+    let (t_par, t_perp) = auxiliary_t(chi);
+    ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) / (COMPTON_TIME * gamma)
 }
 
 /// Proportional to the probability spectrum dW/ds
@@ -150,9 +160,10 @@ mod tests {
         ];
 
         for (chi, target) in &pts {
-            let result = auxiliary_t(*chi);
+            let (t_par, t_perp) = auxiliary_t(*chi);
+            let result = 0.5 * (t_par + t_perp);
             let error = (result - target).abs() / target;
-            //println!("chi = {:.3e}, t(chi) = {:.6e}, error = {:.3e}", chi, result, error);
+            println!("chi = {:.3e}, t(chi) = {:.6e}, error = {:.3e}", chi, result, error);
             assert!(error < max_error);
         }
     }

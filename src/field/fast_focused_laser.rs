@@ -306,7 +306,7 @@ impl FastFocusedLaser {
         } else {
             0.0
         };
-        let prob = dt * lcfa::pair_creation::rate(chi, u[0]);
+        let prob = dt * lcfa::pair_creation::rate(chi, u[0], 0.5, 0.5);
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {
