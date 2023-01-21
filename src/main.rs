@@ -217,30 +217,6 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     photon_rate / pair_rate
 }
 
-/// Collects the values of a variable to be simulated over into a vector based
-/// on the presence or absence of a nested loop for that variable.
-fn get_value_as_vector(input: &Config, path: &str) -> Result<Vec<f64>, Box<dyn Error>> {
-    if input.read::<f64, &str>(format!("{}{}", path, ":start").as_str()).is_err() {       // no 'start' value
-        let value: f64 = input.read(path)?;                                                    // if a single value exists,
-                                                                                               // return a single element vector.
-        let v: Vec<f64> = vec![value; 1];
-        Ok(v)
-    }
-    else { // 'start' value found
-        let start: f64 = input.read(format!("{}{}", path, ":start").as_str())?;
-        let stop: f64 = input.read(format!("{}{}", path, ":stop").as_str())?;
-        let step: f64 = input.read(format!("{}{}", path, ":step").as_str())?;
-
-        let mut v: Vec<f64> = Vec::new();
-        let mut x: f64 = start;
-        while x <= stop {
-            v.push(x);
-            x += step;
-        }
-        Ok(v)
-    }
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let universe = mpi::initialize().unwrap();
     let world = universe.world();
@@ -300,7 +276,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
 
-    let a0_values: Vec<f64> = get_value_as_vector(&input, "laser:a0")?;
+    let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
         .read("laser:wavelength")
         .or_else(|_e|
@@ -611,11 +587,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Simulation building and running starts here
     for a0_v in a0_values.iter() {
         let a0: f64 = *a0_v; 
-        // Change to LCFA if a0 if variable is looped and LMA has been selected
-        if !using_lcfa && a0_values.len() > 1 {
-            if a0 > 20.0 {let using_lcfa = true;}
-        }
-
         // Rare event sampling for pair creation
         let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
             // if increase is not specified at all, default to unity
@@ -736,17 +707,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let runtime = std::time::Instant::now();
 
-    let options = CollideOptions {
-        dt_multiplier,
-        rate_increase: pair_rate_increase,
-        t_stop,
-        discard_bg_e,
-        discard_bg_ph,
-        rr,
-        tracking_photons,
-        classical,
-        gaunt_factor,
-    };
+        let options = CollideOptions {
+            dt_multiplier,
+            rate_increase: pair_rate_increase,
+            t_stop,
+            discard_bg_e,
+            discard_bg_ph,
+            rr,
+            tracking_photons,
+            classical,
+            gaunt_factor,
+        };
 
         let (mut electrons, mut photons, mut positrons) = primaries
             .chunks(num / 20)
@@ -787,18 +758,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
+        // Updating 'ident' in case of a0 looping
+        let current_ident: String = if a0_values.len() > 1 {
+            format!("{}_a0_{:.3}", ident, a0)
+        }
+        else {
+            ident.to_owned()
+        };
+
         for dstr in &eospec {
-            let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
             dstr.write(&world, &electrons, &units, &prefix, file_format)?;
         }
 
         for dstr in &gospec {
-            let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let prefix = format!("{}{}{}{}photon", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
             dstr.write(&world, &photons, &units, &prefix, file_format)?;
         }
 
         for dstr in &pospec {
-            let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, ident, if ident.is_empty() {""} else {"_"});
+            let prefix = format!("{}{}{}{}positron", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
             dstr.write(&world, &positrons, &units, &prefix, file_format)?;
         }
 
@@ -818,10 +797,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() {
                 use std::fs::File;
                 use std::io::Write;
-                let ss: &str = &format!("{:.1}_", a0);
-                let filename = format!("{}{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 
-                                                                      ident, if ident.is_empty() {""} else {"_"}, 
-                                                                      if a0_values.len() > 1 {ss} else {""});
+                let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 
+                                                                      current_ident, if current_ident.is_empty() {""} else {"_"});
                 let mut file = File::create(filename)?;
                 for stat in &estats {
                     writeln!(file, "{}", stat)?;
@@ -839,10 +816,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             #[cfg(feature = "hdf5-output")]
             OutputMode::Hdf5 => {
                 use hdf5_writer::GroupHolder;
-                let ss: &str = &format!("{:.1}_", a0);
-                let filename = format!("{}{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, 
-                                                               ident, if ident.is_empty() {""} else {"_"},
-                                                               if a0_values.len() > 1 {ss} else {""});
+                let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, 
+                                                               current_ident, if current_ident.is_empty() {""} else {"_"});
                 let file = hdf5_writer::ParallelFile::create(&world, &filename)?;
 
                 // Build info
@@ -1112,36 +1087,4 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     Ok(())
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extract_values() {
-        // Test extraction of single value
-        let text: &str = "---
-        laser:
-            a0: 10.0
-        ";
-        let mut config = Config::from_string(&text).unwrap();
-        config.with_context("constants");
-        let a0_values1 = get_value_as_vector(&config, "laser:a0").unwrap();
-        assert_eq!(a0_values1, vec![10.0; 1]);
-        
-        // Test extraction of looped values
-        let text: &str = "---
-        laser:
-            a0:
-                start: 1.0
-                stop: 10.0
-                step: 2.0
-        ";
-        config = Config::from_string(&text).unwrap();
-        config.with_context("constants");
-        let a0_values = get_value_as_vector(&config, "laser:a0").unwrap();
-        assert_eq!(a0_values, vec![1.0, 3.0, 5.0, 7.0, 9.0]);
-    }
 }

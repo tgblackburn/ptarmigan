@@ -5,28 +5,38 @@ control:
   lcfa: false # if omitted or false, use LMA
   radiation_reaction: true
   pair_creation: false
-  rng_seed: 2
+  rng_seed: 0
 
 laser:
+  # New looping feature for a0
   a0: 
-    start: 0.5
-    stop: 2.0
-    step: 0.5
+    start: 1.0
+    stop: 10.0
+    step: 2.0
   wavelength: wavelength
   fwhm_duration: tau * femto
   waist: 25.0 * micro
   polarization: linear # must be given explicitly
 
 beam:
-  n: 100
+  n: 1000   
   species: electron
   charge: 1.5e9 * e
   gamma: initial_gamma
-  sigma: 0.0
+  sigma: 0.0 
   radius: [0.1 * micro, uniformly_distributed]
   length: 0.1 * micro
   collision_angle: -17.2 * degree
   rms_divergence: 8.672 * micro
+
+stats:
+  electron:
+    - total number
+    - mean gamma
+  photon:
+    - total number
+    - variance angle_x`energy
+    - variance angle_y`energy
 
 output:
   ident: auto
