@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0
+
+2023-01-23
+
+Added:
+
+* Looping over a range of a0s (PR #45).
+
 ## v1.1.0
 
 2023-01-13

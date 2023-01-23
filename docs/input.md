@@ -30,6 +30,7 @@ Tracking:
 
 * `a0`: the laser strength parameter, normalized amplitude, etc.
 Defined by the peak electric field, so a0 is sqrt(2) larger for LP than for CP at fixed intensity.
+Alternatively, specifying `a0:start`, `a0:step` and `a0:stop` will run a single simulation for all a0 values in the given range.
 * `wavelength`: of the carrier wave, in metres, or
 * `omega`: the equivalent photon energy, in joules. The conversion constants `eV` etc are provided for convenience.
 * `waist` (optional): if specified, the laser pulse will be focused to a spot size of `waist`, which defines the radius at which the intensity falls to 1/e^2 of its maximum value. Otherwise the laser is modelled as a plane wave.

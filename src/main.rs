@@ -585,7 +585,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?;
 
     // Simulation building and running starts here
-    for a0_v in a0_values.iter() {
+    for (run, a0_v) in a0_values.iter().enumerate() {
         let a0: f64 = *a0_v; 
         // Rare event sampling for pair creation
         let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
@@ -625,6 +625,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if id == 0 {
             println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+            if a0_values.len() > 1 {
+                println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
+            }
             #[cfg(feature = "with-mpi")] {
                 println!("\t* with MPI support enabled");
             }
@@ -760,7 +763,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // Updating 'ident' in case of a0 looping
         let current_ident: String = if a0_values.len() > 1 {
-            format!("{}_a0_{:.3}", ident, a0)
+            format!("{}{}a0_{:.3}", ident, if ident.is_empty() {""} else {"_"}, a0)
         }
         else {
             ident.to_owned()

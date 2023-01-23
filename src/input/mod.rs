@@ -3,6 +3,7 @@
 // use std::fmt;
 // use std::error::Error;
 use std::path::Path;
+use std::ops::Add;
 use yaml_rust::{YamlLoader, yaml::Yaml};
 use meval::Context;
 
@@ -128,7 +129,7 @@ impl<'a> Config<'a> {
         self
     }
 
-    /// Locates a key-value pair in the configuration file and attempts the
+    /// Locates a key-value pair in the configuration file and attempts
     /// to parse the value as the specified type.
     /// The path to the key-value pair is specified by a string of colon-separated 
     /// sections, e.g. `'section:subsection:subsubsection:key'`.
@@ -184,25 +185,44 @@ impl<'a> Config<'a> {
             .ok()
     }
 
-    /// Uses 'Config::read' to determine if a0 is to be looped over. If a "start" key is given,
-    /// assumes that a0 will be looped over.
-    #[allow(unused)]
-    pub fn read_loop<S: AsRef<str> + std::fmt::Display>(&self, path: S) -> Result<Vec<f64>, InputError> {
-        if self.read::<f64, &str>(format!("{}{}", path, ":start").as_str()).is_err() { 
-            let value: f64 = self.read(path)?;                                                  
-            let v: Vec<f64> = vec![value; 1];                                                   
+    /// Locates a key-value pair in the configuration file and attempts
+    /// to parse it as a looped variable, returning a Vec of the values.
+    /// The loop is defined by a `start`, `stop` and `step`:
+    ///
+    /// ```
+    /// let text: &str = "---
+    ///     x:
+    ///         start: 1.0
+    ///         stop: 1.5
+    ///         step: 0.1
+    /// ";
+    ///
+    /// let values: Vec<f64> = Config::from_string(&text).unwrap()
+    ///     .read_loop("x").unwrap();
+    ///
+    /// assert_eq!(values, vec![1.0, 1.1, 1.2, 1.3, 1.4, 1.5]);
+    /// ```
+    pub fn read_loop<T, S>(&self, path: S) -> Result<Vec<T>, InputError>
+    where
+        T: FromYaml + PartialOrd + Add<Output=T> + Copy,
+        S: AsRef<str> {
+        let key = path.as_ref();
+
+        if self.read::<T, _>(format!("{}{}", key, ":start").as_str()).is_err() {
+            let value = self.read(path)?;
+            let v = vec![value];
             Ok(v)
         }
         else { // 'start' value found
-            let start: f64 = self.read(format!("{}{}", path, ":start").as_str())?;
-            let stop: f64 = self.read(format!("{}{}", path, ":stop").as_str())?;
-            let step: f64 = self.read(format!("{}{}", path, ":step").as_str())?;
+            let start = self.read(format!("{}{}", key, ":start").as_str())?;
+            let stop = self.read(format!("{}{}", key, ":stop").as_str())?;
+            let step = self.read(format!("{}{}", key, ":step").as_str())?;
 
-            let mut v: Vec<f64> = Vec::new();
-            let mut x: f64 = start;
+            let mut v: Vec<T> = Vec::new();
+            let mut x = start;
             while x <= stop {
                 v.push(x);
-                x += step;
+                x = x + step;
             }
             Ok(v)
         }
@@ -290,7 +310,7 @@ mod tests {
         ";
         let mut config = Config::from_string(&text).unwrap();
         //config.with_context("constants");
-        let a0_values1 = config.read_loop("laser:a0").unwrap();
+        let a0_values1: Vec<f64> = config.read_loop("laser:a0").unwrap();
         assert_eq!(a0_values1, vec![10.0; 1]);
         
         // Test extraction of looped values
@@ -303,7 +323,7 @@ mod tests {
         ";
         config = Config::from_string(&text).unwrap();
         //config.with_context("constants");
-        let a0_values = config.read_loop("laser:a0").unwrap();
+        let a0_values: Vec<f64> = config.read_loop("laser:a0").unwrap();
         assert_eq!(a0_values, vec![1.0, 3.0, 5.0, 7.0, 9.0]);
     }
     
