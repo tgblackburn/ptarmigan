@@ -1,12 +1,16 @@
 # Changelog
 
-## v1.2.0
+## v1.2.1
 
 2023-01-23
 
 Added:
 
 * Looping over a range of a0s (PR #45).
+
+Fixed:
+
+* Incorrect sampling of LCFA pair-creation spectrum (evident only for chi > 2).
 
 ## v1.1.0
 
