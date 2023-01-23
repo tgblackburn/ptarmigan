@@ -183,6 +183,30 @@ impl<'a> Config<'a> {
             .and_then(|expr| expr.eval_with_context(&self.ctx))
             .ok()
     }
+
+    /// Uses 'Config::read' to determine if a0 is to be looped over. If a "start" key is given,
+    /// assumes that a0 will be looped over.
+    #[allow(unused)]
+    pub fn read_loop<S: AsRef<str> + std::fmt::Display>(&self, path: S) -> Result<Vec<f64>, InputError> {
+        if self.read::<f64, &str>(format!("{}{}", path, ":start").as_str()).is_err() { 
+            let value: f64 = self.read(path)?;                                                  
+            let v: Vec<f64> = vec![value; 1];                                                   
+            Ok(v)
+        }
+        else { // 'start' value found
+            let start: f64 = self.read(format!("{}{}", path, ":start").as_str())?;
+            let stop: f64 = self.read(format!("{}{}", path, ":stop").as_str())?;
+            let step: f64 = self.read(format!("{}{}", path, ":step").as_str())?;
+
+            let mut v: Vec<f64> = Vec::new();
+            let mut x: f64 = start;
+            while x <= stop {
+                v.push(x);
+                x += step;
+            }
+            Ok(v)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -256,4 +280,31 @@ mod tests {
         let val = config.evaluate("1.0 / (1.0 + y)").unwrap();
         assert_eq!(val, 1.0 / 2.0);
     }
+
+    #[test]
+    fn looper() {
+        // Test extraction of single value
+        let text: &str = "---
+        laser:
+            a0: 10.0
+        ";
+        let mut config = Config::from_string(&text).unwrap();
+        //config.with_context("constants");
+        let a0_values1 = config.read_loop("laser:a0").unwrap();
+        assert_eq!(a0_values1, vec![10.0; 1]);
+        
+        // Test extraction of looped values
+        let text: &str = "---
+        laser:
+            a0:
+                start: 1.0
+                stop: 10.0
+                step: 2.0
+        ";
+        config = Config::from_string(&text).unwrap();
+        //config.with_context("constants");
+        let a0_values = config.read_loop("laser:a0").unwrap();
+        assert_eq!(a0_values, vec![1.0, 3.0, 5.0, 7.0, 9.0]);
+    }
+    
 }
