@@ -313,7 +313,7 @@ impl FastFocusedLaser {
             rate_increase
         };
         if rng.gen::<f64>() < prob * rate_increase {
-            let (gamma_p, cos_theta, _, _) = lcfa::pair_creation::sample(chi, u[0], rng);
+            let (gamma_p, cos_theta, _, _) = lcfa::pair_creation::sample(chi, u[0], 0.5, 0.5, rng);
             let perp = beta.orthogonal().rotate_around(beta, 2.0 * consts::PI * rng.gen::<f64>());
             let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
             let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt();

@@ -49,14 +49,30 @@ pub fn rate(chi: f64, gamma: f64, parallel_proj: f64, perp_proj: f64) -> f64 {
     ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) / (COMPTON_TIME * gamma)
 }
 
-/// Proportional to the probability spectrum dW/ds
-fn spectrum(s: f64, chi: f64) -> f64 {
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Polarization {
+    Parallel,
+    Perpendicular,
+    None,
+}
+
+/// Proportional to the probability spectrum dW/ds for a polarized photon.
+///
+/// The rate is obtained by integrating [spectrum] over s and multiplying
+/// by ɑ m^2 / (√3 π ω).
+fn spectrum(s: f64, chi: f64, pol: Polarization) -> f64 {
+    let beta = match pol {
+        Polarization::Perpendicular => 1.0,
+        Polarization::None => 2.0,
+        Polarization::Parallel => 3.0,
+    };
+
     tables::GL_NODES.iter()
         .zip(tables::GL_WEIGHTS.iter())
         .map(|(t, w)| {
             let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
             let prefactor = (-xi * t.cosh() + t).exp();
-            w * prefactor * ((s / (1.0 - s) + (1.0 - s) / s) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
+            w * prefactor * ((1.0 / (s * (1.0 - s)) - beta) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
         })
         .sum()
 }
@@ -77,11 +93,11 @@ fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
 /// mass) `gamma`, returning the positron Lorentz factor,
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
-pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> (f64, f64, f64, f64) {
+pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64, rng: &mut R) -> (f64, f64, f64, f64) {
     let max = if chi < 2.0 {
-        spectrum(0.5, chi)
+        spectrum(0.5, chi, Polarization::None)
     } else {
-        spectrum(0.9 * chi.powf(-0.875), chi)
+        spectrum(0.9 * chi.powf(-0.875), chi, Polarization::None)
     };
     let max = 1.2 * max;
 
@@ -89,7 +105,7 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> (f64, f64, f64, f64)
     let s = loop {
         let s = rng.gen::<f64>();
         let u = rng.gen::<f64>();
-        let f = spectrum(s, chi);
+        let f = spectrum(s, chi, Polarization::None);
         if u <= f / max {
             break s;
         }
@@ -168,7 +184,7 @@ mod tests {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    prefactor * 0.5 * w * spectrum(s, *chi)
+                    prefactor * 0.5 * w * spectrum(s, *chi, Polarization::None)
                 })
                 .sum();
 
@@ -176,6 +192,46 @@ mod tests {
             let intgd_error = (intgd - target).abs() / target;
             println!("chi = {:>9.3e}, t(chi) = {:>12.6e} | {:>12.6e} [interp|intgd], error = {:.3e} | {:.3e}", chi, result, intgd, error, intgd_error);
             assert!(error < max_error);
+        }
+    }
+
+    #[test]
+    fn lcfa_rate_pol_resolved() {
+        use Polarization::*;
+
+        let pts = [
+            0.15,
+            0.75,
+            1.2,
+            8.7,
+            43.0,
+            225.0,
+        ];
+
+        for chi in &pts {
+            let (target_t_par, target_t_perp) = auxiliary_t(*chi);
+
+            let t_par: f64 = GAUSS_32_NODES.iter()
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(t, w)| {
+                    let s = 0.5 * (1.0 + t);
+                    w * spectrum(s, *chi, Parallel)
+                })
+                .sum();
+
+            let t_perp: f64 = GAUSS_32_NODES.iter()
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(t, w)| {
+                    let s = 0.5 * (1.0 + t);
+                    w * spectrum(s, *chi, Perpendicular)
+                })
+                .sum();
+
+            let target = target_t_par / target_t_perp;
+            let result = t_par / t_perp;
+            let error = (target - result).abs() / target;
+            println!("chi = {:.3e}, expected T_parallel / T_perp = {:.3}, error = {:.3}%", chi, target, 100.0 * error);
+            assert!(error < 1.0e-2);
         }
     }
 
@@ -188,7 +244,7 @@ mod tests {
         let path = format!("output/lcfa_pair_spectrum_{}.dat", chi);
         let mut file = File::create(path).unwrap();
         for _i in 0..100000 {
-            let (_, _, s, z) = sample(chi, gamma, &mut rng);
+            let (_, _, s, z) = sample(chi, gamma, 0.5, 0.5, &mut rng);
             assert!(s > 0.0 && s < 1.0);
             assert!(z >= 1.0);
             writeln!(file, "{:.6e} {:.6e}", s, z).unwrap();
