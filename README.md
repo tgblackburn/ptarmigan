@@ -64,3 +64,13 @@ will run the code, parallelized over `np` MPI tasks (if MPI support has been ena
 The code bins the final-state particles to generate the distribution functions requested in the input file, which are written in plain-text or FITS format.
 
 If `hdf5-output` is enabled, complete data about all particles can be written as a single HDF5 file.
+
+
+## Contribute
+
+Pull requests, bug fixes and new features, are welcome!
+
+Contributors:
+
+* Tom Blackburn
+* Kyle Fleck
