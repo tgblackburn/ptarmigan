@@ -56,7 +56,7 @@ fn spectrum(s: f64, chi: f64) -> f64 {
         .map(|(t, w)| {
             let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
             let prefactor = (-xi * t.cosh() + t).exp();
-            w * prefactor * ((s / (1.0 - s) + (1.0 - s) / s) * (1.5 * t).cosh() + (t / 3.0).cosh() / t.cosh())
+            w * prefactor * ((s / (1.0 - s) + (1.0 - s) / s) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
         })
         .sum()
 }
@@ -78,10 +78,10 @@ fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
 pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> (f64, f64, f64, f64) {
-    let max = if chi < 2.5 {
+    let max = if chi < 2.0 {
         spectrum(0.5, chi)
     } else {
-        spectrum(1.2 / chi, chi)
+        spectrum(0.9 * chi.powf(-0.875), chi)
     };
     let max = 1.2 * max;
 
@@ -162,8 +162,19 @@ mod tests {
         for (chi, target) in &pts {
             let (t_par, t_perp) = auxiliary_t(*chi);
             let result = 0.5 * (t_par + t_perp);
+
+            let prefactor = 1.0 / (3_f64.sqrt() * std::f64::consts::PI * chi);
+            let intgd: f64 = GAUSS_32_NODES.iter()
+                .zip(GAUSS_32_WEIGHTS.iter())
+                .map(|(t, w)| {
+                    let s = 0.5 * (1.0 + t);
+                    prefactor * 0.5 * w * spectrum(s, *chi)
+                })
+                .sum();
+
             let error = (result - target).abs() / target;
-            println!("chi = {:.3e}, t(chi) = {:.6e}, error = {:.3e}", chi, result, error);
+            let intgd_error = (intgd - target).abs() / target;
+            println!("chi = {:>9.3e}, t(chi) = {:>12.6e} | {:>12.6e} [interp|intgd], error = {:.3e} | {:.3e}", chi, result, intgd, error, intgd_error);
             assert!(error < max_error);
         }
     }
@@ -171,7 +182,7 @@ mod tests {
     #[test]
     #[ignore]
     fn pair_spectrum_sampling() {
-        let chi = 1.0;
+        let chi = 2.0;
         let gamma = 1000.0;
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
         let path = format!("output/lcfa_pair_spectrum_{}.dat", chi);
@@ -183,4 +194,74 @@ mod tests {
             writeln!(file, "{:.6e} {:.6e}", s, z).unwrap();
         }
     }
+
+    static GAUSS_32_NODES: [f64; 32] = [
+        -9.972638618494816e-1,
+        -9.856115115452683e-1,
+        -9.647622555875064e-1,
+        -9.349060759377397e-1,
+        -8.963211557660521e-1,
+        -8.493676137325700e-1,
+        -7.944837959679424e-1,
+        -7.321821187402897e-1,
+        -6.630442669302152e-1,
+        -5.877157572407623e-1,
+        -5.068999089322294e-1,
+        -4.213512761306353e-1,
+        -3.318686022821276e-1,
+        -2.392873622521371e-1,
+        -1.444719615827965e-1,
+        -4.830766568773832e-2,
+        4.830766568773832e-2,
+        1.444719615827965e-1,
+        2.392873622521371e-1,
+        3.318686022821276e-1,
+        4.213512761306353e-1,
+        5.068999089322294e-1,
+        5.877157572407623e-1,
+        6.630442669302152e-1,
+        7.321821187402897e-1,
+        7.944837959679424e-1,
+        8.493676137325700e-1,
+        8.963211557660521e-1,
+        9.349060759377397e-1,
+        9.647622555875064e-1,
+        9.856115115452683e-1,
+        9.972638618494816e-1,
+    ];
+
+    static GAUSS_32_WEIGHTS: [f64; 32] = [
+        7.018610000000000e-3,
+        1.627439500000000e-2,
+        2.539206500000000e-2,
+        3.427386300000000e-2,
+        4.283589800000000e-2,
+        5.099805900000000e-2,
+        5.868409350000000e-2,
+        6.582222280000000e-2,
+        7.234579411000000e-2,
+        7.819389578700000e-2,
+        8.331192422690000e-2,
+        8.765209300440000e-2,
+        9.117387869576400e-2,
+        9.384439908080460e-2,
+        9.563872007927486e-2,
+        9.654008851472780e-2,
+        9.654008851472780e-2,
+        9.563872007927486e-2,
+        9.384439908080460e-2,
+        9.117387869576400e-2,
+        8.765209300440000e-2,
+        8.331192422690000e-2,
+        7.819389578700000e-2,
+        7.234579411000000e-2,
+        6.582222280000000e-2,
+        5.868409350000000e-2,
+        5.099805900000000e-2,
+        4.283589800000000e-2,
+        3.427386300000000e-2,
+        2.539206500000000e-2,
+        1.627439500000000e-2,
+        7.018610000000000e-3,
+    ];
 }
