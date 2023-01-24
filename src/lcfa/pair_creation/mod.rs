@@ -77,6 +77,26 @@ fn spectrum(s: f64, chi: f64, pol: Polarization) -> f64 {
         .sum()
 }
 
+/// Returns the maximum value of [spectrum] for a polarized photon,
+/// padded by a small safety margin.
+fn spectrum_ceiling(chi: f64, pol: Polarization) -> f64 {
+    let (chi_switch, alpha, beta) = match pol {
+        Polarization::Parallel => (1.3, 0.55, -0.75),
+        Polarization::Perpendicular => (4.0, 1.54, -1.0),
+        Polarization::None => (2.5, 0.9, -0.875),
+    };
+
+    let max = if chi < chi_switch {
+        spectrum(0.5, chi, pol)
+    } else if chi > 100.0 {
+        spectrum(4.0 / (3.0 * chi), chi, pol)
+    } else {
+        spectrum(alpha * chi.powf(beta), chi, pol)
+    };
+
+    1.05 * max
+}
+
 /// Proportional to the angularly resolved spectrum d^2 W/(ds dz),
 /// where z^(2/3) = 2ɣ^2(1 - β cosθ).
 /// Range is 1 < z < infty, but dominated by 1 < z < 1 + 2 chi
@@ -94,12 +114,7 @@ fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
 pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64, rng: &mut R) -> (f64, f64, f64, f64) {
-    let max = if chi < 2.0 {
-        spectrum(0.5, chi, Polarization::None)
-    } else {
-        spectrum(0.9 * chi.powf(-0.875), chi, Polarization::None)
-    };
-    let max = 1.2 * max;
+    let max = spectrum_ceiling(chi, Polarization::None);
 
     // Rejection sampling for s
     let s = loop {
@@ -232,6 +247,45 @@ mod tests {
             let error = (target - result).abs() / target;
             println!("chi = {:.3e}, expected T_parallel / T_perp = {:.3}, error = {:.3}%", chi, target, 100.0 * error);
             assert!(error < 1.0e-2);
+        }
+    }
+
+    #[test]
+    fn pair_spectrum_ceiling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _i in 0..100 {
+            let chi = (0.1_f64.ln() + (100_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
+
+            let pol = match rng.gen_range(0, 3) {
+                0 => Polarization::Parallel,
+                1 => Polarization::Perpendicular,
+                2 => Polarization::None,
+                _ => unreachable!(),
+            };
+
+            let target: f64 = (0..10_000)
+                .map(|i| 0.5 * (i as f64) / 10000.0)
+                .map(|s| spectrum(s, chi, pol))
+                .reduce(f64::max)
+                .unwrap();
+
+            let result = spectrum_ceiling(chi, pol);
+
+            let err = (target - result) / target;
+
+            let pol = match pol {
+                Polarization::Parallel => "∥",
+                Polarization::Perpendicular => "⟂",
+                Polarization::None => "x",
+            };
+
+            println!(
+                "chi = {:>9.3e}, pol = {} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                chi, pol, target, result, 100.0 * err,
+            );
+
+            assert!(err < 0.0);
         }
     }
 
