@@ -5,7 +5,7 @@ use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
 use crate::geometry::StokesVector;
-use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
+use crate::quadrature::*;
 
 mod rate_table;
 mod cdf_table;

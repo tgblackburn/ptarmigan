@@ -32,6 +32,7 @@ mod special_functions;
 mod output;
 mod input;
 mod pwmci;
+mod quadrature;
 
 use constants::*;
 use field::*;

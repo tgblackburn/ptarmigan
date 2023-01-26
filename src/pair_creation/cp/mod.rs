@@ -3,7 +3,7 @@
 use std::f64::consts;
 use rand::prelude::*;
 use crate::special_functions::*;
-use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
+use crate::quadrature::{GAUSS_32_NODES, GAUSS_32_WEIGHTS};
 
 #[cfg(not(feature = "leading-order-only"))]
 mod rate_table;

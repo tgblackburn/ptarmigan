@@ -3,7 +3,7 @@ use std::f64::consts;
 use rand::prelude::*;
 use crate::special_functions::*;
 use crate::geometry::StokesVector;
-use super::{GAUSS_32_NODES, GAUSS_32_WEIGHTS, GAUSS_16_NODES};
+use crate::quadrature::*;
 
 // Lookup tables
 mod tables;
