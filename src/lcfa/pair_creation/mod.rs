@@ -87,15 +87,35 @@ fn spectrum_ceiling(chi: f64, sv1: f64) -> f64 {
     1.05 * max
 }
 
-/// Proportional to the angularly resolved spectrum d^2 W/(ds dz),
-/// where z^(2/3) = 2ɣ^2(1 - β cosθ).
-/// Range is 1 < z < infty, but dominated by 1 < z < 1 + 2 chi
-/// Tested and working.
-fn angular_spectrum(z: f64, s: f64, chi: f64, sv1: f64) -> f64 {
+/// Proportional to the angularly resolved spectrum d^2 W/(ds dy),
+/// where z = [2ɣ^2(1 - β cosθ)]^(3/2) = 1 + 4 chi y^2.
+/// The domain of interest is 0 < y < 1.
+fn angular_spectrum(y: f64, s: f64, chi: f64, sv1: f64) -> f64 {
+    // The spectrum is given by
+    // dW/(ds dy) = y [1 + z^(2/3) (s/(1-s) + (1-s)/s - sv1)] K_{1/3}(xi z)
+    // where z = 1 + 4 chi y^2, xi = 2 / [3 chi s (1-s)]
+    // In principle, 1 < z < infty, but dominated by 1 < z < 1 + 4 chi
     use crate::special_functions::*;
     let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
     let prefactor = s / (1.0 - s) + (1.0 - s) / s - sv1;
-    (1.0 + prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
+    let z = 1.0 + 4.0 * chi * y * y;
+    y * (1.0 + prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
+}
+
+/// Returns the maximum value of [angular_spectrum] for a polarized photon,
+/// padded by a small safety margin.
+fn angular_spectrum_ceiling(s: f64, chi: f64, sv1: f64) -> f64 {
+    // y that maximises the spectrum, assuming s = 1/2:
+    let y_peak = {
+        let y_min = 0.216;
+        let y_max = 0.259;
+        y_min + (y_max - y_min) * (1.0 - (8.3 / chi).powf(2.0/3.0).tanh())
+    };
+
+    // and for general s:
+    let y = y_peak * (1.0 - (1.0 - 2.0 * s).powi(2)).sqrt();
+
+    1.05 * angular_spectrum(y, s, chi, sv1)
 }
 
 /// Samples the positron spectrum of an photon with
@@ -104,9 +124,8 @@ fn angular_spectrum(z: f64, s: f64, chi: f64, sv1: f64) -> f64 {
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
 pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64, rng: &mut R) -> (f64, f64, f64, f64) {
-    let max = spectrum_ceiling(chi, 0.0);
-
     // Rejection sampling for s
+    let max = spectrum_ceiling(chi, 0.0);
     let s = loop {
         let s = rng.gen::<f64>();
         let u = rng.gen::<f64>();
@@ -117,33 +136,13 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64
     };
 
     // Now that s is fixed, sample from the angular spectrum
-    // d^2 W/(ds dz), which ranges from 1 < z < infty, or
-    // xi/(1+xi) < y < 1 where xi z = y/(1-y)
-    let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
-    let y_min = xi / (1.0 + xi);
-    let max = if y_min > 0.563 {
-        let y = y_min;
-        let z = y / (xi * (1.0 - y));
-        angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y))
-    } else {
-        let y = 0.563;
-        let z = y / (xi * (1.0 - y));
-        angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y))
-    };
-    let max = 1.1 * max;
-
-    // Rejection sampling for z
-    let z = if max <= 0.0 {
-        0.0
-    } else {
-        loop {
-            let y = y_min + (1.0 - y_min) * rng.gen::<f64>();
-            let z = y / (xi * (1.0 - y));
-            let u = rng.gen::<f64>();
-            let f = angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y));
-            if u <= f / max {
-                break z;
-            }
+    let max = angular_spectrum_ceiling(s, chi, 0.0);
+    let z = loop {
+        let y = rng.gen::<f64>();
+        let u = rng.gen::<f64>();
+        let f = angular_spectrum(y, s, chi, 0.0);
+        if u <= f / max {
+            break 1.0 + 4.0 * chi * y * y;
         }
     };
 
@@ -263,6 +262,34 @@ mod tests {
             );
 
             assert!(err < 0.0);
+        }
+    }
+
+    #[test]
+    fn pair_angular_spectrum_ceiling() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        for _i in 0..1000 {
+            let chi = (0.1_f64.ln() + (100_f64.ln() - 1_f64.ln()) * rng.gen::<f64>()).exp();
+            let sv1 = -1.0 + 2.0 * rng.gen::<f64>();
+            let s = 0.5 * rng.gen::<f64>();
+
+            let target: f64 = (0..100)
+                .map(|i| 0.5 * (i as f64) / 100.0) // search in 0 < y < 0.5
+                .map(|y| angular_spectrum(y, s, chi, sv1))
+                .reduce(f64::max)
+                .unwrap();
+
+            let result = angular_spectrum_ceiling(s, chi, sv1);
+
+            let err = (target - result) / target;
+
+            println!(
+                "chi = {:>9.3e}, ξ_1 = {:>6.3}, s = {:.3} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                chi, sv1, s, target, result, 100.0 * err,
+            );
+
+            assert!(err < 0.0 || target < 1.0e-200);
         }
     }
 
