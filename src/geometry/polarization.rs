@@ -49,6 +49,30 @@ impl StokesVector {
         }
     }
 
+    /// Returns the Stokes parameters if the basis is redefined in terms of
+    /// the principal axis `e1`.
+    ///
+    /// `e1` must be perpendicular to particle propagation direction `k`!
+    pub fn in_basis(&self, e1: ThreeVector, k: ThreeVector) -> StokesVector {
+        // In the standard basis, e1 is guaranteed to lie in the x-z
+        // plane and to be perpendicular to the propagation direction.
+        // Get that first
+        let n = k.normalize();
+        let mag = n[0].hypot(n[2]);
+        let e1_old: ThreeVector = if mag == 0.0 {
+            // so photon pointed along y
+            [1.0, 0.0, 0.0].into()
+        } else {
+            [n[2] / mag, 0.0, -n[0] / mag].into()
+        };
+
+        // So we need to rotate the basis by the angle
+        let e1 = e1.normalize();
+        let theta = (e1 * e1_old).acos();
+
+        self.rotate_by(theta)
+    }
+
     /// Projects the polarization of a particle, travelling along `dir`,
     /// onto the given `axis`
     pub fn project_onto(&self, dir: ThreeVector, axis: ThreeVector) -> f64 {

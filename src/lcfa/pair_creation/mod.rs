@@ -2,6 +2,7 @@
 
 use rand::prelude::*;
 use crate::constants::*;
+use crate::geometry::*;
 use crate::quadrature::{GL_NODES, GL_WEIGHTS};
 
 mod tables;
@@ -38,61 +39,49 @@ fn auxiliary_t(chi: f64) -> (f64, f64) {
 }
 
 /// Returns the nonlinear Breit-Wheeler rate, per unit time (in seconds),
-/// for a polarized photon with quantum parameter `chi` and normalized energy `gamma`.
+/// for a photon with four-momentum `ell` and Stokes vector `sv` in a
+/// constant, crossed field.
 ///
-/// The photon polarization is defined by  `parallel_proj` and `perp_proj`,
-/// the projections of the polarization on `w` and `n × w`, respectively,
-/// where `w` is the instantaneous acceleration and `n` is the photon direction.
-///
-/// The polarization-averaged rate is recovered by setting both projections to 0.5.
-pub fn rate(chi: f64, gamma: f64, parallel_proj: f64, perp_proj: f64) -> f64 {
+/// The field is defined by the transverse acceleration `w` and quantum
+/// parameter `chi`.
+pub fn rate(ell: FourVector, sv: StokesVector, chi: f64, w: ThreeVector) -> f64 {
+    let sv = sv.in_basis(w, ell.into());
+    let parallel_proj = 0.5 * (1.0 + sv[1]);
+    let perp_proj = 0.5 * (1.0 - sv[1]);
     let (t_par, t_perp) = auxiliary_t(chi);
-    ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) / (COMPTON_TIME * gamma)
+    ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) / (COMPTON_TIME * ell[0])
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Polarization {
-    Parallel,
-    Perpendicular,
-    None,
-}
-
-/// Proportional to the probability spectrum dW/ds for a polarized photon.
+/// Proportional to the probability spectrum dW/ds for a photon
+/// with quantum parameter `chi` and Stokes parameter `sv1`.
 ///
 /// The rate is obtained by integrating [spectrum] over s and multiplying
 /// by ɑ m^2 / (√3 π ω).
-fn spectrum(s: f64, chi: f64, pol: Polarization) -> f64 {
-    let beta = match pol {
-        Polarization::Perpendicular => 1.0,
-        Polarization::None => 2.0,
-        Polarization::Parallel => 3.0,
-    };
-
+fn spectrum(s: f64, chi: f64, sv1: f64) -> f64 {
     GL_NODES.iter()
         .zip(GL_WEIGHTS.iter())
         .map(|(t, w)| {
             let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
             let prefactor = (-xi * t.cosh() + t).exp();
-            w * prefactor * ((1.0 / (s * (1.0 - s)) - beta) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
+            w * prefactor * ((1.0 / (s * (1.0 - s)) - sv1 - 2.0) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
         })
         .sum()
 }
 
 /// Returns the maximum value of [spectrum] for a polarized photon,
 /// padded by a small safety margin.
-fn spectrum_ceiling(chi: f64, pol: Polarization) -> f64 {
-    let (chi_switch, alpha, beta) = match pol {
-        Polarization::Parallel => (1.3, 0.55, -0.75),
-        Polarization::Perpendicular => (4.0, 1.54, -1.0),
-        Polarization::None => (2.5, 0.9, -0.875),
-    };
+fn spectrum_ceiling(chi: f64, sv1: f64) -> f64 {
+    let chi_switch = ((1.5 - sv1) / 3_f64.sqrt()).exp();
 
     let max = if chi < chi_switch {
-        spectrum(0.5, chi, pol)
+        spectrum(0.5, chi, sv1)
     } else if chi > 100.0 {
-        spectrum(4.0 / (3.0 * chi), chi, pol)
+        spectrum(4.0 / (3.0 * chi), chi, sv1)
     } else {
-        spectrum(alpha * chi.powf(beta), chi, pol)
+        let m = -0.94866 + 0.170159 * sv1;
+        let s = 0.5 * chi_switch.powf(-m) * chi.powf(m);
+        // println!("\tchi_switch = {:.3}, m = {:.3}, s = {:.3}", chi_switch, m, s);
+        spectrum(s, chi, sv1)
     };
 
     1.05 * max
@@ -102,11 +91,11 @@ fn spectrum_ceiling(chi: f64, pol: Polarization) -> f64 {
 /// where z^(2/3) = 2ɣ^2(1 - β cosθ).
 /// Range is 1 < z < infty, but dominated by 1 < z < 1 + 2 chi
 /// Tested and working.
-fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
+fn angular_spectrum(z: f64, s: f64, chi: f64, sv1: f64) -> f64 {
     use crate::special_functions::*;
     let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
-    let prefactor = (s * s + (1.0 - s) * (1.0 - s)) / (s * (1.0 - s));
-    (1.0 * prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
+    let prefactor = s / (1.0 - s) + (1.0 - s) / s - sv1;
+    (1.0 + prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
 }
 
 /// Samples the positron spectrum of an photon with
@@ -115,13 +104,13 @@ fn angular_spectrum(z: f64, s: f64, chi: f64) -> f64 {
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
 pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64, rng: &mut R) -> (f64, f64, f64, f64) {
-    let max = spectrum_ceiling(chi, Polarization::None);
+    let max = spectrum_ceiling(chi, 0.0);
 
     // Rejection sampling for s
     let s = loop {
         let s = rng.gen::<f64>();
         let u = rng.gen::<f64>();
-        let f = spectrum(s, chi, Polarization::None);
+        let f = spectrum(s, chi, 0.0);
         if u <= f / max {
             break s;
         }
@@ -135,11 +124,11 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64
     let max = if y_min > 0.563 {
         let y = y_min;
         let z = y / (xi * (1.0 - y));
-        angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y))
+        angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y))
     } else {
         let y = 0.563;
         let z = y / (xi * (1.0 - y));
-        angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y))
+        angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y))
     };
     let max = 1.1 * max;
 
@@ -151,7 +140,7 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64
             let y = y_min + (1.0 - y_min) * rng.gen::<f64>();
             let z = y / (xi * (1.0 - y));
             let u = rng.gen::<f64>();
-            let f = angular_spectrum(z, s, chi) / (xi * (1.0 - y) * (1.0 - y));
+            let f = angular_spectrum(z, s, chi, 0.0) / (xi * (1.0 - y) * (1.0 - y));
             if u <= f / max {
                 break z;
             }
@@ -201,7 +190,7 @@ mod tests {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    prefactor * 0.5 * w * spectrum(s, *chi, Polarization::None)
+                    prefactor * 0.5 * w * spectrum(s, *chi, 0.0)
                 })
                 .sum();
 
@@ -214,8 +203,6 @@ mod tests {
 
     #[test]
     fn lcfa_rate_pol_resolved() {
-        use Polarization::*;
-
         let pts = [
             0.15,
             0.75,
@@ -232,7 +219,7 @@ mod tests {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    w * spectrum(s, *chi, Parallel)
+                    w * spectrum(s, *chi, 1.0)
                 })
                 .sum();
 
@@ -240,7 +227,7 @@ mod tests {
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    w * spectrum(s, *chi, Perpendicular)
+                    w * spectrum(s, *chi, -1.0)
                 })
                 .sum();
 
@@ -257,34 +244,22 @@ mod tests {
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
         for _i in 0..100 {
-            let chi = (0.1_f64.ln() + (100_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
-
-            let pol = match rng.gen_range(0, 3) {
-                0 => Polarization::Parallel,
-                1 => Polarization::Perpendicular,
-                2 => Polarization::None,
-                _ => unreachable!(),
-            };
+            let chi = (1_f64.ln() + (100_f64.ln() - 1_f64.ln()) * rng.gen::<f64>()).exp();
+            let sv1 = -1.0 + 2.0 * rng.gen::<f64>();
 
             let target: f64 = (0..10_000)
                 .map(|i| 0.5 * (i as f64) / 10000.0)
-                .map(|s| spectrum(s, chi, pol))
+                .map(|s| spectrum(s, chi, sv1))
                 .reduce(f64::max)
                 .unwrap();
 
-            let result = spectrum_ceiling(chi, pol);
+            let result = spectrum_ceiling(chi, sv1);
 
             let err = (target - result) / target;
 
-            let pol = match pol {
-                Polarization::Parallel => "∥",
-                Polarization::Perpendicular => "⟂",
-                Polarization::None => "x",
-            };
-
             println!(
-                "chi = {:>9.3e}, pol = {} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
-                chi, pol, target, result, 100.0 * err,
+                "chi = {:>9.3e}, ξ_1 = {:>6.3} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
+                chi, sv1, target, result, 100.0 * err,
             );
 
             assert!(err < 0.0);
