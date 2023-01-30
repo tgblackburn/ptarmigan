@@ -67,6 +67,8 @@ struct CollideOptions {
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Use polarization-resolved pair creation rates
+    pol_resolved: bool,
     /// Use classical emission rates
     classical: bool,
     /// Correct classical spectrum using Gaunt factor
@@ -146,7 +148,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                 while field.contains(pt.position()) && pt.time() < options.t_stop && !has_decayed && options.tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
-                    let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
+                    let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
                     let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
@@ -275,8 +277,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    // pair creation is enabled by default, unless classical = true
-    let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
+    let (tracking_photons, pol_resolved) = input.read::<bool, _>("control:pair_creation:enabled")
+        .and_then(|status| {
+            input.read("control:pair_creation:pol_resolved").map(|pr| (status, pr))
+        })
+        // fall back to 'pair_creation: true|false'
+        .or_else(|_| {
+            input.read("control:pair_creation").map(|b| (b, false))
+        })
+        // pair creation is enabled by default, unless classical = true
+        .unwrap_or((!classical, false));
 
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
@@ -720,6 +730,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             discard_bg_ph,
             rr,
             tracking_photons,
+            pol_resolved,
             classical,
             gaunt_factor,
         };
@@ -854,6 +865,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("radiation_reaction")?.write(&rr)?
                     .new_dataset("classical")?.write(&classical)?
                     .new_dataset("pair_creation")?.write(&tracking_photons)?
+                    .new_dataset("pair_creation_is_pol_resolved")?.write(&pol_resolved)?
                     .new_dataset("lcfa")?.write(&using_lcfa)?
                     .new_dataset("rng_seed")?.write(&rng_seed)?
                     .new_dataset("increase_pair_rate_by")?.write(&pair_rate_increase)?
@@ -952,7 +964,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
-                        pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
+                        pt.polarization(),
                         pt.weight(),
                         pt.payload(),
                         pt.interaction_count(),

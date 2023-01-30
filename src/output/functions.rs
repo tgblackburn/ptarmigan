@@ -191,27 +191,15 @@ pub fn interaction_count(pt: &Particle) -> f64 {
 }
 
 pub fn stokes_1(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[1]
-    } else {
-        0.0
-    }
+    pt.polarization()[1]
 }
 
 pub fn stokes_2(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[2]
-    } else {
-        0.0
-    }
+    pt.polarization()[2]
 }
 
 pub fn stokes_3(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[3]
-    } else {
-        0.0
-    }
+    pt.polarization()[3]
 }
 
 pub fn weighted_by_energy(pt: &Particle) -> f64 {

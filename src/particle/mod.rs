@@ -48,7 +48,6 @@ pub struct Particle {
     species: Species,
     r: [FourVector; 2],
     u: [FourVector; 2],
-    has_pol: bool,
     pol: StokesVector,
     optical_depth: f64,
     payload: f64,
@@ -104,7 +103,6 @@ impl Particle {
             species,
             r: [r; 2],
             u: [u; 2],
-            has_pol: false,
             pol: StokesVector::unpolarized(),
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
@@ -246,7 +244,6 @@ impl Particle {
             species: self.species,
             r: [r0, r],
             u: [u0, u],
-            has_pol: self.has_pol,
             pol: self.pol,
             optical_depth: self.optical_depth,
             payload: self.payload,
@@ -286,28 +283,21 @@ impl Particle {
 
     /// Updates the particle polarization
     pub fn with_polarization(&mut self, pol: StokesVector) -> Self {
-        self.has_pol = true;
         self.pol = pol;
         *self
     }
 
     /// Returns the particle polarization, if it exists
     #[allow(unused)]
-    pub fn polarization(&self) -> Option<StokesVector> {
-        if self.has_pol {
-            Some(self.pol)
-        } else {
-            None
-        }
+    pub fn polarization(&self) -> StokesVector {
+        self.pol
     }
 
     /// Projects the particle polarization onto the given axis.
     /// `polarization_along_x` and `polarization_along_y` are
     /// provided for convenience
     pub fn polarization_along<T: Into<ThreeVector>>(&self, axis: T) -> f64 {
-        let sv = self.polarization()
-            .unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into());
-
+        let sv = self.polarization();
         let n = ThreeVector::from(self.normalized_momentum()).normalize();
         sv.project_onto(n, axis.into())
     }
