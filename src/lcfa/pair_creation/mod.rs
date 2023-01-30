@@ -47,7 +47,11 @@ fn auxiliary_t(chi: f64) -> (f64, f64) {
 /// The field is defined by the transverse acceleration `a_perp` and quantum
 /// parameter `chi`.
 pub fn rate(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector) -> f64 {
-    let sv = sv.in_basis(a_perp, ell.into());
+    let sv = if chi > 0.0 {
+        sv.in_basis(a_perp, ell.into())
+    } else {
+        StokesVector::unpolarized()
+    };
     let parallel_proj = 0.5 * (1.0 + sv[1]);
     let perp_proj = 0.5 * (1.0 - sv[1]);
     let (t_par, t_perp) = auxiliary_t(chi);

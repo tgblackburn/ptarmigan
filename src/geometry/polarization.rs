@@ -68,7 +68,7 @@ impl StokesVector {
 
         // So we need to rotate the basis by the angle
         let e1 = e1.normalize();
-        let theta = (e1 * e1_old).acos();
+        let theta = (e1 * e1_old).acos().max(-1.0);
 
         self.rotate_by(theta)
     }
