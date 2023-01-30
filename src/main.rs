@@ -288,6 +288,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         // pair creation is enabled by default, unless classical = true
         .unwrap_or((!classical, false));
 
+    if pol_resolved && !using_lcfa {
+        eprintln!("Photon-polarization-resolved pair creation rates only available under the LCFA.");
+        return Err(Box::new(InputError::conversion("control:pair_creation:pol_resolved", "pol_resolved")));
+    }
+
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
         .read("laser:wavelength")

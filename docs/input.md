@@ -8,6 +8,8 @@ Physics:
 
 * `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
 * `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
+More fine-grained control can be achieved by setting `pair_creation:enabled` and `pair_creation:pol_resolved` separately.
+The first switches pair creation on and off; the second controls the use of photon-polarization-resolved rates, which improves simulation accuracy by approximately 10%.
 * `classical` (optional, default = `false`): use the classical photon emission rate. If `radiation_reaction` is enabled, electrons and positrons lose energy smoothly, following the Landau-Lifshitz equation. Disables pair creation unless otherwise specified.
 A modified classical model can be chosen by setting `classical` to `gaunt_factor_corrected`.
 In this model the instantaneous radiated power is reduced by the Gaunt factor g(χ) and the upper bound on the photon spectrum corrected to the electron energy.
