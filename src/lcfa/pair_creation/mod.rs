@@ -1,9 +1,11 @@
 //! Nonlinear pair creation, gamma -> e- + e+, in a background field
 
+use std::f64::consts;
 use rand::prelude::*;
 use crate::constants::*;
 use crate::geometry::*;
 use crate::quadrature::{GL_NODES, GL_WEIGHTS};
+use crate::special_functions::Airy;
 
 mod tables;
 
@@ -42,10 +44,10 @@ fn auxiliary_t(chi: f64) -> (f64, f64) {
 /// for a photon with four-momentum `ell` and Stokes vector `sv` in a
 /// constant, crossed field.
 ///
-/// The field is defined by the transverse acceleration `w` and quantum
+/// The field is defined by the transverse acceleration `a_perp` and quantum
 /// parameter `chi`.
-pub fn rate(ell: FourVector, sv: StokesVector, chi: f64, w: ThreeVector) -> f64 {
-    let sv = sv.in_basis(w, ell.into());
+pub fn rate(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector) -> f64 {
+    let sv = sv.in_basis(a_perp, ell.into());
     let parallel_proj = 0.5 * (1.0 + sv[1]);
     let perp_proj = 0.5 * (1.0 - sv[1]);
     let (t_par, t_perp) = auxiliary_t(chi);
@@ -118,33 +120,67 @@ fn angular_spectrum_ceiling(s: f64, chi: f64, sv1: f64) -> f64 {
     1.05 * angular_spectrum(y, s, chi, sv1)
 }
 
+fn sample_azimuthal_angle<R: Rng>(s: f64, z: f64, chi: f64, sv: StokesVector, rng: &mut R) -> f64 {
+    let arg = 2.0 * z / (3.0 * chi * s * (1.0 - s));
+    let k_1_3 = arg.bessel_K_1_3().unwrap();
+    let k_2_3 = arg.bessel_K_2_3().unwrap();
+    let a = (1.0 + z.powf(2.0/3.0) * (s.powi(2) + (1.0 - s).powi(2)) / (s * (1.0 - s))) * k_1_3;
+    let b = k_1_3;
+    let c = z.powf(2.0/3.0);
+    let d = (z.powf(2.0/3.0) - 1.0) * k_1_3;
+    let e = z.powf(1.0/3.0) * (z.powf(2.0/3.0) - 1.0) * (s.powi(2) + (1.0 - s).powi(2)) * k_2_3 / (s * (1.0 - s));
+
+    fn azimuthal_spectrum(phi: f64, a: f64, b: f64, c: f64, d: f64, e: f64, sv: StokesVector) -> f64 {
+        a + b * ((2.0 * phi).cos() - c * (1.0 + (2.0 * phi).cos()))* sv[1]
+            - d * (2.0 * phi).sin() * sv[2]
+            + e * phi.sin() * sv[3]
+    }
+
+    let max = (0..32)
+        .map(|i| azimuthal_spectrum(2.0 * consts::PI * (i as f64) / 32.0, a, b, c, d, e, sv))
+        .reduce(f64::max)
+        .map(|y| 1.1 * y)
+        .unwrap();
+
+    loop {
+        let phi = 2.0 * consts::PI * rng.gen::<f64>();
+        let u = rng.gen::<f64>();
+        let f = azimuthal_spectrum(phi, a, b, c, d, e, sv);
+        if u <= f / max {
+            break phi;
+        }
+    }
+}
+
 /// Samples the positron spectrum of an photon with
 /// quantum parameter `chi` and energy (per electron
 /// mass) `gamma`, returning the positron Lorentz factor,
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
-pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64, rng: &mut R) -> (f64, f64, f64, f64) {
+pub fn sample<R: Rng>(chi: f64, gamma: f64, sv: StokesVector, rng: &mut R) -> (f64, f64, f64, f64, f64) {
     // Rejection sampling for s
-    let max = spectrum_ceiling(chi, 0.0);
+    let max = spectrum_ceiling(chi, sv[1]);
     let s = loop {
         let s = rng.gen::<f64>();
         let u = rng.gen::<f64>();
-        let f = spectrum(s, chi, 0.0);
+        let f = spectrum(s, chi, sv[1]);
         if u <= f / max {
             break s;
         }
     };
 
     // Now that s is fixed, sample from the angular spectrum
-    let max = angular_spectrum_ceiling(s, chi, 0.0);
+    let max = angular_spectrum_ceiling(s, chi, sv[1]);
     let z = loop {
         let y = rng.gen::<f64>();
         let u = rng.gen::<f64>();
-        let f = angular_spectrum(y, s, chi, 0.0);
+        let f = angular_spectrum(y, s, chi, sv[1]);
         if u <= f / max {
             break 1.0 + 4.0 * chi * y * y;
         }
     };
+
+    let phi = sample_azimuthal_angle(s, z, chi, sv, rng);
 
     // recall z = 2 gamma^2 (1 - beta cos_theta), where
     // beta = sqrt(1 - 1/gamma^2), so cos_theta is close
@@ -154,7 +190,7 @@ pub fn sample<R: Rng>(chi: f64, gamma: f64, _parallel_proj: f64, _perp_proj: f64
     let cos_theta = (2.0 * gamma_p * gamma_p - z.powf(2.0/3.0)) / (2.0 * gamma_p * gamma_p - 1.0);
     let cos_theta = cos_theta.max(-1.0);
 
-    (gamma_p, cos_theta, s, z)
+    (gamma_p, cos_theta, phi, s, z)
 }
 
 #[cfg(test)]
@@ -296,16 +332,17 @@ mod tests {
     #[test]
     #[ignore]
     fn pair_spectrum_sampling() {
+        let s1 = 0.0;
         let chi = 2.0;
         let gamma = 1000.0;
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let path = format!("output/lcfa_pair_spectrum_{}.dat", chi);
+        let path = format!("output/lcfa_pair_spectrum_{}_{}.dat", chi, "cp");
         let mut file = File::create(path).unwrap();
-        for _i in 0..100000 {
-            let (_, _, s, z) = sample(chi, gamma, 0.5, 0.5, &mut rng);
+        for _i in 0..200000 {
+            let (_, _, phi, s, z) = sample(chi, gamma, [1.0, s1, 0.0, 1.0].into(), &mut rng);
             assert!(s > 0.0 && s < 1.0);
             assert!(z >= 1.0);
-            writeln!(file, "{:.6e} {:.6e}", s, z).unwrap();
+            writeln!(file, "{:.6e} {:.6e} {:.6e}", s, z, phi).unwrap();
         }
     }
 }
