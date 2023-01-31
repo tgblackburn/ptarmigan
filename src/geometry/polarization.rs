@@ -56,21 +56,29 @@ impl StokesVector {
     pub fn in_basis(&self, e1: ThreeVector, k: ThreeVector) -> StokesVector {
         // In the standard basis, e1 is guaranteed to lie in the x-z
         // plane and to be perpendicular to the propagation direction.
-        // Get that first
-        let n = k.normalize();
-        let mag = n[0].hypot(n[2]);
-        let e1_old: ThreeVector = if mag == 0.0 {
-            // so photon pointed along y
-            [1.0, 0.0, 0.0].into()
+        // So we need to rotate the basis by the angle
+        let k_mag = k[0].hypot(k[2]);
+        let e1_mag = e1.norm_sqr().sqrt();
+        let cos_theta = if k_mag == 0.0 {
+            // photon pointed along y => e1_old = (1,0,0)
+            e1[0] / e1_mag
         } else {
-            [n[2] / mag, 0.0, -n[0] / mag].into()
+            // e1_old = (k3, 0, -k1) / |k|
+            (k[2] * e1[0] - k[0] * e1[2]) / (k_mag * e1_mag)
+
         };
 
-        // So we need to rotate the basis by the angle
-        let e1 = e1.normalize();
-        let theta = (e1 * e1_old).acos().max(-1.0);
+        let cos_theta = cos_theta.clamp(-1.0, 1.0);
+        let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+        let cos_2theta = cos_theta * cos_theta - sin_theta * sin_theta;
+        let sin_2theta = 2.0 * cos_theta * sin_theta;
 
-        self.rotate_by(theta)
+        Self {
+            i: self.i,
+            q: cos_2theta * self.q + sin_2theta * self.u,
+            u: -sin_2theta * self.q + cos_2theta * self.u,
+            v: self.v,
+        }
     }
 
     /// Projects the polarization of a particle, travelling along `dir`,
@@ -103,7 +111,7 @@ impl StokesVector {
 
         // Construct axes of the ellipse
         let (x, y) = {
-            let n = dir.normalize();
+            let n = dir;
             let mag = n[0].hypot(n[2]);
             let x: ThreeVector = if mag == 0.0 {
                 // so photon pointed along y

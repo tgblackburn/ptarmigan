@@ -304,13 +304,15 @@ impl FastFocusedLaser {
         // transverse "acceleration"
         let a_perp = E - (E * n) * n + SPEED_OF_LIGHT * n.cross(B);
         let E_rf_sqd = a_perp.norm_sqr();
-        let chi = if E_rf_sqd > 0.0 {
-            u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
+
+        let (chi, prob) = if E_rf_sqd > 0.0 {
+            let chi = u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD;
+            let prob = dt * lcfa::pair_creation::rate(u, sv, chi, a_perp);
+            (chi, prob)
         } else {
-            0.0
+            (0.0, 0.0)
         };
 
-        let prob = dt * lcfa::pair_creation::rate(u, sv, chi, a_perp);
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {
