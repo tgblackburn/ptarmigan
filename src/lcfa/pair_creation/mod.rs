@@ -5,7 +5,6 @@ use rand::prelude::*;
 use crate::constants::*;
 use crate::geometry::*;
 use crate::quadrature::{GL_NODES, GL_WEIGHTS};
-use crate::special_functions::Airy;
 
 mod tables;
 
@@ -122,18 +121,20 @@ fn angular_spectrum_ceiling(s: f64, chi: f64, sv1: f64) -> f64 {
 
 fn sample_azimuthal_angle<R: Rng>(s: f64, z: f64, chi: f64, sv: StokesVector, rng: &mut R) -> f64 {
     let arg = 2.0 * z / (3.0 * chi * s * (1.0 - s));
-    let k_1_3 = arg.bessel_K_1_3().unwrap();
-    let k_2_3 = arg.bessel_K_2_3().unwrap();
-    let a = (1.0 + z.powf(2.0/3.0) * (s.powi(2) + (1.0 - s).powi(2)) / (s * (1.0 - s))) * k_1_3;
-    let b = k_1_3;
+    // ratio of K_{2/3}(arg) / K_{1/3}(arg)
+    let k_ratio = if arg < 1.0e-4 {
+        0.6368498843179743 / arg.cbrt()
+    } else {
+        1.0 + 1.0 / (1.4624087952220928 * arg.cbrt() + 1.023821552056939 * arg.sqrt() + 6.0 * arg)
+    };
+    let a = 1.0 + z.powf(2.0/3.0) * (s.powi(2) + (1.0 - s).powi(2)) / (s * (1.0 - s));
+    let b = 1.0;
     let c = z.powf(2.0/3.0);
-    let d = (z.powf(2.0/3.0) - 1.0) * k_1_3;
-    let e = z.powf(1.0/3.0) * (z.powf(2.0/3.0) - 1.0) * (s.powi(2) + (1.0 - s).powi(2)) * k_2_3 / (s * (1.0 - s));
+    let d = z.powf(2.0/3.0) - 1.0;
+    let e = z.powf(1.0/3.0) * (z.powf(2.0/3.0) - 1.0) * (s.powi(2) + (1.0 - s).powi(2)) * k_ratio / (s * (1.0 - s));
 
     fn azimuthal_spectrum(phi: f64, a: f64, b: f64, c: f64, d: f64, e: f64, sv: StokesVector) -> f64 {
-        a + b * ((2.0 * phi).cos() - c * (1.0 + (2.0 * phi).cos()))* sv[1]
-            - d * (2.0 * phi).sin() * sv[2]
-            + e * phi.sin() * sv[3]
+        a + b * ((2.0 * phi).cos() * (1.0 - c) - c) * sv[1] - d * (2.0 * phi).sin() * sv[2] + e * phi.sin() * sv[3]
     }
 
     let max = (0..32)
@@ -336,10 +337,10 @@ mod tests {
         let chi = 2.0;
         let gamma = 1000.0;
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-        let path = format!("output/lcfa_pair_spectrum_{}_{}.dat", chi, "cp");
+        let path = format!("output/lcfa_pair_spectrum_{}_{}.dat", chi, s1);
         let mut file = File::create(path).unwrap();
         for _i in 0..200000 {
-            let (_, _, phi, s, z) = sample(chi, gamma, [1.0, s1, 0.0, 1.0].into(), &mut rng);
+            let (_, _, phi, s, z) = sample(chi, gamma, [1.0, s1, 0.0, 0.0].into(), &mut rng);
             assert!(s > 0.0 && s < 1.0);
             assert!(z >= 1.0);
             writeln!(file, "{:.6e} {:.6e} {:.6e}", s, z, phi).unwrap();
