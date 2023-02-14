@@ -563,6 +563,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    let statsexpr = input.read("stats:expression")
+        .map_or_else(|_| Ok(vec!{}), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| StatsExpression::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+    
     let mut estats = input.read("stats:electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
@@ -803,6 +810,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 
                                                                       current_ident, if current_ident.is_empty() {""} else {"_"});
                 let mut file = File::create(filename)?;
+                for stat in &statsexpr {
+                    writeln!(file, "{}", stat)?;
+                }
                 for stat in &estats {
                     writeln!(file, "{}", stat)?;
                 }
