@@ -36,7 +36,7 @@ output:
 
 stats:
   expression:
-    - expr synch_peak 0.44 * initial_gamma * me_MeV * 0.1
+    - expr synch_peak`formula 0.44*initial_gamma*me_MeV*0.1 MeV
   photon:
     - mean energy 
     - variance energy
