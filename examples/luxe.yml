@@ -17,7 +17,7 @@ laser:
   polarization: circular
 
 beam:
-  n: 1000
+  n: 100000
   species: electron
   charge: 1.5e9 * e
   gamma: initial_gamma
@@ -34,16 +34,8 @@ output:
   coordinate_system: beam
   units: hep
 
-stats:
-  expression:
-    - expr synch_peak`formula 0.44*initial_gamma*me_MeV*0.1 MeV
-  photon:
-    - mean energy 
-    - variance energy
-
 constants:
   a0: 5.0
-  me_MeV: 0.511
   laser_energy: 1.2 # joules
   wavelength: 0.8 * micro
   tau: 30.0 # fs
