@@ -306,6 +306,7 @@ impl Particle {
     pub fn polarization_along_x(&self) -> f64 {
         self.polarization_along([1.0, 0.0, 0.0])
     }
+
     /// Projects the particle polarization onto the y axis.
     pub fn polarization_along_y(&self) -> f64 {
         self.polarization_along([0.0, 1.0, 0.0])

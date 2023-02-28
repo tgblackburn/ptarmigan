@@ -63,6 +63,11 @@ The distribution (if normal) may be optionally truncated by specifying `[radius,
 * `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
 The offsets are defined with respect to the beam propagation axis: the first two components are perpendicular to this axis and the third is parallel to it.
 For example, if the offset is `[0.0, 0.0, delta > 0]` and the collision angle is `0.0`, the peak of the laser reaches the focal plane before the beam centroid does; the collision, while perfectly aligned in the perpendicular directions, is delayed by time `delta/(2c)`.
+* `stokes_pars` (optional, default = `[0.0, 0.0, 0.0]`): specifies the primary particles' polarization in terms of the three Stokes parameters `S_1`, `S_2` and `S_3` (equiv. `Q`, `U` and `V`).
+The basis is defined with respect to the `x`-`z` plane and the particle velocity:
+`S_1` is associated with linear polarization along x (`+1.0`) or y (`-1.0`); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
+For example, `[1.0, 0.0, 0.0]` loads particles that are polarized parallel to the laser electric field (if `laser:polarization` is `linear`).
+The default behaviour is to assume that the particles are unpolarized.
 
 ## output
 

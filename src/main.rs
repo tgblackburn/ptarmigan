@@ -288,11 +288,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         // pair creation is enabled by default, unless classical = true
         .unwrap_or((!classical, false));
 
-    if pol_resolved && !using_lcfa {
-        eprintln!("Photon-polarization-resolved pair creation rates only available under the LCFA.");
-        return Err(Box::new(InputError::conversion("control:pair_creation:pol_resolved", "pol_resolved")));
-    }
-
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
         .read("laser:wavelength")
@@ -458,6 +453,29 @@ fn main() -> Result<(), Box<dyn Error>> {
             _ => {
                 eprintln!("A collision offset must be expressed as a three-vector [dx, dy, dz].");
                 Err(InputError::conversion("beam:offset", "offset"))
+            }
+        })
+        ?;
+
+    let sv = input.read::<Vec<f64>,_>("beam:stokes_pars")
+        // if missing, assume to be (0,0,0)
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(vec![0.0; 3]),
+            _ => Err(e),
+        })
+        .and_then(|v| match v.len() {
+            3 => {
+                let sv = StokesVector::new(1.0, v[0], v[1], v[2]);
+                if sv.dop() <= 1.0 {
+                    Ok(sv)
+                } else {
+                    eprintln!("Specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
+                    Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
+                }
+            },
+            _ => {
+                eprintln!("Particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
+                Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
             }
         })
         ?;
@@ -684,6 +702,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_collision_angle(angle)
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
+            .with_polarization(sv)
             .with_length(length);
 
         let builder = if normally_distributed {
@@ -952,6 +971,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("collision_angle")?.with_unit("rad")?.write(&angle)?
                     .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
                     .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
+                    .new_dataset("polarization")?
+                        .with_unit("1")?
+                        .with_desc("Stokes parameters of the primary particles: I, Q, U, V")?
+                        .with_alias("polarisation")?
+                        .write(&sv)?
                     .new_dataset("transverse_distribution_is_normal")?.write(&normally_distributed)?
                     .new_dataset("longitudinal_distribution_is_normal")?.write(&true)?;
 
