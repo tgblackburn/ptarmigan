@@ -38,6 +38,7 @@ vergen = "4.0.3"
 [dev-dependencies]
 rayon = "1.5.1"
 indicatif = {version = "0.17", features = ["rayon"]}
+rustfft = "6.1"
 
 [patch.crates-io]
 hdf5-sys = {git = "https://github.com/tgblackburn/hdf5-rust", branch = "patch"}

@@ -18,12 +18,15 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
     let eta = k * ell;
 
     let f = match pol {
         Polarization::Circular => cp::rate(a, eta).unwrap(),
-        Polarization::Linear => lp::rate(a * consts::SQRT_2, eta).unwrap(),
+        Polarization::Linear => {
+            let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
+            rate.value(sv[1])
+        },
     };
 
     Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
@@ -34,12 +37,15 @@ pub fn probability(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, dt
 /// by a photon with normalized momentum `ell` and polarization `sv`
 /// in a plane EM wave with root-mean-square amplitude `a`,
 /// (local) wavector `k` and polarization `pol`.
-pub fn generate<R: Rng>(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
 
     let (n, s, cphi_zmf) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng),
-        Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng),
+        Polarization::Linear => {
+            let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
+            rate.sample(sv[1], rng)
+        },
     };
 
     // Scattering momentum (/m) and angles in zero momentum frame
