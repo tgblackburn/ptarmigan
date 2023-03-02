@@ -84,6 +84,12 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "S_3" | "S3" => Some(
             (stokes_3 as ParticleOutput, Dimensionless)
         ),
+        "pol_x" | "pol_sigma" => Some(
+            (pol_x as ParticleOutput, Dimensionless)
+        ),
+        "pol_y" | "pol_pi" => Some(
+            (pol_y as ParticleOutput, Dimensionless)
+        ),
         _ => None,
     }
 }
@@ -212,6 +218,14 @@ pub fn stokes_3(pt: &Particle) -> f64 {
     } else {
         0.0
     }
+}
+
+pub fn pol_x(pt: &Particle) -> f64 {
+    pt.polarization_along_x()
+}
+
+pub fn pol_y(pt: &Particle) -> f64 {
+    pt.polarization_along_y()
 }
 
 pub fn weighted_by_energy(pt: &Particle) -> f64 {
