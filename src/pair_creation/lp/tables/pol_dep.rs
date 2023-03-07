@@ -11,6 +11,22 @@ impl PolDep {
         Self { inner: [par, perp] }
     }
 
+    pub fn par(self) -> f64 {
+        self.inner[0]
+    }
+
+    pub fn with_par(&mut self, par: f64) {
+        self.inner[0] = par;
+    }
+
+    pub fn perp(self) -> f64 {
+        self.inner[1]
+    }
+
+    pub fn with_perp(&mut self, perp: f64) {
+        self.inner[1] = perp;
+    }
+
     /// Term-wise exponentiation
     pub fn exp(self) -> Self {
         Self { inner: [self.inner[0].exp(), self.inner[1].exp()] }

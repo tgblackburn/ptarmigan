@@ -53,7 +53,32 @@ fn interpolate_in_eta_prime(eta_prime: f64, ia: usize) -> PolDep {
     let alpha = (mid.1 - lower.1) / PolDep::from(mid.0 - lower.0).powf(m);
     //println!("alpha = {}, m = {}, returning {}", alpha, m, alpha * (eta_prime - lower.0).powf(m) + lower.1);
 
-    alpha * PolDep::from(eta_prime - lower.0).powf(m) + lower.1
+    let mut interp = alpha * PolDep::from(eta_prime - lower.0).powf(m) + lower.1;
+
+    // Power-law fit fails if !(lower < mid < upper), fall back to linear interpolation
+    if !interp.par().is_finite() {
+        let par = if eta_prime < mid.0 {
+            let w = (eta_prime.ln() - lower.0.ln()) / (mid.0.ln() - lower.0.ln());
+            (1.0 - w) * lower.1.par() + w * mid.1.par()
+        } else {
+            let w = (eta_prime.ln() - mid.0.ln()) / (upper.0.ln() - mid.0.ln());
+            (1.0 - w) * mid.1.par() + w * upper.1.par()
+        };
+        interp.with_par(par);
+    }
+
+    if !interp.perp().is_finite() {
+        let perp = if eta_prime < mid.0 {
+            let w = (eta_prime.ln() - lower.0.ln()) / (mid.0.ln() - lower.0.ln());
+            (1.0 - w) * lower.1.perp() + w * mid.1.perp()
+        } else {
+            let w = (eta_prime.ln() - mid.0.ln()) / (upper.0.ln() - mid.0.ln());
+            (1.0 - w) * mid.1.perp() + w * upper.1.perp()
+        };
+        interp.with_perp(perp);
+    }
+
+    interp
 }
 
 pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
