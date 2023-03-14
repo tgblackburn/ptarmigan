@@ -115,6 +115,7 @@ The possible weight functions are:
 * `energy`: particle energy, in MeV
 * `pol_x`: the projection of the particle polarization along the global x-axis
 * `pol_y`: the projection of the particle polarization along the global y-axis
+* `helicity`: the projection of the particle polarization along its momentum
 
 The number of bins, or whether they should be log-scaled, is controlled by adding an integer or `log` *before* the weight specification.
 The weight function must be given explicitly in this case, e.g. `energy:(log;auto)`.

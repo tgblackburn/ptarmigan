@@ -90,6 +90,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "pol_y" | "pol_pi" => Some(
             (pol_y as ParticleOutput, Dimensionless)
         ),
+        "helicity" => Some(
+            (weighted_by_helicity as ParticleOutput, Dimensionless)
+        ),
         _ => None,
     }
 }
@@ -232,4 +235,8 @@ pub fn weighted_by_pol_x(pt: &Particle) -> f64 {
 
 pub fn weighted_by_pol_y(pt: &Particle) -> f64 {
     pt.polarization_along_y() * pt.weight()
+}
+
+pub fn weighted_by_helicity(pt: &Particle) -> f64 {
+    pt.polarization()[3] * pt.weight()
 }
