@@ -438,11 +438,12 @@ mod tests {
 
     #[test]
     fn parsing() {
-        use meval::Context;
-        let mut ctx = Context::new();
-        ctx.var("a", 2.0);
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 2.0,
+        }.unwrap();
         let parser = |s: &str| -> Option<f64> {
-            s.parse::<meval::Expr>().and_then(|e| e.eval_with_context(&ctx)).ok()
+            eval_number_with_context(s, &ctx).ok()
         };
 
         let test = "mean energy in (1.0; auto)";
