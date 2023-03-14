@@ -1,6 +1,6 @@
 [package]
 name = "ptarmigan"
-version = "1.2.1"
+version = "1.3.0"
 authors = ["tgblackburn"]
 edition = "2018"
 publish = false
@@ -10,16 +10,16 @@ build = "build.rs"
 rust-version = "1.60"
 
 [dependencies]
-mpi = {version = "0.6", optional = true, default-features = false}
 rand = "0.7"
 rand_xoshiro = "0.4"
 rand_distr = "0.2"
-meval = "0.2.0"
+evalexpr = "8.1"
 yaml-rust = "0.4.5"
-num-complex = "0.4.0"
+num-complex = "0.4"
 enum_dispatch = "0.3"
 hdf5-writer = {path = "./hdf5-writer", version = "0.2", optional = true}
 unzip-n = {version = "0.1.2", optional = true}
+mpi = {version = "0.6", optional = true, default-features = false}
 no-mpi = {path = "./no-mpi", version = "0.1"}
 
 [workspace]

@@ -239,8 +239,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let raw_input = std::fs::read_to_string(&path)
         .map_err(|_| InputError::file())?;
     let mut input = Config::from_string(&raw_input)?;
-    //let mut input = Config::from_file(&path)?;
-    input.with_context("constants");
+    input.with_context("constants")?;
 
     let dt_multiplier = input.read("control:dt_multiplier").unwrap_or(1.0);
     let multiplicity: Option<usize> = input.read("control:select_multiplicity").ok();
