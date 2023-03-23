@@ -44,7 +44,7 @@ pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64
         Polarization::Circular => cp::sample(a, eta, rng),
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
-            rate.sample(sv[1], rng)
+            rate.sample(sv[1], sv[2], rng)
         },
     };
 
