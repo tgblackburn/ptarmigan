@@ -276,16 +276,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    let (tracking_photons, pol_resolved) = input.read::<bool, _>("control:pair_creation:enabled")
-        .and_then(|status| {
-            input.read("control:pair_creation:pol_resolved").map(|pr| (status, pr))
-        })
-        // fall back to 'pair_creation: true|false'
-        .or_else(|_| {
-            input.read("control:pair_creation").map(|b| (b, false))
-        })
-        // pair creation is enabled by default, unless classical = true
-        .unwrap_or((!classical, false));
+    // pair creation is enabled by default, unless classical = true
+    let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
+    let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
 
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
