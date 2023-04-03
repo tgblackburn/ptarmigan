@@ -158,7 +158,10 @@ fn sample_azimuthal_angle<R: Rng>(s: f64, z: f64, chi: f64, sv: StokesVector, rn
 /// mass) `gamma`, returning the positron Lorentz factor,
 /// the cosine of the scattering angle, as well as the
 /// equivalent s and z for debugging purposes
-pub fn sample<R: Rng>(chi: f64, gamma: f64, sv: StokesVector, rng: &mut R) -> (f64, f64, f64, f64, f64) {
+pub fn sample<R: Rng>(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector, rng: &mut R) -> (f64, f64, f64, f64, f64) {
+    let gamma = ell[0];
+    let sv = sv.in_basis(a_perp, ell.into());
+
     // Rejection sampling for s
     let max = spectrum_ceiling(chi, sv[1]);
     let s = loop {
@@ -340,7 +343,13 @@ mod tests {
         let path = format!("output/lcfa_pair_spectrum_{}_{}.dat", chi, s1);
         let mut file = File::create(path).unwrap();
         for _i in 0..200000 {
-            let (_, _, phi, s, z) = sample(chi, gamma, [1.0, s1, 0.0, 0.0].into(), &mut rng);
+            let (_, _, phi, s, z) = sample(
+                [gamma, 0.0, 0.0, -gamma].into(),
+                [1.0, s1, 0.0, 0.0].into(),
+                chi,
+                [1.0, 0.0, 0.0].into(),
+                &mut rng
+            );
             assert!(s > 0.0 && s < 1.0);
             assert!(z >= 1.0);
             writeln!(file, "{:.6e} {:.6e} {:.6e}", s, z, phi).unwrap();

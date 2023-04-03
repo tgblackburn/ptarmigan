@@ -20,6 +20,7 @@ mod lp;
 /// to the electron mass.
 pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
     let eta = k * ell;
+    let sv = sv.in_lma_basis(ell);
 
     let f = match pol {
         Polarization::Circular => cp::rate(a, eta).unwrap(),
@@ -39,6 +40,7 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
 /// (local) wavector `k` and polarization `pol`.
 pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
+    let sv = sv.in_lma_basis(ell);
 
     let (n, s, cphi_zmf) = match pol {
         Polarization::Circular => cp::sample(a, eta, rng),
