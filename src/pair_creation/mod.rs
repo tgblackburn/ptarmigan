@@ -23,7 +23,10 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
     let sv = sv.in_lma_basis(ell);
 
     let f = match pol {
-        Polarization::Circular => cp::rate(a, eta).unwrap(),
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.value(sv[3])
+        },
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
             rate.value(sv[1])
@@ -43,7 +46,10 @@ pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64
     let sv = sv.in_lma_basis(ell);
 
     let (n, s, cphi_zmf) = match pol {
-        Polarization::Circular => cp::sample(a, eta, rng),
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.sample(sv[1], sv[2], sv[3], rng)
+        },
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
             rate.sample(sv[1], sv[2], rng)
