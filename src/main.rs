@@ -69,6 +69,8 @@ struct CollideOptions {
     tracking_photons: bool,
     /// Use polarization-resolved pair creation rates
     pol_resolved: bool,
+    /// Rotate Stokes vector in absence of pair creation
+    rotate_stokes_pars: bool,
     /// Use classical emission rates
     classical: bool,
     /// Correct classical spectrum using Gaunt factor
@@ -150,7 +152,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
-                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
+                    let (prob, frac, pol_new, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
@@ -172,6 +174,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
+                    }
+
+                    if options.rotate_stokes_pars && options.pol_resolved {
+                        pt.with_polarization(pol_new);
                     }
 
                     pt.update_interaction_count(prob);
@@ -201,12 +207,12 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let a_rms = match pol { Polarization::Linear => a0 / consts::SQRT_2, Polarization::Circular => a0 };
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
+    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
-    if pair_rate.is_none() || photon_rate.is_none() {
+    if pair_rate == 0.0 || photon_rate.is_none() {
         1.0
     } else {
-        let ratio = photon_rate.unwrap() / pair_rate.unwrap();
+        let ratio = photon_rate.unwrap() / pair_rate;
         //println!("P_pair = {:.6e}, P_photon = {:.6e}, ratio = {:.3}", pair_rate.unwrap(), photon_rate.unwrap(), ratio);
         ratio.max(1.0)
     }
@@ -216,7 +222,7 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
     let chi = 2.0 * gamma * a0 * omega_mc2;
     let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
-    let pair_rate = lcfa::pair_creation::rate(ell, StokesVector::unpolarized(), chi, [1.0, 0.0, 0.0].into());
+    let pair_rate = lcfa::pair_creation::probability(ell, StokesVector::unpolarized(), chi, [1.0, 0.0, 0.0].into(), 1.0).0;
     let photon_rate = lcfa::photon_emission::rate(chi, gamma);
     photon_rate / pair_rate
 }
@@ -279,6 +285,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
     let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
+    let rotate_stokes_pars = input.read("control:rotate_stokes_pars")
+        .map_or(true, |val| {
+            if id == 0 { eprintln!("Warning: use of undocumented option control:rotate_stokes_pars, intended for debugging purposes only."); }
+            val
+        });
 
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
@@ -747,6 +758,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             rr,
             tracking_photons,
             pol_resolved,
+            rotate_stokes_pars,
             classical,
             gaunt_factor,
         };

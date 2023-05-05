@@ -5,6 +5,9 @@ use crate::special_functions::*;
 use crate::geometry::StokesVector;
 use crate::quadrature::*;
 
+// Stokes parameter of the background field
+const LASER_S3: f64 = -1.0;
+
 // Lookup tables
 mod tables;
 pub mod classical;
@@ -218,7 +221,7 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
         let xi_0 = (1.0 - s + 1.0 / (1.0 - s)) * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) - (2.0 * j_n / a).powi(2);
         let xi_1 = 2.0 * (j_nm1 * j_nm1 + j_np1 * j_np1 - 2.0 * j_n * j_n) + 8.0 * j_n * j_n * (1.0 - ((n as f64) / z).powi(2) - 0.5 / (a * a));
         let xi_2 = 0.0;
-        let xi_3 = (1.0 - s + 1.0 / (1.0 - s)) * (1.0 - 2.0 * s / (sn * (1.0 - s))) * (j_nm1 * j_nm1 - j_np1 * j_np1); // +/-1 depending on wave handedness
+        let xi_3 = LASER_S3 * (1.0 - s + 1.0 / (1.0 - s)) * (1.0 - 2.0 * s / (sn * (1.0 - s))) * (j_nm1 * j_nm1 - j_np1 * j_np1); // +/-1 depending on wave handedness
         [1.0, xi_1 / xi_0, xi_2 / xi_0, xi_3 / xi_0].into()
     };
 

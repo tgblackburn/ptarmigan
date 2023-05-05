@@ -18,18 +18,25 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> (f64, StokesVector) {
     let eta = k * ell;
+    let sv = sv.in_lma_basis(ell);
+    let dphi = eta * dt / (COMPTON_TIME * ell[0]);
 
-    let f = match pol {
-        Polarization::Circular => cp::rate(a, eta).unwrap(),
+    let (prob, sv) = match pol {
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.probability(sv, dphi)
+        },
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
-            rate.value(sv[1])
+            rate.probability(sv, dphi)
         },
     };
 
-    Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
+    let sv = sv.from_lma_basis(ell);
+
+    (prob, sv)
 }
 
 /// Assuming that pair creation takes place, pseudorandomly
@@ -39,9 +46,13 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
 /// (local) wavector `k` and polarization `pol`.
 pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
+    let sv = sv.in_lma_basis(ell);
 
     let (n, s, cphi_zmf) = match pol {
-        Polarization::Circular => cp::sample(a, eta, rng),
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.sample(sv[1], sv[2], sv[3], rng)
+        },
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
             rate.sample(sv[1], sv[2], rng)

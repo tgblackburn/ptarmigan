@@ -114,20 +114,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: R
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
-    // Stokes vector is defined w.r.t. to the orthonormal basis
-    // e_1 = x - k_x (k - omega z) / (omega * (omega - k_z))
-    // e_2 = y - k_y (k - omega z) / (omega * (omega - k_z))
-    // which are perpendicular to k.
-
-    // The global basis requires one vector to be in the x-z plane,
-    // so e_1 gets rotated by
-    let theta = {
-        let sin_theta = -k_prime[1] * k_prime[2] / (k_prime[0] * (k_prime[0] - k_prime[3]));
-        sin_theta.asin()
-    };
-
-    // and the Stokes parameters by
-    let sv = sv.rotate_by(theta);
+    let sv = sv.from_lma_basis(k_prime);
 
     // Verify construction of photon momentum
     let s_new = (k * k_prime) / (k * q);

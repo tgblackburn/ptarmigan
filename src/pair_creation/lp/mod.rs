@@ -11,7 +11,9 @@ use num_complex::Complex64;
 #[cfg(test)]
 use rayon::prelude::*;
 
+use crate::constants::ALPHA_FINE;
 use crate::special_functions::*;
+use crate::geometry::StokesVector;
 #[cfg(test)]
 use crate::quadrature::*;
 
@@ -377,21 +379,43 @@ impl TotalRate {
         eta.log10() < -1.0 - (self.a.log10() + 2.0).powi(2) / 4.5
     }
 
-    /// Returns the sum, over harmonic index, of the partial nonlinear
-    /// Breit-Wheeler rates. Implemented as a table lookup.
-    pub(super) fn value(&self, sv1: f64) -> f64 {
+    /// Returns the probability that pair creation occurs in a phase
+    /// interval `dphi`, as well as the Stokes parameters of the photon.
+    /// These must change whether pair creation occurs or not to avoid biased results.
+    pub(super) fn probability(&self, sv: StokesVector, dphi: f64) -> (f64, StokesVector) {
         let a = self.a;
         let eta = self.eta;
 
-        if self.is_negligible() {
-            0.0
+        let [f0, f1] = if self.is_negligible() {
+            [0.0, 0.0]
         } else if tables::mid_range::contains(a, eta) {
-            tables::mid_range::interpolate(a, eta, sv1)
+            tables::mid_range::interpolate(a, eta)
         } else if tables::contains(a, eta) {
-            tables::interpolate(a, eta, sv1)
+            tables::interpolate(a, eta)
         } else {
-           0.0
-        }
+           [0.0, 0.0]
+        };
+
+        let prob = {
+            let f = 0.5 * ((f0 + f1) + sv[1] * (f0 - f1));
+            ALPHA_FINE * f * dphi / eta
+        };
+
+        let prob_avg = {
+            let f = 0.5 * (f0 + f1);
+            ALPHA_FINE * f * dphi / eta
+        };
+
+        let delta = {
+            let f = 0.5 * (f0 - f1);
+            ALPHA_FINE * f * dphi / eta
+        };
+
+        let sv1 = (sv[1] * (1.0 - prob_avg) - delta) / (1.0 - prob);
+        let sv2 = sv[2] * (1.0 - prob_avg) / (1.0 - prob);
+        let sv3 = sv[3] * (1.0 - prob_avg) / (1.0 - prob);
+
+        (prob, [sv[0], sv1, sv2, sv3].into())
     }
 
     /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum
@@ -659,8 +683,14 @@ mod tests {
 
         for (a, eta, target_par, target_perp) in &pts {
             let rate = TotalRate::new(*a, *eta);
-            let result_par = rate.value(1.0);
-            let result_perp = rate.value(-1.0);
+            let result_par = {
+                let (prob, _) = rate.probability([1.0, 1.0, 0.0, 0.0].into(), 1.0);
+                eta * prob / ALPHA_FINE
+            };
+            let result_perp = {
+                let (prob, _) = rate.probability([1.0, -1.0, 0.0, 0.0].into(), 1.0);
+                eta * prob / ALPHA_FINE
+            };
             let (target_par, target_perp) = if *target_par == 0.0 {
                 pool.install(|| rate.by_integration().total())
             } else {
@@ -934,6 +964,75 @@ mod tests {
         }
 
         // assert!(n_err == 0);
+    }
+
+    fn positron_yield<R: Rng>(a: f64, eta: f64, sv1: f64, bias: f64, change_sv: bool, rng: &mut R) -> f64 {
+        let dphi = 2.0 * consts::PI / 20.0;
+        let rate = TotalRate::new(a, eta);
+        let mut weight = 1.0;
+        let mut count = 0.0;
+        let mut sv = StokesVector::new(1.0, sv1, 0.0, 0.0);
+        for _i in -40..40 {
+            let (prob, sv_new) = rate.probability(sv, dphi);
+            let bias = if prob * bias > 0.1 { 0.1 / prob } else { bias };
+            let prob = prob * bias;
+            if rng.gen::<f64>() < prob {
+                count += weight / bias;
+                weight -= weight / bias;
+                if weight <= 0.0 {
+                    break;
+                }
+            }
+            if change_sv {
+                sv = sv_new;
+            }
+        }
+        count
+    }
+
+    #[test]
+    #[ignore]
+    fn polarization_change() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+        let n = 150_000;
+        // with rotation on/off @ a = 3, eta = 1
+        // 50_000 => +1.55 sigma, +4.23 sigma
+        // 85_000 => +0.17 sigma, +3.92 sigma
+        // 100_000 => +0.08 sigma, +4.05 sigma
+        // 120_000 => +0.06 sigma, +4.42 sigma
+        // 150_000 => +0.74 sigma, 5.45 sigma
+        let (a, eta, bias) = (3.0, 1.0, 100.0);
+
+        let mut ps = vec![];
+        for _bx in 0..100 {
+            let mut count = 0.0;
+            for _i in 0..n {
+                count += positron_yield(a, eta, 1.0, bias, false, &mut rng);
+                count += positron_yield(a, eta, -1.0, bias, false, &mut rng);
+            }
+            ps.push(count / (2.0 * n as f64));
+        }
+
+        let mean = ps.iter().sum::<f64>() / 100.0;
+        let sdev = ps.iter().map(|p| (p - mean).powi(2)).sum::<f64>().sqrt() / 100.0;
+
+        let mut ps = vec![];
+        for _bx in 0..100 {
+            let mut count = 0.0;
+            for _i in 0..(2 * n) {
+                count += positron_yield(a, eta, 0.0, bias, true, &mut rng);
+            }
+            ps.push(count / (2.0 * n as f64));
+        }
+
+        let mean2 = ps.iter().sum::<f64>() / 100.0;
+        let sdev2 = ps.iter().map(|p| (p - mean2).powi(2)).sum::<f64>().sqrt() / 100.0;
+
+        let diff = mean2 - mean;
+        let sigma = sdev.hypot(sdev2);
+
+        println!("50-50 = {:.6e} ± {:.6e}, 100 = {:.6e} ± {:.6e}, diff = {:+.2} sigma", mean, sdev, mean2, sdev2, diff / sigma);
+        assert!(diff < sigma);
     }
 }
 

@@ -202,12 +202,21 @@ pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w:
 
     // xi is defined w.r.t. the basis [w - (n.w) n, n, w x n], whereas
     // we want [e, n, e x n], where e is in the x-z plane.
-    // phi rotates w - (n.w)n down to the x-z plane - we don't care which
-    // direction in the x-z plane, because this is fixed by k
-    let phi = ((w - (n * w) * n) * ThreeVector::new(0.0, 1.0, 0.0)).asin();
-    // println!("rotating w by {:.3e}", phi);
+    let e1 = {
+        let e1 = ThreeVector::new(k[3], 0.0, -k[1]);
+        if e1.norm_sqr() == 0.0 {
+            [1.0, 0.0, 0.0].into()
+        } else {
+            e1.normalize()
+        }
+    };
 
-    // which rotates the Stokes parameters through 2 phi
+    let phi = (e1 * w).clamp(-1.0, 1.0).acos();
+    // if sign positive, positive rotation by phi brings w to e1.
+    let sign = (w.cross(e1) * n).signum();
+    let phi = sign * phi;
+
+    // which rotates Stokes parameters by -2 * phi
     let xi = ThreeVector::new(
         (2.0 * phi).cos() * xi[0] + (2.0 * phi).sin() * xi[1],
         -(2.0 * phi).sin() * xi[0] + (2.0 * phi).cos() * xi[1],

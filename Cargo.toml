@@ -30,7 +30,6 @@ default = []
 hdf5-output = ["hdf5-writer", "unzip-n"]
 with-mpi = ["mpi", "hdf5-writer?/with-mpi"]
 compensating-chirp = []
-leading-order-only = []
 
 [build-dependencies]
 vergen = "4.0.3"
