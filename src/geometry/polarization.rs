@@ -54,7 +54,7 @@ impl StokesVector {
     /// the principal axis `a`.
     ///
     /// `a` must be perpendicular to particle propagation direction `k`!
-    pub fn in_basis(&self, a: ThreeVector, k: ThreeVector) -> StokesVector {
+    pub fn in_basis(&self, a: ThreeVector, k: ThreeVector) -> (StokesVector, f64, f64) {
         // In the standard basis, e_1 is guaranteed to lie in the x-z
         // plane and to be perpendicular to the propagation direction.
         // So we need to rotate the basis by the angle
@@ -85,12 +85,14 @@ impl StokesVector {
         let cos_2theta = cos_theta * cos_theta - sin_theta * sin_theta;
         let sin_2theta = 2.0 * cos_theta * sin_theta;
 
-        Self {
+        let sv = Self {
             i: self.i,
             q: cos_2theta * self.q - sin_2theta * self.u,
             u: sin_2theta * self.q + cos_2theta * self.u,
             v: self.v,
-        }
+        };
+
+        (sv, cos_2theta, sin_2theta)
     }
 
     /// Returns the sine and cosine of the angle that rotates the LMA basis

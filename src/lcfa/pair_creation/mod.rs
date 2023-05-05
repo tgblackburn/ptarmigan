@@ -39,18 +39,37 @@ fn auxiliary_t(chi: f64) -> (f64, f64) {
     }
 }
 
-/// Returns the nonlinear Breit-Wheeler rate, per unit time (in seconds),
+/// Returns the nonlinear Breit-Wheeler probability
 /// for a photon with four-momentum `ell` and Stokes vector `sv` in a
 /// constant, crossed field.
 ///
-/// The field is defined by the transverse acceleration `a_perp` and quantum
-/// parameter `chi`.
-pub fn rate(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector) -> f64 {
-    let sv = sv.in_basis(a_perp, ell.into());
+/// The field is defined by the transverse acceleration `a_perp`, quantum
+/// parameter `chi`, and duration `dt` (in seconds).
+pub fn probability(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector, dt: f64) -> (f64, StokesVector) {
+    let (sv, cos_2theta, sin_2theta) = sv.in_basis(a_perp, ell.into());
     let parallel_proj = 0.5 * (1.0 + sv[1]);
     let perp_proj = 0.5 * (1.0 - sv[1]);
     let (t_par, t_perp) = auxiliary_t(chi);
-    ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) / (COMPTON_TIME * ell[0])
+    let prob = ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) * dt / (COMPTON_TIME * ell[0]);
+
+    // If pair creation does not occur, photon Stokes parameters should be changed to:
+    let sv: StokesVector = {
+        let prob_avg = ALPHA_FINE * chi * 0.5 * (t_par + t_perp) * dt / (COMPTON_TIME * ell[0]);
+        let delta = ALPHA_FINE * chi * 0.5 * (t_par - t_perp) * dt / (COMPTON_TIME * ell[0]);
+
+        let sv1 = (sv[1] * (1.0 - prob_avg) - delta) / (1.0 - prob);
+        let sv2 = sv[2] * (1.0 - prob_avg) / (1.0 - prob);
+
+        // transform to simulation basis, rotating by -theta
+        [
+            sv[0],
+            cos_2theta * sv1 + sin_2theta * sv2,
+            -sin_2theta * sv1 + cos_2theta * sv2,
+            sv[3] * (1.0 - prob_avg) / (1.0 - prob),
+        ].into()
+    };
+
+    (prob, sv)
 }
 
 /// Proportional to the probability spectrum dW/ds for a photon
@@ -160,7 +179,7 @@ fn sample_azimuthal_angle<R: Rng>(s: f64, z: f64, chi: f64, sv: StokesVector, rn
 /// equivalent s and z for debugging purposes
 pub fn sample<R: Rng>(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector, rng: &mut R) -> (f64, f64, f64, f64, f64) {
     let gamma = ell[0];
-    let sv = sv.in_basis(a_perp, ell.into());
+    let (sv, _, _) = sv.in_basis(a_perp, ell.into());
 
     // Rejection sampling for s
     let max = spectrum_ceiling(chi, sv[1]);
@@ -354,5 +373,110 @@ mod tests {
             assert!(z >= 1.0);
             writeln!(file, "{:.6e} {:.6e} {:.6e}", s, z, phi).unwrap();
         }
+    }
+
+    #[test]
+    fn pure_states_remain_so() {
+        let ell: FourVector = [100.0, 0.0, 0.0, -100.0].into();
+        let a_perp: ThreeVector = [1.0, 0.0, 0.0].into();
+
+        let svs: [StokesVector; 2] = [
+            [1.0,  1.0,  0.0,  0.0].into(),
+            [1.0, -1.0,  0.0,  0.0].into(),
+        ];
+
+        for sv in &svs {
+            let (_, sv_new) = probability(ell, *sv, 1.0, a_perp, 1.0e-6 / SPEED_OF_LIGHT);
+            assert!((sv[1] - sv_new[1]).abs() < 1.0e-12);
+        }
+    }
+
+    fn positron_yield<R: Rng>(chi_max: f64, gamma: f64, sv1: f64, bias: f64, change_sv1: bool, rng: &mut R) -> f64 {
+        let tau = 10.0;
+        let dt = 1.0e-6 / (20.0 * SPEED_OF_LIGHT);
+        let ell: FourVector = [gamma, 0.0, 0.0, -gamma].into();
+        let a_perp: ThreeVector = [1.0, 0.0, 0.0].into();
+        let mut sv: StokesVector = [1.0, sv1, 0.0, 0.0].into();
+        let mut weight = 1.0;
+        let mut count = 0.0;
+        for i in -300..300 {
+            let t = (i as f64) * 0.05;
+            let chi = chi_max * (-(t/tau).powi(2)).exp();
+            let (prob, sv_new) = probability(ell, sv, chi, a_perp, dt);
+            let bias = if prob * bias > 0.1 { 0.1 / prob } else { bias };
+            let prob = prob * bias;
+            if rng.gen::<f64>() < prob {
+                count += weight / bias;
+                weight -= weight / bias;
+                if weight <= 0.0 {
+                    break;
+                }
+            }
+            if change_sv1 {
+                sv = sv_new;
+            }
+        }
+        count
+    }
+
+    #[test]
+    #[ignore]
+    fn polarization_change() {
+        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
+
+        let n = 50_000;
+        let gamma = 1000.0;
+        // let (chi_max, bias) = (1.0, 1.0);
+        let (chi_max, bias) = (0.5, 100.0);
+
+        // incoherent sum of sigma and pi
+        let mut ps = vec![];
+        for _bx in 0..10 {
+            let mut count = 0.0;
+            for _i in 0..n {
+                count += positron_yield(chi_max, gamma, 1.0, bias, false, &mut rng);
+                count += positron_yield(chi_max, gamma, -1.0, bias, false, &mut rng);
+            }
+            ps.push(count / (2.0 * n as f64));
+        }
+
+        let mean = ps.iter().sum::<f64>() / 10.0;
+        let sdev = ps.iter().map(|p| (p - mean).powi(2)).sum::<f64>().sqrt() / 10.0;
+
+        // unpolarized (correct)
+        let mut ps = vec![];
+        for _bx in 0..10 {
+            let mut count = 0.0;
+            for _i in 0..(2 * n) {
+                count += positron_yield(chi_max, gamma, 0.0, bias, true, &mut rng);
+            }
+            ps.push(count / (2.0 * n as f64));
+        }
+
+        let mean2 = ps.iter().sum::<f64>() / 10.0;
+        let sdev2 = ps.iter().map(|p| (p - mean2).powi(2)).sum::<f64>().sqrt() / 10.0;
+
+        // unpolarized (incorrect)
+        let mut ps = vec![];
+        for _bx in 0..10 {
+            let mut count = 0.0;
+            for _i in 0..(2 * n) {
+                count += positron_yield(chi_max, gamma, 0.0, bias, false, &mut rng);
+            }
+            ps.push(count / (2.0 * n as f64));
+        }
+
+        let mean3 = ps.iter().sum::<f64>() / 10.0;
+        let sdev3 = ps.iter().map(|p| (p - mean3).powi(2)).sum::<f64>().sqrt() / 10.0;
+
+        println!("50-50 pure = {:.6e} ± {:.6e}, 100 mixed = {:.6e} ± {:.6e}, 100 mixed != {:.6e} ± {:.6e}", mean, sdev, mean2, sdev2, mean3, sdev3);
+
+        let diff = mean - mean2;
+        let width = sdev.hypot(sdev2);
+        let diff3 = mean - mean3;
+        let width3 = sdev.hypot(sdev3);
+
+        println!("diff = {:.6e} ± {:.6e} [{:.2} sigma] or {:.6e} ± {:.6e} [{:.2} sigma]", diff, width, diff.abs() / width, diff3, width3, diff3.abs() / width3);
+        assert!(diff.abs() < width);
     }
 }

@@ -7,6 +7,8 @@ use rand::prelude::*;
 #[cfg(test)]
 use rayon::prelude::*;
 
+use crate::constants::ALPHA_FINE;
+use crate::geometry::StokesVector;
 use crate::special_functions::*;
 use crate::quadrature::*;
 
@@ -260,7 +262,7 @@ impl TotalRate {
     /// Breit-Wheeler rates. Implemented as a table lookup.
     /// The rate is a function of the third Stokes parameter, S_3,
     /// which determines degree of circular polarization.
-    pub(super) fn value(&self, sv3: f64) -> f64 {
+    fn value(&self, sv3: f64) -> f64 {
         let f = if self.a < 0.02 || self.is_too_small() {
             [0.0, 0.0]
         } else if self.a < total::LN_MIN_A.exp() {
@@ -270,6 +272,40 @@ impl TotalRate {
         };
 
         0.5 * (f[0] * (1.0 + sv3) + f[1] * (1.0 - sv3))
+    }
+
+    /// Returns the probability that pair creation occurs in a phase
+    /// interval `dphi`, as well as the Stokes parameters of the photon.
+    /// These must change whether pair creation occurs or not to avoid biased results.
+    pub(super) fn probability(&self, sv: StokesVector, dphi: f64) -> (f64, StokesVector) {
+        let [f0, f1] = if self.a < 0.02 || self.is_too_small() {
+            [0.0, 0.0]
+        } else if self.a < total::LN_MIN_A.exp() {
+            self.by_summation()
+        } else {
+            self.by_lookup()
+        };
+
+        let prob = {
+            let f = 0.5 * ((f0 + f1) + sv[3] * (f0 - f1));
+            ALPHA_FINE * f * dphi / self.eta
+        };
+
+        let prob_avg = {
+            let f = 0.5 * (f0 + f1);
+            ALPHA_FINE * f * dphi / self.eta
+        };
+
+        let delta = {
+            let f = 0.5 * (f0 - f1);
+            ALPHA_FINE * f * dphi / self.eta
+        };
+
+        let sv1 = sv[1] * (1.0 - prob_avg) / (1.0 - prob);
+        let sv2 = sv[2] * (1.0 - prob_avg) / (1.0 - prob);
+        let sv3 = (sv[3] * (1.0 - prob_avg) - delta) / (1.0 - prob);
+
+        (prob, [sv[0], sv1, sv2, sv3].into())
     }
 
     /// Returns a pseudorandomly sampled n (harmonic order), s (lightfront momentum

@@ -45,6 +45,10 @@ impl PolDep {
         let [a, b] = self.inner;
         0.5 * ((a + b) + sv1 * (a - b))
     }
+
+    pub fn into_inner(self) -> [f64; 2] {
+        self.inner
+    }
 }
 
 impl From<[f64; 2]> for PolDep {

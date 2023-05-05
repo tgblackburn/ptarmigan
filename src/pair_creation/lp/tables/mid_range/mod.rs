@@ -81,7 +81,7 @@ fn interpolate_in_eta_prime(eta_prime: f64, ia: usize) -> PolDep {
     interp
 }
 
-pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
+pub fn interpolate(a: f64, eta: f64) -> [f64; 2] {
     use total::*;
     let ia = ((a.ln() - LN_MIN_A) / LN_A_STEP) as usize;
     let eta_prime = eta / (1.0 + 0.5 * a * a);
@@ -96,7 +96,12 @@ pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
         ((1.0 - da) * a_min * interpolate_in_eta_prime(eta_prime, ia) + da * a_max * interpolate_in_eta_prime(eta_prime, ia+1)) / a
     };
 
-    f.exp().interp(sv1)
+    f.exp().into_inner()
+}
+
+fn interpolate_and_project(a: f64, eta: f64, sv1: f64) -> f64 {
+    let [a, b] = interpolate(a, eta);
+    0.5 * ((a + b) + sv1 * (a - b))
 }
 
 /// Estimates the pair-creation rate for the lowest accessible harmonic,
@@ -135,7 +140,7 @@ fn interpolate_lowest_harmonic(a: f64, eta: f64, sv1: f64) -> (i32, f64) {
 
     let (n_min, _) = TotalRate::new(a, eta).sum_limits();
 
-    let total_rate = interpolate(a, eta, sv1);
+    let total_rate = interpolate_and_project(a, eta, sv1);
 
     let rate = index.iter()
         .zip(weight.iter())
@@ -197,7 +202,7 @@ pub fn invert(a: f64, eta: f64, sv1: f64, frac: f64) -> i32 {
 
     if next_to_bdy {
         let (n_min, rate_lowest) = interpolate_lowest_harmonic(a, eta, sv1);
-        let total_rate = interpolate(a, eta, sv1);
+        let total_rate = interpolate_and_project(a, eta, sv1);
         let p_lowest = rate_lowest / total_rate;
         // println!("n_min = {}, frac = {:.3e}, p_lowest = {:.3e}", n_min, frac, p_lowest);
         if frac <= p_lowest {
@@ -300,7 +305,7 @@ mod tests {
             }).collect();
             let total: f64 = rates.iter().sum();
 
-            println!("a = {}, eta = {}, r({}) = {:.3e}:", a, eta, n_min, interpolate_lowest_harmonic(*a, *eta, sv1).1 / interpolate(*a, *eta, sv1));
+            println!("a = {}, eta = {}, r({}) = {:.3e}:", a, eta, n_min, interpolate_lowest_harmonic(*a, *eta, sv1).1 / interpolate_and_project(*a, *eta, sv1));
 
             let mut counts = [0.0; 16];
             for _ in 0..1_000_000 {

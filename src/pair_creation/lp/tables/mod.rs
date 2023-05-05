@@ -20,7 +20,7 @@ pub fn contains(a: f64, eta: f64) -> bool {
 }
 
 #[allow(unused_parens)]
-pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
+pub fn interpolate(a: f64, eta: f64) -> [f64; 2] {
     use total::*;
 
     let ia = ((a.ln() - LN_MIN_A) / LN_A_STEP) as usize;
@@ -40,7 +40,7 @@ pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
             + (1.0 - da) * de * PolDep::from(TABLE[ie+1][ia])
             + da * de * PolDep::from(TABLE[ie+1][ia+1])
         );
-        f.exp().interp(sv1)
+        f.exp().into_inner()
     } else {
         // linear interpolation of: log y against 1/x, best for f(x) ~ exp(-1/x)
         let a_min = (LN_MIN_A + (ia as f64) * LN_A_STEP).exp();
@@ -55,7 +55,7 @@ pub fn interpolate(a: f64, eta: f64, sv1: f64) -> f64 {
             + PolDep::from(TABLE[ie+1][ia]) * da * (1.0 - de)
             + PolDep::from(TABLE[ie+1][ia+1]) * (1.0 - da) * (1.0 -de)
         );
-        f.exp().interp(sv1)
+        f.exp().into_inner()
     }
 }
 
@@ -145,7 +145,11 @@ mod tests {
                     0.5 * ((pr.re + pr.im) + sv1 * (pr.re - pr.im))
                 })
                 .collect();
-            let total: f64 = interpolate(*a, *eta, sv1);
+
+            let total: f64 = {
+                let [a, b] = interpolate(*a, *eta);
+                0.5 * ((a + b) + sv1 * (a - b))
+            };
 
             println!("a = {}, eta = {}, n = {}..{}:", a, eta, n_min, n_max);
 

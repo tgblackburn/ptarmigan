@@ -18,22 +18,25 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> (f64, StokesVector) {
     let eta = k * ell;
     let sv = sv.in_lma_basis(ell);
+    let dphi = eta * dt / (COMPTON_TIME * ell[0]);
 
-    let f = match pol {
+    let (prob, sv) = match pol {
         Polarization::Circular => {
             let rate = cp::TotalRate::new(a, eta);
-            rate.value(sv[3])
+            rate.probability(sv, dphi)
         },
         Polarization::Linear => {
             let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
-            rate.value(sv[1])
+            rate.probability(sv, dphi)
         },
     };
 
-    Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
+    let sv = sv.from_lma_basis(ell);
+
+    (prob, sv)
 }
 
 /// Assuming that pair creation takes place, pseudorandomly
