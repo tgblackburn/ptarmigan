@@ -28,7 +28,7 @@ stats:
   expression:
     - nominal_a0 a0
     - quantum_chi 2.*initial_gamma*a0*(photon_energy/(me*c^2))
-    - synch_peak 0.44*(2.*initial_gamma*a0*photon_energy)/MeV MeV
+    - synch_peak`formula 0.44*(2.*initial_gamma*a0*photon_energy)/MeV MeV
   electron:
     - mean gamma
   photon:
