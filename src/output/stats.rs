@@ -374,6 +374,8 @@ impl SummaryStatistic {
         max
     }
 
+    /// Returns an array of: the mean cosine, the mean sine,
+    /// and the number of elements that satisfy the filter.
     fn directmean(&self, pt: &[Particle]) -> [f64; 3] {
         let mut xbar = 0.0;
         let mut ybar = 0.0;
