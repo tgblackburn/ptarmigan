@@ -22,6 +22,9 @@ enum Reduction {
     Variance,
     Minimum,
     Maximum,
+    CircMean,
+    CircVar,
+    CircStdDev,
 }
 
 impl fmt::Display for Reduction {
@@ -32,7 +35,10 @@ impl fmt::Display for Reduction {
             Reduction::Mean => "mean",
             Reduction::Variance => "variance",
             Reduction::Minimum => "minimum",
-            Reduction::Maximum => "maximum"
+            Reduction::Maximum => "maximum",
+            Reduction::CircMean => "circmean",
+            Reduction::CircVar => "circvar",
+            Reduction::CircStdDev => "circstd",
         };
         write!(f, "{}", name)
     }
@@ -162,6 +168,9 @@ impl SummaryStatistic {
                     "variance" | "var" => Reduction::Variance,
                     "minimum" | "min" => Reduction::Minimum,
                     "maximum" | "max" => Reduction::Maximum,
+                    "circmean" | "cmean" => Reduction::CircMean,
+                    "circvar" | "cvar" => Reduction::CircVar,
+                    "circstd" | "cstd" => Reduction::CircStdDev,
                     _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
                 };
 
@@ -365,6 +374,30 @@ impl SummaryStatistic {
         max
     }
 
+    fn directmean(&self, pt: &[Particle]) -> [f64; 3] {
+        let mut xbar = 0.0;
+        let mut ybar = 0.0;
+        let mut count = 0.0;
+        for p in pt {
+            let within_bounds = if self.filter.is_some() {
+                let f = self.filter.as_ref().unwrap().f;
+                f(p) > self.min && f(p) < self.max
+            } else {
+                true
+            };
+        
+            if within_bounds {
+                let val = (self.variable.f)(p);
+                let weight = (self.weight.f)(p);
+                xbar += weight * f64::cos(val);
+                ybar += weight * f64::sin(val);
+                count += weight;
+            }
+        }
+
+        [xbar, ybar, count]
+
+    }
 
     pub fn evaluate(&mut self, world: &impl Communicator, pt: &[Particle], name: &str) {
         self.name = name.to_owned();
@@ -404,6 +437,35 @@ impl SummaryStatistic {
                 world.all_reduce_into(&local, &mut global, SystemOperation::max());
                 global
             },
+            Reduction::CircMean => {
+                let local = self.directmean(pt);
+                let mut global = [0.0, 0.0, 0.0];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                // <θ> = arctan(<Y> / <X>)
+                means[1].atan2(means[0])
+            },
+            Reduction::CircVar => {
+                let local = self.directmean(pt);
+                let mut global = [0.0, 0.0, 0.0];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                let r_length = (means[0].powi(2) + means[1].powi(2)).sqrt(); // resultant length, <R>
+                // Circular variance = 1 - <R>
+                1.0 - r_length
+            },
+            Reduction::CircStdDev => {
+                let local = self.directmean(pt);
+                let mut global = [0.0, 0.0, 0.0];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                let r_length = (means[0].powi(2) + means[1].powi(2)).sqrt(); // resultant length, <R>
+                // Circular standard deviation = sqrt(-2 ln<R>)
+                ( -2.0 * r_length.ln() ).sqrt()
+            }
         };
     }
 }
@@ -480,6 +542,33 @@ mod tests {
         assert!(stat.filter.is_some());
         assert_eq!(stat.min, 2.0 / 3.0);
         assert_eq!(stat.max, 1000.0);
+
+        let test = "circmean angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircMean);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
+
+        let test = "circvar angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircVar);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
+
+        let test = "cstd angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircStdDev);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
 
     }
 }
