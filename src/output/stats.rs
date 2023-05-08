@@ -443,33 +443,34 @@ pub struct StatsExpression {
 
 impl StatsExpression {
     /// Parses a string representation of a stats expression. If no unit is given,
-    /// defaults to '1' (dimensionless).
+    /// defaults to '1' (dimensionless). If a formula is provided, it must contain
+    /// no whitespace.
     /// `
-    ///     expr [name] [expression]
-    ///     expr [name] [expression] [unit]
-    ///     expr [name]`formula [expression]
-    ///     expr [name]`formula [expression] [unit]
+    ///     [name] [expression]
+    ///     [name] [expression] [unit]
+    ///     [name]`formula [expression]
+    ///     [name]`formula [expression] [unit]
     /// `
     pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
         let vstr: Vec<&str> = spec.split_whitespace().collect();
-        if vstr.len() < 3 || vstr[0]!= "expr" {
+        if vstr.len() < 2 {
             return Err(OutputError::Conversion(spec.to_owned(), "stats expression".to_owned()));
         }
         else {
-            let (exprname, form) = if vstr[1].contains("`") {
-                (vstr[1].split("`").collect::<Vec<&str>>()[0].to_owned(),
-                Some(vstr[2].to_owned())
+            let (exprname, form) = if vstr[0].contains("`") {
+                (vstr[0].split("`").collect::<Vec<&str>>()[0].to_owned(),
+                Some(vstr[1].to_owned())
                 )
             }
             else {
-                (vstr[1].to_owned(), None)
+                (vstr[0].to_owned(), None)
             };
 
             Ok(StatsExpression {
                 name: exprname,
-                value: parser(&vstr[2].to_owned()).unwrap(),
+                value: parser(&vstr[1].to_owned()).unwrap(),
                 formula: form,
-                unit: vstr.get(3).map_or("1", |&s| s).to_owned()
+                unit: vstr.get(2).map_or("1", |&s| s).to_owned()
             })
         }
     }
@@ -553,7 +554,7 @@ mod tests {
             s.parse::<meval::Expr>().and_then(|e| e.eval_with_context(&ctx)).ok()
         };
 
-        let test = "expr test a*b";
+        let test = "test a*b";
         let spec = StatsExpression::load(test, &parser).unwrap();
         println!("Got stats expression -> {}", spec);
         assert!(spec.name == "test");
@@ -561,7 +562,7 @@ mod tests {
         assert_eq!(spec.value, 5.0);
         assert!(spec.unit == "1");
 
-        let test = "expr test`formula a*b";
+        let test = "test`formula a*b";
         let spec = StatsExpression::load(test, &parser).unwrap();
         println!("Got stats expression -> {}", spec);
         assert!(spec.name == "test");
@@ -569,7 +570,7 @@ mod tests {
         assert_eq!(spec.value, 5.0);
         assert!(spec.unit == "1");
 
-        let test = "expr test a*b mm";
+        let test = "test a*b mm";
         let spec = StatsExpression::load(test, &parser).unwrap();
         println!("Got stats expression -> {}", spec);
         assert!(spec.name == "test");
@@ -577,7 +578,7 @@ mod tests {
         assert_eq!(spec.value, 5.0);
         assert!(spec.unit == "mm");
 
-        let test = "expr test`formula a*b mm";
+        let test = "test`formula a*b mm";
         let spec = StatsExpression::load(test, &parser).unwrap();
         println!("Got stats expression -> {}", spec);
         assert!(spec.name == "test");
