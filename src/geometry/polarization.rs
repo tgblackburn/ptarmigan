@@ -99,15 +99,10 @@ impl StokesVector {
     /// vector e_1 into the global basis vector.
     fn lma_basis_rotation(k: FourVector) -> (f64, f64) {
         let k_minus = k[0] - k[3];
-        let cos_theta = (k[3] * k_minus + k[1].powi(2)) / (k_minus * k[1].hypot(k[3]));
+        let cos_theta = (k[3] * k_minus - k[1].powi(2)) / (k_minus * k[1].hypot(k[3]));
 
-        let det = {
-            let x = 1.0 - k[1] * k[1] / (k[0] * k_minus);
-            let y = -k[1] * k[2] / (k[0] * k_minus);
-            let z = -k[1] * (k[3] - k[0]) / (k[0] * k_minus);
-            -y * (k[1].powi(2) + k[3].powi(2)) + k[2] * (x * k[1] + z * k[3])
-        };
-
+        // det = k · (e_LMA × e_g), ignoring positive factors as we only need the sign
+        let det = k[1] * k[2]; // k[0] * k[1] * k[2] / (k_minus * k[1].hypot(k[3]))
         let sign = det.signum();
 
         let cos_theta = cos_theta.clamp(-1.0, 1.0);
