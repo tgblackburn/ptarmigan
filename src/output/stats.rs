@@ -169,7 +169,7 @@ impl SummaryStatistic {
                     "minimum" | "min" => Reduction::Minimum,
                     "maximum" | "max" => Reduction::Maximum,
                     "circmean" | "cmean" => Reduction::CircMean,
-                    "circvar" | "cvar" => Reduction::CircVar,
+                    "circvariance" | "cvariance" | "circvar" | "cvar" => Reduction::CircVar,
                     "circstd" | "cstd" => Reduction::CircStdDev,
                     _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
                 };
