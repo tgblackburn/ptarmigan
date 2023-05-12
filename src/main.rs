@@ -810,9 +810,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 
                                                                       current_ident, if current_ident.is_empty() {""} else {"_"});
                 let mut file = File::create(filename)?;
-                for stat in &statsexpr {
-                    writeln!(file, "{}", stat)?;
-                }
                 for stat in &estats {
                     writeln!(file, "{}", stat)?;
                 }
@@ -820,6 +817,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", stat)?;
                 }
                 for stat in &gstats {
+                    writeln!(file, "{}", stat)?;
+                }
+                for stat in &statsexpr {
                     writeln!(file, "{}", stat)?;
                 }
             }
