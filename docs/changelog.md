@@ -8,7 +8,8 @@ Added:
 
 * Photon-polarization dependence of pair creation rates.
 * Input file parsing: variables in the `constants` block can depend on previously defined variables.
-* Evaluate and print math expressions in stats file.
+* Evaluate and print math expressions in stats file (PR #46).
+* Circular statistics (PR #47).
 
 Fixed:
 

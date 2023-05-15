@@ -68,7 +68,7 @@ struct Filter {
 impl Filter {
     fn from_str<F: Fn(&str) -> Option<f64>>(s: &str, parser: F) -> Result<Self, OutputError> {
         // just in case
-        let error = || OutputError::Conversion(s.to_owned(), "filter".to_owned());
+        let error = || OutputError::conversion(s, "filter");
 
         // s is a string like 'op in min, max'
         let (prefix, suffix) = s.split_once(',').ok_or_else(error)?;
@@ -242,7 +242,7 @@ impl DistributionFunction {
                 filter: filter.unwrap(),
             })
         } else {
-            Err(OutputError::Conversion(spec.to_owned(), "distribution function".to_owned()))
+            Err(OutputError::conversion(spec, "distribution function"))
         }
     }
 }

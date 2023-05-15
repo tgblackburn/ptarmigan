@@ -139,9 +139,22 @@ Each specifier must be one of:
 * ``op var[`weight] in (min; max)``
 * ``op var[`weight] for var2 in (min; max)``
 
-where `op` is one of `total`, `fraction`, `mean`, `variance`, `minimum` and `maximum`, `circmean`, `circvariance` and `circstd` and `var` is a desired output (`px`, the x-component of momentum, for example). The range of values to be used can be specified by `var`, or another output entirely, `var2`. Both `min` and `max` can be arbitrary mathematical expressions, using values given in the [constants](#constants) block, or `auto`, in which case the range is detected automatically. The contribution of each particle to the statistic is either its weight (i.e. number) or may given in terms of another variable.
+where `op` is one of:
 
-For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds. The options `circmean`, `circvariance` and `circstd`, which compute the circular mean, variance and standard deviation respectively, are meaningful only for angular quantities. The circular variance is defined as $ 1- \langle R \rangle$, and the circular standard deviation as $\sqrt{-2\ln\langle R \rangle}$, where $\langle R \rangle$ is the mean resultant vector. This follows the definition from [Statistics of Directional Data; K.V. Mardia](https://doi.org/10.1016/C2013-0-07425-7).
+* `total`
+* `fraction`
+* `mean`
+* `variance`
+* `minimum`, `maximum`
+* `circmean`, `circvariance`, `circstd`
+
+and `var` is a desired output (`px`, the x-component of momentum, for example). The range of values to be used can be specified by `var`, or another output entirely, `var2`. Both `min` and `max` can be arbitrary mathematical expressions, using values given in the [constants](#constants) block, or `auto`, in which case the range is detected automatically. The contribution of each particle to the statistic is either its weight (i.e. number) or may given in terms of another variable.
+
+For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds.
+
+The summary statistics `circmean`, `circvariance` and `circstd`, which compute the circular mean, variance and standard deviation respectively, are meaningful only for angular quantities.
+The circular variance is defined as $ 1- \langle R \rangle$, and the circular standard deviation as $\sqrt{-2\ln\langle R \rangle}$, where $\langle R \rangle$ is the mean resultant vector.
+This follows the definition from [Statistics of Directional Data; K.V. Mardia](https://doi.org/10.1016/C2013-0-07425-7).
 
 Expressions involving defined constants from the [constants](#constants) block can also be calculated and written to the 'stats.txt' file.  The identifier prefix is
 
