@@ -1,0 +1,51 @@
+---
+control:
+  radiation_reaction: true
+  pair_creation: false
+
+laser:
+  a0: a0
+  wavelength: wavelength
+  envelope: flattop
+  n_cycles: 16
+  polarization: linear
+
+beam:
+  n: 10000
+  species: electron
+  charge: 1.5e9 * e
+  gamma: initial_gamma
+  radius: [0.5 * micro, uniformly_distributed]
+  length: 0.5 * micro
+
+output:
+  ident: auto
+  discard_background_e: true
+  coordinate_system: beam
+  units: hep
+
+stats:
+  expression:
+    - nominal_a0 a0
+    - quantum_chi 2.*initial_gamma*a0*(photon_energy/(me*c^2))
+    - synch_peak`formula 0.44*(2.*initial_gamma*a0*photon_energy)/MeV MeV
+  electron:
+    - mean gamma
+  photon:
+    - total number
+    - mean energy 
+    - variance angle_x
+    - variance angle_y
+    - variance angle_x`energy
+    - variance angle_y`energy
+    - circmean angle_x`energy
+    - circmean angle_y`energy
+    - circstd angle_x`energy
+    - circstd angle_y`energy
+
+constants:
+  a0: 5.0
+  laser_energy: 1.2 # joules
+  wavelength: 0.8 * micro
+  photon_energy: 1.55 * eV # Required for evaluating some expressions in stats
+  initial_gamma: 16.5 * GeV / (me * c^2)
