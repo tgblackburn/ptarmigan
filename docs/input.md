@@ -143,6 +143,19 @@ where `op` is one of `total`, `fraction`, `mean`, `variance`, `minimum` and `max
 
 For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds.
 
+Expressions involving defined constants from the [constants](#constants) block can also be calculated and written to the 'stats.txt' file.  The identifier prefix is
+
+* `expression` (optional): list of specifiers
+
+The specifier must be one of:
+
+* ``name[`formula] expression``
+* ``name[`formula] expression unit``
+
+where `name` is a name for the expression being evaluated, `expression` is the combination of constants to be evaluated and `unit` is the unit of the expression result (it is up to the user to ensure this is correctly specified). There should be no whitespace in the expression. `` `formula`` is an optional tag to write the expression formula as well as the calculated value.
+
+For example, `init_energy initial_gamma*me*c^2/MeV MeV` would compute and write the value of this expression, in units of MeV, with name `init_energy` to the 'stats.txt' file, provided `initial_gamma` was specified in the [constants](#constants) block. The unit would also be printed as MeV. Adding the formula tag, ``init_energy`formula initial_gamma*me*c^2/MeV MeV``, will also write `initial_gamma*me*c^2/MeV` as a string to the 'stats.txt' file.
+
 ## constants
 
 Everywhere an integer or floating-point number is requested in the input file, a named value may be given instead, provided that its value is specified in this section.

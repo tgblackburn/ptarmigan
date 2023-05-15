@@ -601,6 +601,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    let statsexpr = input.read("stats:expression")
+        .map_or_else(|_| Ok(vec!{}), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| StatsExpression::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+    
     let mut estats = input.read("stats:electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
@@ -851,6 +858,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", stat)?;
                 }
                 for stat in &gstats {
+                    writeln!(file, "{}", stat)?;
+                }
+                for stat in &statsexpr {
                     writeln!(file, "{}", stat)?;
                 }
             }
