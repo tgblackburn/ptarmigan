@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.3.0
+
+In progress
+
+Added:
+
+* Photon-polarization dependence of pair creation rates.
+* Input file parsing: variables in the `constants` block can depend on previously defined variables.
+* Evaluate and print math expressions in stats file.
+
+Fixed:
+
+* Vulnerabilities reported by Dependabot.
+* Warning about deprecated code in nom 1.2.4.
+
 ## v1.2.1
 
 2023-01-23

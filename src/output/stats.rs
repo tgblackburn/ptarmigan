@@ -174,6 +174,7 @@ impl SummaryStatistic {
                     _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
                 };
 
+
                 // The second word can be either 'variable' or 'variable`weight'
                 let varstr: Vec<&str> = words[1].split('`').collect();
                 let (varstr, weightstr) = match varstr.len() {
@@ -496,17 +497,77 @@ impl fmt::Display for SummaryStatistic {
     }
 }
 
+/// Calculates the value given by a function of constant values.
+pub struct StatsExpression {
+    name: String,
+    value: f64,
+    formula: Option<String>,
+    unit: String,
+}
+
+impl StatsExpression {
+    /// Parses a string representation of a stats expression. If no unit is given,
+    /// defaults to '1' (dimensionless). If a formula is provided, it must contain
+    /// no whitespace.
+    /// `
+    ///     [name] [expression]
+    ///     [name] [expression] [unit]
+    ///     [name]`formula [expression]
+    ///     [name]`formula [expression] [unit]
+    /// `
+    pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
+        let vstr: Vec<&str> = spec.split_whitespace().collect();
+        if vstr.len() < 2 {
+            return Err(OutputError::Conversion(spec.to_owned(), "stats expression".to_owned()));
+        }
+        else {
+            let (exprname, form) = if vstr[0].contains("`") {
+                (vstr[0].split("`").collect::<Vec<&str>>()[0].to_owned(),
+                Some(vstr[1].to_owned())
+                )
+            }
+            else {
+                (vstr[0].to_owned(), None)
+            };
+
+            Ok(StatsExpression {
+                name: exprname,
+                value: parser(&vstr[1].to_owned()).unwrap(),
+                formula: form,
+                unit: vstr.get(2).map_or("1", |&s| s).to_owned()
+            })
+        }
+    }
+}
+
+impl fmt::Display for StatsExpression {
+    /// Formats the stats expression as a string.
+    /// `
+    ///     "- expr quantum_chi = 0.1 [1]"
+    ///     "- expr synchcut (0.44*initial_gamma*me_MeV*chi) = 72.34 [MeV]"
+    /// `
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(formula) = &self.formula {
+            write!(f, "expr: {} ({}) = {:.6e} [{}]", self.name, formula, self.value, self.unit)
+        }
+        else {
+            write!(f, "expr: {} = {:.6e} [{}]", self.name, self.value, self.unit)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parsing() {
-        use meval::Context;
-        let mut ctx = Context::new();
-        ctx.var("a", 2.0);
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 2.0,
+        }.unwrap();
         let parser = |s: &str| -> Option<f64> {
-            s.parse::<meval::Expr>().and_then(|e| e.eval_with_context(&ctx)).ok()
+            eval_number_with_context(s, &ctx).ok()
         };
 
         let test = "mean energy in (1.0; auto)";
@@ -571,6 +632,51 @@ mod tests {
         assert!(stat.weight.name == "energy");
         assert_eq!(stat.min, std::f64::NEG_INFINITY);
         assert_eq!(stat.max, std::f64::INFINITY);
+
+    }
+
+    #[test]
+    fn parse_expr() {
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 1.0,
+            "b" => 5.0,
+        }.unwrap();
+        let parser = |s: &str| -> Option<f64> {
+            eval_number_with_context(s, &ctx).ok()
+        };
+
+        let test = "test a*b";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.is_none());
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "1");
+
+        let test = "test`formula a*b";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.unwrap() == "a*b");
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "1");
+
+        let test = "test a*b mm";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.is_none());
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "mm");
+
+        let test = "test`formula a*b mm";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.unwrap() == "a*b");
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "mm");
 
     }
 }

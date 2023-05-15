@@ -8,6 +8,7 @@ Physics:
 
 * `radiation_reaction` (optional, default = `true`): set to `false` to disable electron/positron recoil on photon emission.
 * `pair_creation` (optional, default = `true`): set to `false` to disable photon tracking and electron-positron pair creation.
+* `pol_resolved` (optional, default = `false`): enable the use of photon-polarization-resolved rates, which improves simulation accuracy by approximately 20%.
 * `classical` (optional, default = `false`): use the classical photon emission rate. If `radiation_reaction` is enabled, electrons and positrons lose energy smoothly, following the Landau-Lifshitz equation. Disables pair creation unless otherwise specified.
 A modified classical model can be chosen by setting `classical` to `gaunt_factor_corrected`.
 In this model the instantaneous radiated power is reduced by the Gaunt factor g(χ) and the upper bound on the photon spectrum corrected to the electron energy.
@@ -61,6 +62,11 @@ The distribution (if normal) may be optionally truncated by specifying `[radius,
 * `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
 The offsets are defined with respect to the beam propagation axis: the first two components are perpendicular to this axis and the third is parallel to it.
 For example, if the offset is `[0.0, 0.0, delta > 0]` and the collision angle is `0.0`, the peak of the laser reaches the focal plane before the beam centroid does; the collision, while perfectly aligned in the perpendicular directions, is delayed by time `delta/(2c)`.
+* `stokes_pars` (optional, default = `[0.0, 0.0, 0.0]`): specifies the primary particles' polarization in terms of the three Stokes parameters `S_1`, `S_2` and `S_3` (equiv. `Q`, `U` and `V`).
+The basis is defined with respect to the `x`-`z` plane and the particle velocity:
+`S_1` is associated with linear polarization along x (`+1.0`) or y (`-1.0`); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
+For example, `[1.0, 0.0, 0.0]` loads particles that are polarized parallel to the laser electric field (if `laser:polarization` is `linear`).
+The default behaviour is to assume that the particles are unpolarized.
 
 ## output
 
@@ -108,6 +114,7 @@ The possible weight functions are:
 * `energy`: particle energy, in MeV
 * `pol_x`: the projection of the particle polarization along the global x-axis
 * `pol_y`: the projection of the particle polarization along the global y-axis
+* `helicity`: the projection of the particle polarization along its momentum
 
 The number of bins, or whether they should be log-scaled, is controlled by adding an integer or `log` *before* the weight specification.
 The weight function must be given explicitly in this case, e.g. `energy:(log;auto)`.
@@ -136,15 +143,39 @@ where `op` is one of `total`, `fraction`, `mean`, `variance`, `minimum` and `max
 
 For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds. The options `circmean`, `circvariance` and `circstd`, which compute the circular mean, variance and standard deviation respectively, are meaningful only for angular quantities. The circular variance is defined as $ 1- \langle R \rangle$, and the circular standard deviation as $\sqrt{-2\ln\langle R \rangle}$, where $\langle R \rangle$ is the mean resultant vector. This follows the definition from [Statistics of Directional Data; K.V. Mardia](https://doi.org/10.1016/C2013-0-07425-7).
 
+Expressions involving defined constants from the [constants](#constants) block can also be calculated and written to the 'stats.txt' file.  The identifier prefix is
+
+* `expression` (optional): list of specifiers
+
+The specifier must be one of:
+
+* ``name[`formula] expression``
+* ``name[`formula] expression unit``
+
+where `name` is a name for the expression being evaluated, `expression` is the combination of constants to be evaluated and `unit` is the unit of the expression result (it is up to the user to ensure this is correctly specified). There should be no whitespace in the expression. `` `formula`` is an optional tag to write the expression formula as well as the calculated value.
+
+For example, `init_energy initial_gamma*me*c^2/MeV MeV` would compute and write the value of this expression, in units of MeV, with name `init_energy` to the 'stats.txt' file, provided `initial_gamma` was specified in the [constants](#constants) block. The unit would also be printed as MeV. Adding the formula tag, ``init_energy`formula initial_gamma*me*c^2/MeV MeV``, will also write `initial_gamma*me*c^2/MeV` as a string to the 'stats.txt' file.
+
 ## constants
 
 Everywhere an integer or floating-point number is requested in the input file, a named value may be given instead, provided that its value is specified in this section.
 
-For example, `gamma: eta * 0.510999 / (2.0 * 1.5498e-6)` in the [beam](#beam) section would be accepted provided that `eta: 0.1` was given. Named constants can themselves be mathematical expressions, but they cannot depend on each other, or themselves.
+For example, `gamma: gamma0` in the [beam](#beam) section would be accepted provided that `gamma0` was appropriately defined.
+
+Entries in the constants block can be plain numbers, mathematical expressions, or functions of previously defined entries. For example,
+```yaml
+constants:
+  a0: 15.0
+  gamma0: 1000.0 / 0.511
+  max_angle: atan(a0 / gamma0)
+```
+would make the numerical values `a0 = 15.0`, `gamma = 1956.95` and `max_angle = 7.6649e-3` available throughout the input file.
+The block is parsed once, in order, so variables cannot be forward-defined.
+YAML syntax requires that keys are unique: in the case of a repeated variable, only the last definition will apply.
 
 ## Maths parser
 
-The code makes use of [meval](https://crates.io/crates/meval) when parsing the input file. In addition to the functions and constants this crate provides, opal provides:
+The code makes use of [evalexpr](https://crates.io/crates/evalexpr) when parsing the input file. In addition to the functions and constants this crate provides, Ptarmigan provides:
 
 * the physical constants `me`, `mp`, `c`, `e`: the electron mass, proton mass, speed of light and elementary charge, respectively, all in SI units.
 * the conversion constants `eV`, `keV`, `MeV`, `GeV`, `femto`, `pico`, `nano`, `milli`.

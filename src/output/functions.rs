@@ -84,6 +84,15 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "S_3" | "S3" => Some(
             (stokes_3 as ParticleOutput, Dimensionless)
         ),
+        "pol_x" | "pol_sigma" => Some(
+            (pol_x as ParticleOutput, Dimensionless)
+        ),
+        "pol_y" | "pol_pi" => Some(
+            (pol_y as ParticleOutput, Dimensionless)
+        ),
+        "helicity" => Some(
+            (weighted_by_helicity as ParticleOutput, Dimensionless)
+        ),
         _ => None,
     }
 }
@@ -191,27 +200,23 @@ pub fn interaction_count(pt: &Particle) -> f64 {
 }
 
 pub fn stokes_1(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[1]
-    } else {
-        0.0
-    }
+    pt.polarization()[1]
 }
 
 pub fn stokes_2(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[2]
-    } else {
-        0.0
-    }
+    pt.polarization()[2]
 }
 
 pub fn stokes_3(pt: &Particle) -> f64 {
-    if let Some(sv) = pt.polarization() {
-        sv[3]
-    } else {
-        0.0
-    }
+    pt.polarization()[3]
+}
+
+pub fn pol_x(pt: &Particle) -> f64 {
+    pt.polarization_along_x()
+}
+
+pub fn pol_y(pt: &Particle) -> f64 {
+    pt.polarization_along_y()
 }
 
 pub fn weighted_by_energy(pt: &Particle) -> f64 {
@@ -230,4 +235,8 @@ pub fn weighted_by_pol_x(pt: &Particle) -> f64 {
 
 pub fn weighted_by_pol_y(pt: &Particle) -> f64 {
     pt.polarization_along_y() * pt.weight()
+}
+
+pub fn weighted_by_helicity(pt: &Particle) -> f64 {
+    pt.polarization()[3] * pt.weight()
 }

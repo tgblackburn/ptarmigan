@@ -32,6 +32,7 @@ mod special_functions;
 mod output;
 mod input;
 mod pwmci;
+mod quadrature;
 
 use constants::*;
 use field::*;
@@ -66,6 +67,10 @@ struct CollideOptions {
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Use polarization-resolved pair creation rates
+    pol_resolved: bool,
+    /// Rotate Stokes vector in absence of pair creation
+    rotate_stokes_pars: bool,
     /// Use classical emission rates
     classical: bool,
     /// Correct classical spectrum using Gaunt factor
@@ -145,9 +150,9 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                 while field.contains(pt.position()) && pt.time() < options.t_stop && !has_decayed && options.tracking_photons {
                     let ell = pt.normalized_momentum();
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
-                    let pol = pt.polarization().unwrap_or_else(|| StokesVector::unpolarized());
+                    let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
-                    let (prob, frac, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
+                    let (prob, frac, pol_new, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
                     if let Some((q_e, q_p, a_eff)) = momenta {
                         let id = *current_id;
                         *current_id = *current_id + 2;
@@ -169,6 +174,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
+                    }
+
+                    if options.rotate_stokes_pars && options.pol_resolved {
+                        pt.with_polarization(pol_new);
                     }
 
                     pt.update_interaction_count(prob);
@@ -198,12 +207,12 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let a_rms = match pol { Polarization::Linear => a0 / consts::SQRT_2, Polarization::Circular => a0 };
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let pair_rate = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
+    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
-    if pair_rate.is_none() || photon_rate.is_none() {
+    if pair_rate == 0.0 || photon_rate.is_none() {
         1.0
     } else {
-        let ratio = photon_rate.unwrap() / pair_rate.unwrap();
+        let ratio = photon_rate.unwrap() / pair_rate;
         //println!("P_pair = {:.6e}, P_photon = {:.6e}, ratio = {:.3}", pair_rate.unwrap(), photon_rate.unwrap(), ratio);
         ratio.max(1.0)
     }
@@ -212,7 +221,8 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
 fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
     let chi = 2.0 * gamma * a0 * omega_mc2;
-    let pair_rate = lcfa::pair_creation::rate(chi, gamma);
+    let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
+    let pair_rate = lcfa::pair_creation::probability(ell, StokesVector::unpolarized(), chi, [1.0, 0.0, 0.0].into(), 1.0).0;
     let photon_rate = lcfa::photon_emission::rate(chi, gamma);
     photon_rate / pair_rate
 }
@@ -235,8 +245,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let raw_input = std::fs::read_to_string(&path)
         .map_err(|_| InputError::file())?;
     let mut input = Config::from_string(&raw_input)?;
-    //let mut input = Config::from_file(&path)?;
-    input.with_context("constants");
+    input.with_context("constants")?;
 
     let dt_multiplier = input.read("control:dt_multiplier").unwrap_or(1.0);
     let multiplicity: Option<usize> = input.read("control:select_multiplicity").ok();
@@ -275,6 +284,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
+    let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
+    let rotate_stokes_pars = input.read("control:rotate_stokes_pars")
+        .map_or(true, |val| {
+            if id == 0 { eprintln!("Warning: use of undocumented option control:rotate_stokes_pars, intended for debugging purposes only."); }
+            val
+        });
 
     let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
     let wavelength: f64 = input
@@ -445,6 +460,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    let sv = input.read::<Vec<f64>,_>("beam:stokes_pars")
+        // if missing, assume to be (0,0,0)
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(vec![0.0; 3]),
+            _ => Err(e),
+        })
+        .and_then(|v| match v.len() {
+            3 => {
+                let sv = StokesVector::new(1.0, v[0], v[1], v[2]);
+                if sv.dop() <= 1.0 {
+                    Ok(sv)
+                } else {
+                    eprintln!("Specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
+                    Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
+                }
+            },
+            _ => {
+                eprintln!("Particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
+                Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
+            }
+        })
+        ?;
+
     let ident: String = input.read("output:ident")
         .map(|s| {
             if s == "auto" {
@@ -563,6 +601,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    let statsexpr = input.read("stats:expression")
+        .map_or_else(|_| Ok(vec!{}), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| StatsExpression::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
+    
     let mut estats = input.read("stats:electron")
         .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
             strs.iter()
@@ -667,6 +712,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_collision_angle(angle)
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
+            .with_polarization(sv)
             .with_length(length);
 
         let builder = if normally_distributed {
@@ -718,6 +764,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             discard_bg_ph,
             rr,
             tracking_photons,
+            pol_resolved,
+            rotate_stokes_pars,
             classical,
             gaunt_factor,
         };
@@ -797,7 +845,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if id == 0 {
-            if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() {
+            if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() || !statsexpr.is_empty() {
                 use std::fs::File;
                 use std::io::Write;
                 let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 
@@ -810,6 +858,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     writeln!(file, "{}", stat)?;
                 }
                 for stat in &gstats {
+                    writeln!(file, "{}", stat)?;
+                }
+                for stat in &statsexpr {
                     writeln!(file, "{}", stat)?;
                 }
             }
@@ -852,6 +903,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("radiation_reaction")?.write(&rr)?
                     .new_dataset("classical")?.write(&classical)?
                     .new_dataset("pair_creation")?.write(&tracking_photons)?
+                    .new_dataset("pair_creation_is_pol_resolved")?.write(&pol_resolved)?
                     .new_dataset("lcfa")?.write(&using_lcfa)?
                     .new_dataset("rng_seed")?.write(&rng_seed)?
                     .new_dataset("increase_pair_rate_by")?.write(&pair_rate_increase)?
@@ -933,6 +985,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("collision_angle")?.with_unit("rad")?.write(&angle)?
                     .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
                     .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
+                    .new_dataset("polarization")?
+                        .with_unit("1")?
+                        .with_desc("Stokes parameters of the primary particles: I, Q, U, V")?
+                        .with_alias("polarisation")?
+                        .write(&sv)?
                     .new_dataset("transverse_distribution_is_normal")?.write(&normally_distributed)?
                     .new_dataset("longitudinal_distribution_is_normal")?.write(&true)?;
 
@@ -950,7 +1007,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
-                        pt.polarization().unwrap_or_else(|| [1.0, 0.0, 0.0, 0.0].into()),
+                        pt.polarization(),
                         pt.weight(),
                         pt.payload(),
                         pt.interaction_count(),

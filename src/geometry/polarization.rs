@@ -2,6 +2,7 @@
 
 use num_complex::Complex;
 use super::ThreeVector;
+use super::FourVector;
 
 #[cfg(feature = "hdf5-output")]
 use hdf5_writer::{Hdf5Type, Datatype};
@@ -49,7 +50,110 @@ impl StokesVector {
         }
     }
 
-    /// Projects the polarization of a particle, travelling along `dir`,
+    /// Returns the Stokes parameters if the basis is redefined in terms of
+    /// the principal axis `a`.
+    ///
+    /// `a` must be perpendicular to particle propagation direction `k`!
+    pub fn in_basis(&self, a: ThreeVector, k: ThreeVector) -> (StokesVector, f64, f64) {
+        // In the standard basis, e_1 is guaranteed to lie in the x-z
+        // plane and to be perpendicular to the propagation direction.
+        // So we need to rotate the basis by the angle
+        let k_mag = k[0].hypot(k[2]);
+        let a_mag = a.norm_sqr().sqrt();
+        let cos_theta = if k_mag == 0.0 {
+            // photon pointed along y => e_1 = (1,0,0)
+            a[0] / a_mag
+        } else {
+            // e_1 = (k3, 0, -k1) / |k|
+            (k[2] * a[0] - k[0] * a[2]) / (k_mag * a_mag)
+
+        };
+
+        // rotating from e_1 to a, RH or LH?
+        // calculate k.(e_1 x a), if positive, RH
+        let det = if k_mag == 0.0 {
+            -k[1] * a[2] + k[2] * a[1]
+        } else {
+            a[1] * (k[0].powi(2) + k[2].powi(2)) - k[1] * (a[0] * k[0] + a[2] * k[2])
+        };
+
+        // if positive, rotate basis by +theta and Stokes parameters by -2 theta
+        let sign = -det.signum();
+
+        let cos_theta = cos_theta.clamp(-1.0, 1.0);
+        let sin_theta = sign * (1.0 - cos_theta * cos_theta).sqrt();
+        let cos_2theta = cos_theta * cos_theta - sin_theta * sin_theta;
+        let sin_2theta = 2.0 * cos_theta * sin_theta;
+
+        let sv = Self {
+            i: self.i,
+            q: cos_2theta * self.q - sin_2theta * self.u,
+            u: sin_2theta * self.q + cos_2theta * self.u,
+            v: self.v,
+        };
+
+        (sv, cos_2theta, sin_2theta)
+    }
+
+    /// Returns the sine and cosine of the angle that rotates the LMA basis
+    /// vector e_1 into the global basis vector.
+    fn lma_basis_rotation(k: FourVector) -> (f64, f64) {
+        let k_minus = k[0] - k[3];
+        let cos_theta = (k[3] * k_minus - k[1].powi(2)) / (k_minus * k[1].hypot(k[3]));
+
+        // det = k · (e_LMA × e_g), ignoring positive factors as we only need the sign
+        let det = k[1] * k[2]; // k[0] * k[1] * k[2] / (k_minus * k[1].hypot(k[3]))
+        let sign = det.signum();
+
+        let cos_theta = cos_theta.clamp(-1.0, 1.0);
+        let sin_theta = sign * (1.0 - cos_theta * cos_theta).sqrt();
+
+        (sin_theta, cos_theta)
+    }
+
+    /// Returns the Stokes parameters in the standard LMA basis.
+    /// See [`from_lma_basis`](Self::from_lma_basis).
+    pub fn in_lma_basis(&self, k: FourVector) -> StokesVector {
+        // RH angle that rotates LMA basis to global basis...
+        let (sin_theta, cos_theta) = Self::lma_basis_rotation(k);
+        // Rotate Stokes parameters by 2 theta...
+        let cos_2theta = cos_theta * cos_theta - sin_theta * sin_theta;
+        let sin_2theta = 2.0 * cos_theta * sin_theta;
+
+        Self {
+            i: self.i,
+            q: cos_2theta * self.q - sin_2theta * self.u,
+            u: sin_2theta * self.q + cos_2theta * self.u,
+            v: self.v,
+        }
+    }
+
+    /// Returns the Stokes parameters in the global basis, where e_1 is
+    /// in the x-z plane:
+    /// ```text
+    ///   e_1_global = (k'_z, 0, -k'_x) / norm
+    /// ```
+    /// In the LMA, the Stokes parameters are defined w.r.t. to the orthonormal basis
+    /// ```text
+    ///   e_1 = x - k'_x (k' - omega' z) / (omega' * (omega' - k'_z))
+    /// ```
+    pub fn from_lma_basis(&self, k: FourVector) -> StokesVector {
+        // RH angle that rotates LMA basis to global basis...
+        let (sin_theta, cos_theta) = Self::lma_basis_rotation(k);
+        // Rotate Stokes parameters by -2 theta...
+        let sin_theta = -sin_theta;
+        let cos_2theta = cos_theta * cos_theta - sin_theta * sin_theta;
+        let sin_2theta = 2.0 * cos_theta * sin_theta;
+
+        Self {
+            i: self.i,
+            q: cos_2theta * self.q - sin_2theta * self.u,
+            u: sin_2theta * self.q + cos_2theta * self.u,
+            v: self.v,
+        }
+    }
+
+    /// Projects the polarization of a particle, travking along `dir`,
     /// onto the given `axis`
     pub fn project_onto(&self, dir: ThreeVector, axis: ThreeVector) -> f64 {
         // Degree of polarization
@@ -79,7 +183,7 @@ impl StokesVector {
 
         // Construct axes of the ellipse
         let (x, y) = {
-            let n = dir.normalize();
+            let n = dir;
             let mag = n[0].hypot(n[2]);
             let x: ThreeVector = if mag == 0.0 {
                 // so photon pointed along y
