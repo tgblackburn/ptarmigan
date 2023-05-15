@@ -8,6 +8,7 @@ Added:
 
 * Photon-polarization dependence of pair creation rates.
 * Input file parsing: variables in the `constants` block can depend on previously defined variables.
+* Evaluate and print math expressions in stats file.
 
 Fixed:
 

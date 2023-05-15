@@ -845,7 +845,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if id == 0 {
-            if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() {
+            if !estats.is_empty() || !gstats.is_empty() || !pstats.is_empty() || !statsexpr.is_empty() {
                 use std::fs::File;
                 use std::io::Write;
                 let filename = format!("{}{}{}{}stats.txt", output_dir, if output_dir.is_empty() {""} else {"/"}, 

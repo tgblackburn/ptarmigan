@@ -9,7 +9,7 @@ use no_mpi::*;
 
 use crate::particle::*;
 
-use super::{ParticleOutput, OutputError, functions, ParticleOutputType};
+use super::{ParticleOutput, OutputError, functions};
 use super::ParticleOutputType::*;
 
 /// Ways an array of particle data can be reduced to
@@ -546,13 +546,13 @@ mod tests {
 
     #[test]
     fn parse_expr() {
-        use meval::Context;
-        let mut ctx = Context::new();
-        ctx.var("a", 1.0);
-        ctx.var("b", 5.0);
-
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 1.0,
+            "b" => 5.0,
+        }.unwrap();
         let parser = |s: &str| -> Option<f64> {
-            s.parse::<meval::Expr>().and_then(|e| e.eval_with_context(&ctx)).ok()
+            eval_number_with_context(s, &ctx).ok()
         };
 
         let test = "test a*b";
