@@ -88,9 +88,12 @@ fn ceiling_double_diff_partial_rate(a: f64, eta: f64, dj: &mut DoubleBessel) -> 
             let theta = 0.0;
             // search max(x_min, 0.4) < s / s_max < 1.0
             let x_min = (4.0 * (n as f64) * eta / (3.0 * a * a + 4.0 * (n as f64) * eta)).max(0.4);
-            (1..=32)
+            // in 2 < a < 5, harmonic cutoff is now ~twice as large as in v1.2.1
+            let n_max = sum_limit(a, eta);
+            let n = if n < n_max / 2 { 32 } else { 64 };
+            (1..=n)
                 .map(|i| {
-                    let s = smax * (x_min + (1.0 - x_min) * (i as f64) / 32.0);
+                    let s = smax * (x_min + (1.0 - x_min) * (i as f64) / (n as f64));
                     double_diff_partial_rate(a, eta, s, theta, dj)
                 })
                 .reduce(f64::max)
