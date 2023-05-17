@@ -5,7 +5,7 @@ use rand::prelude::*;
 use crate::special_functions::*;
 use crate::pwmci;
 use crate::geometry::StokesVector;
-use super::{GAUSS_16_NODES, GAUSS_16_WEIGHTS, GAUSS_32_NODES, GAUSS_32_WEIGHTS};
+use crate::quadrature::*;
 
 mod rate_table;
 mod cdf_table;
@@ -408,8 +408,8 @@ fn partial_rate(n: i32, a: f64, eta: f64) -> (f64, f64) {
 #[allow(unused)]
 fn sum_limit(a: f64, eta: f64) -> i32 {
     let m = 3.0 - 0.4 * eta.powf(0.25);
-    let n_max = 6.0 + 2.5 * a.powf(m);
-    // let n_max = 5.0 * (1.0 + 2.0 * a * a);
+    // let n_max = 6.0 + 2.5 * a.powf(m);
+    let n_max = 6.0 * (1.0 + a * a) + 2.0 * a.powf(m);
     n_max.ceil() as i32
 }
 
@@ -1114,7 +1114,7 @@ mod tests {
         const A_DENSITY: usize = 20; // points per order of magnitude
         const ETA_DENSITY: usize = 20;
         const N_COLS: usize = 61; // pts in a0 direction
-        const N_ROWS: usize = 61; // pts in eta direction
+        const N_ROWS: usize = 68; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
@@ -1138,17 +1138,19 @@ mod tests {
             }
         }
 
-        let pts: Vec<(usize, usize, f64, [[f64; 2]; 16])> = pool.install(|| {
-            pts.into_par_iter()
+        let pts: Vec<(usize, usize, f64, [[f64; 2]; 16])> = pts.into_iter()
             .map(|(i, j, a, eta, n_max)| {
+                let mut rates: Vec<[f64; 2]> = pool.install(|| {
+                    (1..=n_max).into_par_iter()
+                        .map(|n| [n as f64, partial_rate(n, a, eta).0])
+                        .collect()
+                });
+
                 let mut cumsum = 0.0;
-                let rates: Vec<[f64; 2]> = (1..=n_max)
-                    .map(|n| {
-                        let (rate, _) = partial_rate(n, a, eta);
-                        cumsum = cumsum + rate;
-                        [n as f64, cumsum]
-                    })
-                    .collect();
+                for [_, pr] in rates.iter_mut() {
+                    cumsum += *pr;
+                    *pr = cumsum;
+                }
 
                 // Total rate
                 let rate: f64 = rates.last().unwrap()[1];
@@ -1188,11 +1190,10 @@ mod tests {
                     }
                 }
 
-                println!("LP NLC [{:>3}]: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", rayon::current_thread_index().unwrap_or(1),eta, a, rate.ln());
+                println!("LP NLC: eta = {:.3e}, a = {:.3e}, ln(rate) = {:.6e}", eta, a, rate.ln());
                 (i, j, rate, cdf)
             })
-            .collect()
-        });
+            .collect();
 
         for (i, j, rate, _) in &pts {
             table[*i][*j] = *rate;

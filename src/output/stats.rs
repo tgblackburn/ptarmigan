@@ -22,6 +22,9 @@ enum Reduction {
     Variance,
     Minimum,
     Maximum,
+    CircMean,
+    CircVar,
+    CircStdDev,
 }
 
 impl fmt::Display for Reduction {
@@ -32,9 +35,20 @@ impl fmt::Display for Reduction {
             Reduction::Mean => "mean",
             Reduction::Variance => "variance",
             Reduction::Minimum => "minimum",
-            Reduction::Maximum => "maximum"
+            Reduction::Maximum => "maximum",
+            Reduction::CircMean => "circmean",
+            Reduction::CircVar => "circvar",
+            Reduction::CircStdDev => "circstd",
         };
         write!(f, "{}", name)
+    }
+}
+
+impl Reduction {
+    /// Returns `true` if this Reduction can only be applied to angular variables
+    fn is_circular_stat(&self) -> bool {
+        use Reduction::*;
+        matches!(self, CircMean | CircVar | CircStdDev)
     }
 }
 
@@ -95,7 +109,7 @@ impl SummaryStatistic {
         let filter = if words.len() == 5 {
             let tmp = functions::identify(words[3]);
             if tmp.is_none() || words[2] != "for" {
-                return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()));
+                return Err(OutputError::conversion(spec, "summary statistic"));
             } else {
                 let unit = match tmp.unwrap().1 {
                     Dimensionless => "1",
@@ -117,7 +131,7 @@ impl SummaryStatistic {
         // Are we checking for a range?
         let (min, max) = if words.len() == 3 || words.len() == 5 {
             if range.is_none() || words[words.len() - 1] != "in" {
-                return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()))
+                return Err(OutputError::conversion(spec, "summary statistic"));
             }
             let range = range.unwrap();
             let rs: Vec<&str> = range[1..range.len()-1].split(';').collect();
@@ -144,7 +158,7 @@ impl SummaryStatistic {
                 // this means that variable is also the filter function.
                 (min.unwrap(), max.unwrap())
             } else {
-                return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()))
+                return Err(OutputError::conversion(spec, "summary statistic"));
             }
         } else {
             (std::f64::NEG_INFINITY, std::f64::INFINITY)
@@ -162,15 +176,19 @@ impl SummaryStatistic {
                     "variance" | "var" => Reduction::Variance,
                     "minimum" | "min" => Reduction::Minimum,
                     "maximum" | "max" => Reduction::Maximum,
-                    _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
+                    "circmean" | "cmean" => Reduction::CircMean,
+                    "circvariance" | "cvariance" | "circvar" | "cvar" => Reduction::CircVar,
+                    "circstd" | "cstd" => Reduction::CircStdDev,
+                    _ => return Err(OutputError::conversion_explained(spec, "summary statistic", "the requested operation is not recognised")),
                 };
+
 
                 // The second word can be either 'variable' or 'variable`weight'
                 let varstr: Vec<&str> = words[1].split('`').collect();
                 let (varstr, weightstr) = match varstr.len() {
                     1 => (varstr[0], "unit"),
                     2 => (varstr[0], varstr[1]),
-                    _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned())),
+                    _ => return Err(OutputError::conversion(spec, "summary statistic")),
                 };
 
                 let variable = if let Some((f, f_type)) = functions::identify(varstr) {
@@ -181,6 +199,7 @@ impl SummaryStatistic {
                         Energy => "MeV",
                         Momentum => "MeV/c",
                     };
+
                     // unit is associated with the function at the moment - but needs to
                     // be consistent with op
                     let unit = match op {
@@ -190,15 +209,22 @@ impl SummaryStatistic {
                         } else {
                             format!("({})^2", unit)
                         },
+                        Reduction::CircVar => "1".to_owned(),
                         _ => unit.to_owned(),
                     };
-                    Operator {
-                        f: f,
-                        name: varstr.to_owned(),
-                        unit: unit,
+
+                    // CircMean, CircVar, CircStdDev can only be applied to angles
+                    if op.is_circular_stat() && f_type != Angle {
+                        return Err(OutputError::conversion_explained(spec, "summary statistic", "circular stats can only be applied to angles"));
+                    } else {
+                        Operator {
+                            f,
+                            name: varstr.to_owned(),
+                            unit,
+                        }
                     }
                 } else {
-                    return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()));
+                    return Err(OutputError::conversion_explained(spec, "summary statistic", "the requested variable is not recognised"));
                 };
 
                 let weight = if let Some((f, f_type)) = functions::identify(weightstr) {
@@ -215,12 +241,12 @@ impl SummaryStatistic {
                         unit: unit.to_owned(),
                     }
                 } else {
-                    return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()));
+                    return Err(OutputError::conversion(spec, "summary statistic"));
                 };
 
                 (op, variable, weight)
             }
-            _ => return Err(OutputError::Conversion(spec.to_owned(), "summary statistic".to_owned()))
+            _ => return Err(OutputError::conversion(spec, "summary statistic"))
         };
 
         // if the range limits are something other than -inf and inf,
@@ -365,6 +391,32 @@ impl SummaryStatistic {
         max
     }
 
+    /// Returns an array of: the mean cosine, the mean sine,
+    /// and the number of elements that satisfy the filter.
+    fn directmean(&self, pt: &[Particle]) -> [f64; 3] {
+        let mut xbar = 0.0;
+        let mut ybar = 0.0;
+        let mut count = 0.0;
+        for p in pt {
+            let within_bounds = if self.filter.is_some() {
+                let f = self.filter.as_ref().unwrap().f;
+                f(p) > self.min && f(p) < self.max
+            } else {
+                true
+            };
+        
+            if within_bounds {
+                let val = (self.variable.f)(p);
+                let weight = (self.weight.f)(p);
+                xbar += weight * f64::cos(val);
+                ybar += weight * f64::sin(val);
+                count += weight;
+            }
+        }
+
+        [xbar, ybar, count]
+
+    }
 
     pub fn evaluate(&mut self, world: &impl Communicator, pt: &[Particle], name: &str) {
         self.name = name.to_owned();
@@ -404,6 +456,35 @@ impl SummaryStatistic {
                 world.all_reduce_into(&local, &mut global, SystemOperation::max());
                 global
             },
+            Reduction::CircMean => {
+                let local = self.directmean(pt);
+                let mut global = [0_f64; 3];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                // <θ> = arctan(<Y> / <X>)
+                means[1].atan2(means[0])
+            },
+            Reduction::CircVar => {
+                let local = self.directmean(pt);
+                let mut global = [0_f64; 3];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                let r_length = means[0].hypot(means[1]); // resultant length, <R>
+                // Circular variance = 1 - <R>
+                1.0 - r_length
+            },
+            Reduction::CircStdDev => {
+                let local = self.directmean(pt);
+                let mut global = [0_f64; 3];
+                world.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+                // Get <X> and <Y>
+                let means = [global[0]/global[2], global[1]/global[2]];
+                let r_length = means[0].hypot(means[1]); // resultant length, <R>
+                // Circular standard deviation = sqrt(-2 ln<R>)
+                ( -2.0 * r_length.ln() ).sqrt()
+            }
         };
     }
 }
@@ -432,17 +513,77 @@ impl fmt::Display for SummaryStatistic {
     }
 }
 
+/// Calculates the value given by a function of constant values.
+pub struct StatsExpression {
+    name: String,
+    value: f64,
+    formula: Option<String>,
+    unit: String,
+}
+
+impl StatsExpression {
+    /// Parses a string representation of a stats expression. If no unit is given,
+    /// defaults to '1' (dimensionless). If a formula is provided, it must contain
+    /// no whitespace.
+    /// `
+    ///     [name] [expression]
+    ///     [name] [expression] [unit]
+    ///     [name]`formula [expression]
+    ///     [name]`formula [expression] [unit]
+    /// `
+    pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
+        let vstr: Vec<&str> = spec.split_whitespace().collect();
+        if vstr.len() < 2 {
+            return Err(OutputError::conversion(spec, "stats expression"));
+        }
+        else {
+            let (exprname, form) = if vstr[0].contains("`") {
+                (vstr[0].split("`").collect::<Vec<&str>>()[0].to_owned(),
+                Some(vstr[1].to_owned())
+                )
+            }
+            else {
+                (vstr[0].to_owned(), None)
+            };
+
+            Ok(StatsExpression {
+                name: exprname,
+                value: parser(&vstr[1].to_owned()).unwrap(),
+                formula: form,
+                unit: vstr.get(2).map_or("1", |&s| s).to_owned()
+            })
+        }
+    }
+}
+
+impl fmt::Display for StatsExpression {
+    /// Formats the stats expression as a string.
+    /// `
+    ///     "- expr quantum_chi = 0.1 [1]"
+    ///     "- expr synchcut (0.44*initial_gamma*me_MeV*chi) = 72.34 [MeV]"
+    /// `
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let Some(formula) = &self.formula {
+            write!(f, "expr: {} ({}) = {:.6e} [{}]", self.name, formula, self.value, self.unit)
+        }
+        else {
+            write!(f, "expr: {} = {:.6e} [{}]", self.name, self.value, self.unit)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn parsing() {
-        use meval::Context;
-        let mut ctx = Context::new();
-        ctx.var("a", 2.0);
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 2.0,
+        }.unwrap();
         let parser = |s: &str| -> Option<f64> {
-            s.parse::<meval::Expr>().and_then(|e| e.eval_with_context(&ctx)).ok()
+            eval_number_with_context(s, &ctx).ok()
         };
 
         let test = "mean energy in (1.0; auto)";
@@ -463,6 +604,9 @@ mod tests {
 
         let test = "frac pelican in (0.0; 1.0)";
         let stat = SummaryStatistic::load(test, &parser);
+        if let Err(ref e) = stat {
+            println!("Got stat = {}", e);
+        }
         assert!(stat.is_err());
 
         let test = "frac number for p_perp in (auto; 100.0)";
@@ -480,6 +624,84 @@ mod tests {
         assert!(stat.filter.is_some());
         assert_eq!(stat.min, 2.0 / 3.0);
         assert_eq!(stat.max, 1000.0);
+
+        let test = "circmean angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircMean);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
+
+        let test = "circvar angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircVar);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
+
+        let test = "cstd angle_x`energy";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::CircStdDev);
+        assert!(stat.filter.is_none());
+        assert!(stat.weight.name == "energy");
+        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.max, std::f64::INFINITY);
+
+        let test = "circvar energy";
+        let stat = SummaryStatistic::load(test, &parser);
+        if let Err(ref e) = stat {
+            println!("Got stat = {}", e);
+        }
+        assert!(stat.is_err());
+    }
+
+    #[test]
+    fn parse_expr() {
+        use evalexpr::*;
+        let ctx = context_map! {
+            "a" => 1.0,
+            "b" => 5.0,
+        }.unwrap();
+        let parser = |s: &str| -> Option<f64> {
+            eval_number_with_context(s, &ctx).ok()
+        };
+
+        let test = "test a*b";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.is_none());
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "1");
+
+        let test = "test`formula a*b";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.unwrap() == "a*b");
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "1");
+
+        let test = "test a*b mm";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.is_none());
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "mm");
+
+        let test = "test`formula a*b mm";
+        let spec = StatsExpression::load(test, &parser).unwrap();
+        println!("Got stats expression -> {}", spec);
+        assert!(spec.name == "test");
+        assert!(spec.formula.unwrap() == "a*b");
+        assert_eq!(spec.value, 5.0);
+        assert!(spec.unit == "mm");
 
     }
 }

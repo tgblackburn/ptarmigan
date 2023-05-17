@@ -1,6 +1,6 @@
 use rand::prelude::*;
 use rand_distr::{Exp1, StandardNormal};
-use crate::geometry::{ThreeVector, FourVector};
+use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use super::{Species, Particle};
 use super::dstr::RadialDistribution;
 
@@ -21,6 +21,7 @@ pub struct BeamBuilder {
     rms_div: f64,
     initial_z: f64,
     offset: ThreeVector,
+    pol: StokesVector,
 }
 
 impl BeamBuilder {
@@ -41,6 +42,7 @@ impl BeamBuilder {
             rms_div: 0.0,
             initial_z,
             offset: ThreeVector::new(0.0, 0.0, 0.0),
+            pol: StokesVector::unpolarized(),
         }
     }
 
@@ -125,6 +127,13 @@ impl BeamBuilder {
         }
     }
 
+    pub fn with_polarization(&self, sv: StokesVector) -> Self {
+        BeamBuilder {
+            pol: sv,
+            ..*self
+        }
+    }
+
     pub fn build<R: Rng>(&self, rng: &mut R) -> Vec<Particle> {
         let normal_espec = self.normal_espec.expect("primary energy spectrum not specified");
         (0..self.num).into_iter()
@@ -190,6 +199,7 @@ impl BeamBuilder {
 
                 Particle::create(self.species, r)
                     .with_normalized_momentum(u)
+                    .with_polarization(self.pol)
                     .with_optical_depth(rng.sample(Exp1))
                     .with_weight(self.weight)
                     .with_id(i as u64)

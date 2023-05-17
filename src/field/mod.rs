@@ -117,6 +117,7 @@ pub trait Field {
     /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
     /// returning the probability that it occurs in the specified interval `dt` and,
     /// if so, the fraction of the photon that decays, the
+    /// new Stokes parameters of the photon, the
     /// the momentum of the electron and positron, and the effective
     /// a0 of the interaction.
     ///
@@ -124,7 +125,7 @@ pub trait Field {
     /// by the given factor, increasing the statistics for what would
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>);
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>);
 
     /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
     /// sufficiently distant from the laser so as not to be affected by it.

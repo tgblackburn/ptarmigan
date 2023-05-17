@@ -159,11 +159,11 @@ impl Field for FastPlaneWave {
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, _pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);
-        (prob, frac, momenta.map(|(p1, p2)| (p1, p2, a)))
+        let (prob, frac, pol_new, momenta) = FastFocusedLaser::create_pair(ell, pol, E, B, dt, rng, rate_increase);
+        (prob, frac, pol_new, momenta.map(|(p1, p2)| (p1, p2, a)))
     }
 
     fn ideal_initial_z(&self) -> f64 {

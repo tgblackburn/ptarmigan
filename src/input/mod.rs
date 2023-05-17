@@ -1,11 +1,9 @@
 //! Parse input configuration file
 
-// use std::fmt;
-// use std::error::Error;
 use std::path::Path;
 use std::ops::Add;
 use yaml_rust::{YamlLoader, yaml::Yaml};
-use meval::Context;
+use evalexpr::*;
 
 use crate::constants::*;
 
@@ -20,12 +18,12 @@ pub use timing::*;
 /// Represents the input configuration, which defines values
 /// for simulation parameters, and any automatic values
 /// for those parameters.
-pub struct Config<'a> {
+pub struct Config {
     input: Yaml,
-    ctx: Context<'a>,
+    ctx: HashMapContext,
 }
 
-impl<'a> Config<'a> {
+impl Config {
     /// Loads a configuration file.
     /// Fails if the file cannot be opened or if it is not
     /// YAML-formatted.
@@ -47,7 +45,7 @@ impl<'a> Config<'a> {
 
         Ok(Config {
             input: input.clone(),
-            ctx: Context::new(),
+            ctx: HashMapContext::new(),
         })
     }
 
@@ -55,78 +53,88 @@ impl<'a> Config<'a> {
     /// and keywords.
     /// Also loads and evaluates mathematical expressions
     /// that are given in the specified `section`.
-    pub fn with_context(&mut self, section: &str) -> &mut Self {
+    pub fn with_context(&mut self, section: &str) -> Result<&mut Self, InputError> {
+        use helper::context_function;
         // Default constants and plasma-related functions
 
-        let gauss_pulse_re = |args: &[f64]| -> f64 {
-            let t = args[0];
-            let x = args[1];
-            let omega = args[2];
-            let sigma = args[3];
-            let phi = omega * (t - x/SPEED_OF_LIGHT);
-            let carrier = phi.sin() + phi * phi.cos() / sigma.powi(2);
-            let envelope = (-phi.powi(2) / (2.0 * sigma.powi(2))).exp();
-            carrier * envelope
-        };
+        let mut ctx = context_map! {
+            "m" => ELECTRON_MASS,
+            "me" => ELECTRON_MASS,
+            "mp" => PROTON_MASS,
+            "c" => SPEED_OF_LIGHT,
+            "e" => ELECTRON_CHARGE,
+            "qe" => ELECTRON_CHARGE,
+            "eV" => ELEMENTARY_CHARGE,
+            "keV" => 1.0e3 * ELEMENTARY_CHARGE,
+            "MeV" => 1.0e6 * ELEMENTARY_CHARGE,
+            "GeV" => 1.0e9 * ELEMENTARY_CHARGE,
+            "femto" => 1.0e-15,
+            "pico" => 1.0e-12,
+            "nano" => 1.0e-9,
+            "micro" => 1.0e-6,
+            "milli" => 1.0e-3,
+            "pi" => std::f64::consts::PI,
+            "degree" => std::f64::consts::PI / 180.0,
+        }.unwrap();
 
-        let gauss_pulse_im = |args: &[f64]| -> f64 {
-            let t = args[0];
-            let x = args[1];
-            let omega = args[2];
-            let sigma = args[3];
-            let phi = omega * (t - x/SPEED_OF_LIGHT);
-            let carrier = phi.cos() - phi * phi.sin() / sigma.powi(2);
-            let envelope = (-phi.powi(2) / (2.0 * sigma.powi(2))).exp();
-            carrier * envelope
-        };
+        context_function!(ctx, "sqrt",   f64::sqrt);
+        context_function!(ctx, "cbrt",   f64::cbrt);
+        context_function!(ctx, "abs",    f64::abs);
+        context_function!(ctx, "exp",    f64::exp);
+        context_function!(ctx, "ln",     f64::ln);
+        context_function!(ctx, "sin",    f64::sin);
+        context_function!(ctx, "cos",    f64::cos);
+        context_function!(ctx, "tan",    f64::tan);
+        context_function!(ctx, "asin",   f64::asin);
+        context_function!(ctx, "acos",   f64::acos);
+        context_function!(ctx, "atan",   f64::atan);
+        context_function!(ctx, "atan2",  f64::atan2, 2);
+        context_function!(ctx, "sinh",   f64::sinh);
+        context_function!(ctx, "cosh",   f64::cosh);
+        context_function!(ctx, "tanh",   f64::tanh);
+        context_function!(ctx, "asinh",  f64::asinh);
+        context_function!(ctx, "acosh",  f64::acosh);
+        context_function!(ctx, "atanh",  f64::atanh);
+        context_function!(ctx, "floor",  f64::floor);
+        context_function!(ctx, "ceil",   f64::ceil);
+        context_function!(ctx, "round",  f64::round);
+        context_function!(ctx, "signum", f64::signum);
 
-        self.ctx
-            .var("m", ELECTRON_MASS)
-            .var("me", ELECTRON_MASS)
-            .var("mp", PROTON_MASS)
-            .var("c", SPEED_OF_LIGHT)
-            .var("e", ELEMENTARY_CHARGE)
-            .var("qe", ELECTRON_CHARGE)
-            .var("eV", ELEMENTARY_CHARGE)
-            .var("keV", 1.0e3 * ELEMENTARY_CHARGE)
-            .var("MeV", 1.0e6 * ELEMENTARY_CHARGE)
-            .var("GeV", 1.0e9 * ELEMENTARY_CHARGE)
-            .var("femto", 1.0e-15)
-            .var("pico", 1.0e-12)
-            .var("nano", 1.0e-9)
-            .var("micro", 1.0e-6)
-            .var("milli", 1.0e-3)
-            .var("degree", std::f64::consts::PI / 180.0)
-            .func3("step", |x, min, max| if x >= min && x < max {1.0} else {0.0})
-            .func3("gauss", |x, mu, sigma| (-(x - mu).powi(2) / (2.0 * sigma.powi(2))).exp())
-            .func("critical", |omega| VACUUM_PERMITTIVITY * ELECTRON_MASS * omega.powi(2) / ELEMENTARY_CHARGE.powi(2))
-            .funcn("gauss_pulse_re", gauss_pulse_re, 4)
-            .funcn("gauss_pulse_im", gauss_pulse_im, 4);
+        context_function!(ctx, "step",     |x: f64, min: f64, max: f64| {if x >= min && x < max {1.0} else {0.0}}, 3);
+        context_function!(ctx, "gauss",    |x: f64, mu: f64, sigma: f64| (-(x - mu).powi(2) / (2.0 * sigma.powi(2))).exp(), 3);
+        context_function!(ctx, "critical", |omega: f64| VACUUM_PERMITTIVITY * ELECTRON_MASS * omega.powi(2) / ELEMENTARY_CHARGE.powi(2));
+
+        self.ctx = ctx;
 
         // Read in from 'constants' block if it exists
         if self.input[section].is_badvalue() {
-            return self;
+            return Ok(self);
         }
 
-        let tmp = self.ctx.clone(); // a constant cannot depend on other constants yet...
-        //println!("{:#?}", self.input[section].as_hash());
-
         for (a, b) in self.input[section].as_hash().unwrap() {
-            //println!("{:?} {:?}", a, b);
-            match (a, b) {
-                (Yaml::String(s), Yaml::Real(v)) => {
-                    if let Ok(num) = v.parse::<f64>() {self.ctx.var(s, num);}
-                },
-                (Yaml::String(s), Yaml::String(v)) => {
-                    if let Ok(expr) = v.parse::<meval::Expr>() {
-                        if let Ok(num) = expr.eval_with_context(&tmp) {self.ctx.var(s, num);}
-                    }
-                },
-                _ => ()
+            // grab the value, if possible
+            let (key, value) = match (a, b) {
+                (Yaml::String(k), Yaml::Integer(i)) => (Some(k), Some(*i as f64)),
+                (Yaml::String(k), Yaml::Real(s)) => (Some(k), s.parse::<f64>().ok()),
+                (Yaml::String(k), Yaml::String(s)) => (Some(k), eval_number_with_context(s, &self.ctx).ok()),
+                _ => (None, None),
+            };
+
+            // insert it into the context so it's available for the next read
+            if let Some(v) = value {
+                let key = key.unwrap(); // if value.is_some() so is key
+                self.ctx.set_value(key.clone(), Value::from(v))
+                    .map_err(|_| {
+                        eprintln!("Failed to insert {} = {} from constants block into context.", key, v);
+                        InputError::conversion(section, key)
+                    })?
+            } else if let Some(k) = key {
+                // found a key, value pair but parsing failed
+                Err(InputError::conversion(section, k))?
             }
         }
 
-        self
+        Ok(self)
     }
 
     /// Locates a key-value pair in the configuration file and attempts
@@ -153,16 +161,29 @@ impl<'a> Config<'a> {
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of a single variable `arg`.
     #[allow(unused)]
-    pub fn func<S: AsRef<str>>(&'a self, path: S, arg: S) -> Result<impl Fn(f64) -> f64 + 'a, InputError> {
+    pub fn func<'a, S: AsRef<str> + 'a>(&'a self, path: S, arg: S) -> Result<impl Fn(f64) -> f64 + 'a, InputError> {
         // get the field, if it exists
         let s: String = self.read(&path)?;
-        // Now try conversion:
-        let expr = s
-            .parse::<meval::Expr>()
+
+        let tree = build_operator_tree(&s)
             .map_err(|_| InputError::conversion(path.as_ref(), &s))?;
-        let func = expr
-            .bind_with_context(&self.ctx, arg.as_ref())
-            .map_err(|_| InputError::conversion(path.as_ref(), &s))?;
+
+        // walk tree and verify there are no missing identifiers, apart from 'arg'
+        for var in tree.iter_read_variable_identifiers() {
+            if var == arg.as_ref() || self.ctx.iter_variable_names().find(|id| var == id).is_some() {
+                continue;
+            } else {
+                return Err(InputError::conversion(path.as_ref(), &s))
+            }
+        }
+
+        let func = move |x| {
+            let name = arg.as_ref().to_owned();
+            let mut ctx = self.ctx.clone();
+            ctx.set_value(name, Value::from(x)).unwrap();
+            tree.eval_number_with_context(&ctx).unwrap()
+        };
+
         Ok(func)
     }
 
@@ -179,10 +200,7 @@ impl<'a> Config<'a> {
     /// where 'density' is specified in the input file.
     #[allow(unused)]
     pub fn evaluate<S: AsRef<str>>(&self, arg: S) -> Option<f64> {
-        arg.as_ref()
-            .parse::<meval::Expr>()
-            .and_then(|expr| expr.eval_with_context(&self.ctx))
-            .ok()
+        eval_number_with_context(arg.as_ref(), &self.ctx).ok()
     }
 
     /// Locates a key-value pair in the configuration file and attempts
@@ -229,6 +247,45 @@ impl<'a> Config<'a> {
     }
 }
 
+mod helper {
+    macro_rules! context_function {
+        ($ctx:expr, $name:literal, $func:expr) => {
+            $ctx.set_function(
+                $name.to_string(),
+                Function::new(|arg| {
+                    let x = arg.as_number()?;
+                    Ok(Value::Float($func(x)))
+                })
+            ).unwrap()
+        };
+        ($ctx:expr, $name:literal, $func:expr, 2) => {
+            $ctx.set_function(
+                $name.to_string(),
+                Function::new(|arg| {
+                    let arg = arg.as_fixed_len_tuple(2)?;
+                    let x = arg[0].as_number()?;
+                    let y = arg[1].as_number()?;
+                    Ok(Value::Float($func(x, y)))
+                })
+            ).unwrap()
+        };
+        ($ctx:expr, $name:literal, $func:expr, 3) => {
+            $ctx.set_function(
+                $name.to_string(),
+                Function::new(|arg| {
+                    let arg = arg.as_fixed_len_tuple(3)?;
+                    let x = arg[0].as_number()?;
+                    let y = arg[1].as_number()?;
+                    let z = arg[2].as_number()?;
+                    Ok(Value::Float($func(x, y, z)))
+                })
+            ).unwrap()
+        };
+    }
+
+    pub(super) use context_function;
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts;
@@ -249,7 +306,8 @@ mod tests {
           s: [0.0, none]
 
         constants:
-          a: 2.0 * pi
+          N: 2.0
+          a: N * pi
           b: 17.0
           y: 1.0
 
@@ -260,7 +318,7 @@ mod tests {
         ";
 
         let mut config = Config::from_string(&text).unwrap();
-        config.with_context("constants");
+        config.with_context("constants").unwrap();
 
         // Plain f64
         let dx: f64 = config.read("control:dx").unwrap();
@@ -281,6 +339,9 @@ mod tests {
         // Function of one variable
         let ne = config.func("control:ne", "x").unwrap();
         assert_eq!(ne(0.6), (2.0 * consts::PI * 0.6).sin());
+
+        let ne = config.func("control:ne", "y");
+        assert!(ne.is_err());
 
         // array of f64
         let r: Vec<f64> = config.read("extra:r").unwrap();

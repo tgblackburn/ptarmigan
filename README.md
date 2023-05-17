@@ -32,6 +32,8 @@ cargo build --release --features with-mpi,hdf5-output [-j NUM_THREADS]
 
 The Ptarmigan changelog can be found [here](docs/changelog.md).
 
+Instructions for building the code on Windows can be found [here](docs/win10_build_guide.md).
+
 ## Specify problem
 
 Ptarmigan takes as its single argument the path to a YAML file describing the input configuration. Output is automatically written to the same directory as this file. The inputs for some test problems can be found in [examples](examples). Starting from scratch, the input needs to contain the following sections:

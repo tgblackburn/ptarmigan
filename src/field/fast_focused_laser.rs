@@ -298,33 +298,44 @@ impl FastFocusedLaser {
     /// magnetic field `B`.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn create_pair<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector)>) {
-        let beta = ThreeVector::from(u).normalize();
-        let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
-        let chi = if E_rf_sqd > 0.0 {
-            u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
+    pub fn create_pair<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVector, B: ThreeVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector)>) {
+        let n = ThreeVector::from(u).normalize();
+
+        // transverse "acceleration"
+        let a_perp = E - (E * n) * n + SPEED_OF_LIGHT * n.cross(B);
+        let E_rf_sqd = a_perp.norm_sqr();
+
+        let (chi, prob, sv_new) = if E_rf_sqd > 0.0 {
+            let chi = u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD;
+            let (prob, sv_new) = lcfa::pair_creation::probability(u, sv, chi, a_perp, dt);
+            (chi, prob, sv_new)
         } else {
-            0.0
+            (0.0, 0.0, sv)
         };
-        let prob = dt * lcfa::pair_creation::rate(chi, u[0]);
+
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {
             rate_increase
         };
+
         if rng.gen::<f64>() < prob * rate_increase {
-            let (gamma_p, cos_theta, _, _) = lcfa::pair_creation::sample(chi, u[0], rng);
-            let perp = beta.orthogonal().rotate_around(beta, 2.0 * consts::PI * rng.gen::<f64>());
+            let (gamma_p, cos_theta, cphi, _, _) = lcfa::pair_creation::sample(u, sv, chi, a_perp, rng);
             let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
             let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt();
-            let u_p = u_p * (cos_theta * beta + sin_theta * perp);
+
+            // axes
+            let e_1 = a_perp.normalize();
+            let e_2 = n.cross(e_1);
+            let u_p = u_p * (cos_theta * n + sin_theta * cphi.cos() * e_1 + sin_theta * cphi.sin() * e_2);
+
             // conserving three-momentum
             let u_e = ThreeVector::from(u) - u_p;
             let u_p = FourVector::new(0.0, u_p[0], u_p[1], u_p[2]).unitize();
             let u_e = FourVector::new(0.0, u_e[0], u_e[1], u_e[2]).unitize();
-            (prob, 1.0 / rate_increase, Some((u_e, u_p)))
+            (prob, 1.0 / rate_increase, sv_new, Some((u_e, u_p)))
         } else {
-            (prob, 0.0, None)
+            (prob, 0.0, sv_new, None)
         }
     }
 }
@@ -360,11 +371,11 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, _pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>) {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        let (prob, frac, momenta) = FastFocusedLaser::create_pair(ell, E, B, dt, rng, rate_increase);
-        (prob, frac, momenta.map(|(p1, p2)| (p1, p2, a)))
+        let (prob, frac, pol_new, momenta) = FastFocusedLaser::create_pair(ell, pol, E, B, dt, rng, rate_increase);
+        (prob, frac, pol_new, momenta.map(|(p1, p2)| (p1, p2, a)))
     }
 
     fn ideal_initial_z(&self) -> f64 {

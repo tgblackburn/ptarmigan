@@ -18,15 +18,25 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> Option<f64> {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> (f64, StokesVector) {
     let eta = k * ell;
+    let sv = sv.in_lma_basis(ell);
+    let dphi = eta * dt / (COMPTON_TIME * ell[0]);
 
-    let f = match pol {
-        Polarization::Circular => cp::rate(a, eta).unwrap(),
-        Polarization::Linear => lp::rate(a * consts::SQRT_2, eta).unwrap(),
+    let (prob, sv) = match pol {
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.probability(sv, dphi)
+        },
+        Polarization::Linear => {
+            let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
+            rate.probability(sv, dphi)
+        },
     };
 
-    Some(ALPHA_FINE * f * dt / (COMPTON_TIME * ell[0]))
+    let sv = sv.from_lma_basis(ell);
+
+    (prob, sv)
 }
 
 /// Assuming that pair creation takes place, pseudorandomly
@@ -34,12 +44,19 @@ pub fn probability(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, dt
 /// by a photon with normalized momentum `ell` and polarization `sv`
 /// in a plane EM wave with root-mean-square amplitude `a`,
 /// (local) wavector `k` and polarization `pol`.
-pub fn generate<R: Rng>(ell: FourVector, _sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
+    let sv = sv.in_lma_basis(ell);
 
     let (n, s, cphi_zmf) = match pol {
-        Polarization::Circular => cp::sample(a, eta, rng),
-        Polarization::Linear => lp::sample(a * consts::SQRT_2, eta, rng),
+        Polarization::Circular => {
+            let rate = cp::TotalRate::new(a, eta);
+            rate.sample(sv[1], sv[2], sv[3], rng)
+        },
+        Polarization::Linear => {
+            let rate = lp::TotalRate::new(a * consts::SQRT_2, eta);
+            rate.sample(sv[1], sv[2], rng)
+        },
     };
 
     // Scattering momentum (/m) and angles in zero momentum frame
@@ -119,111 +136,3 @@ mod tests {
         }
     }
 }
-
-static GAUSS_16_NODES: [f64; 16] = [
-    -9.894009349916499e-1,
-    -9.445750230732326e-1,
-    -8.656312023878317e-1,
-    -7.554044083550030e-1,
-    -6.178762444026437e-1,
-    -4.580167776572274e-1,
-    -2.816035507792589e-1,
-    -9.501250983763744e-2,
-    9.501250983763744e-2,
-    2.816035507792589e-1,
-    4.580167776572274e-1,
-    6.178762444026437e-1,
-    7.554044083550030e-1,
-    8.656312023878317e-1,
-    9.445750230732326e-1,
-    9.894009349916499e-1,
-];
-
-static GAUSS_16_WEIGHTS: [f64; 16] = [
-    2.715245941175400e-2,
-    6.225352393864800e-2,
-    9.515851168249300e-2,
-    1.246289712555340e-1,
-    1.495959888165770e-1,
-    1.691565193950025e-1,
-    1.826034150449236e-1,
-    1.894506104550685e-1,
-    1.894506104550685e-1,
-    1.826034150449236e-1,
-    1.691565193950025e-1,
-    1.495959888165770e-1,
-    1.246289712555340e-1,
-    9.515851168249300e-2,
-    6.225352393864800e-2,
-    2.715245941175400e-2,
-];
-
-static GAUSS_32_NODES: [f64; 32] = [
-    -9.972638618494816e-1,
-    -9.856115115452683e-1,
-    -9.647622555875064e-1,
-    -9.349060759377397e-1,
-    -8.963211557660521e-1,
-    -8.493676137325700e-1,
-    -7.944837959679424e-1,
-    -7.321821187402897e-1,
-    -6.630442669302152e-1,
-    -5.877157572407623e-1,
-    -5.068999089322294e-1,
-    -4.213512761306353e-1,
-    -3.318686022821276e-1,
-    -2.392873622521371e-1,
-    -1.444719615827965e-1,
-    -4.830766568773832e-2,
-    4.830766568773832e-2,
-    1.444719615827965e-1,
-    2.392873622521371e-1,
-    3.318686022821276e-1,
-    4.213512761306353e-1,
-    5.068999089322294e-1,
-    5.877157572407623e-1,
-    6.630442669302152e-1,
-    7.321821187402897e-1,
-    7.944837959679424e-1,
-    8.493676137325700e-1,
-    8.963211557660521e-1,
-    9.349060759377397e-1,
-    9.647622555875064e-1,
-    9.856115115452683e-1,
-    9.972638618494816e-1,
-];
-
-static GAUSS_32_WEIGHTS: [f64; 32] = [
-    7.018610000000000e-3,
-    1.627439500000000e-2,
-    2.539206500000000e-2,
-    3.427386300000000e-2,
-    4.283589800000000e-2,
-    5.099805900000000e-2,
-    5.868409350000000e-2,
-    6.582222280000000e-2,
-    7.234579411000000e-2,
-    7.819389578700000e-2,
-    8.331192422690000e-2,
-    8.765209300440000e-2,
-    9.117387869576400e-2,
-    9.384439908080460e-2,
-    9.563872007927486e-2,
-    9.654008851472780e-2,
-    9.654008851472780e-2,
-    9.563872007927486e-2,
-    9.384439908080460e-2,
-    9.117387869576400e-2,
-    8.765209300440000e-2,
-    8.331192422690000e-2,
-    7.819389578700000e-2,
-    7.234579411000000e-2,
-    6.582222280000000e-2,
-    5.868409350000000e-2,
-    5.099805900000000e-2,
-    4.283589800000000e-2,
-    3.427386300000000e-2,
-    2.539206500000000e-2,
-    1.627439500000000e-2,
-    7.018610000000000e-3,
-];
