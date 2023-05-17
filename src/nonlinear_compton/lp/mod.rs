@@ -1114,7 +1114,7 @@ mod tests {
         const A_DENSITY: usize = 20; // points per order of magnitude
         const ETA_DENSITY: usize = 20;
         const N_COLS: usize = 61; // pts in a0 direction
-        const N_ROWS: usize = 61; // pts in eta direction
+        const N_ROWS: usize = 68; // pts in eta direction
         let mut table = [[0.0; N_COLS]; N_ROWS];
 
         let num: usize = std::env::var("RAYON_NUM_THREADS")
