@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.3.0
+## v1.3.1
 
 2023-05-17
 
@@ -15,6 +15,7 @@ Fixed:
 
 * Vulnerabilities reported by Dependabot.
 * Warning about deprecated code in nom 1.2.4.
+* Rate ceiling at large harmonic order (NLC, LP)
 
 ## v1.2.1
 

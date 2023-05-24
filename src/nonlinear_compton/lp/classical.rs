@@ -50,8 +50,8 @@ fn ceiling_double_diff_partial_rate(a: f64, dj: &mut DoubleBessel) -> f64 {
     } else if a <= 1.5 {
         let theta = 0.0;
 
-        let v_min = 0.2 + (9.0 / (n as f64).sqrt() - 1.0) / 10.0;
-        let v_max = v_min + 0.2;
+        let v_min = 0.1 + (9.0 / (n as f64).sqrt() - 1.0) / 10.0;
+        let v_max = (v_min + 0.4).min(1.0);
 
         (1..=16)
             .map(|i| {

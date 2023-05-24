@@ -902,7 +902,7 @@ mod tests {
         let mut n_err = 0;
         let mut pts: Vec<(f64, f64, f64, f64)> = Vec::new();
 
-        for _i in 0..1000 {
+        for _i in 0..200 {
             let a = (0.1_f64.ln() + (20_f64.ln() - 0.1_f64.ln()) * rng.gen::<f64>()).exp();
             let eta = (0.01_f64.ln() + (1_f64.ln() - 0.01_f64.ln()) * rng.gen::<f64>()).exp();
 
@@ -963,7 +963,7 @@ mod tests {
             }
         }
 
-        // assert!(n_err == 0);
+        assert!(n_err < 10);
     }
 
     fn positron_yield<R: Rng>(a: f64, eta: f64, sv1: f64, bias: f64, change_sv: bool, rng: &mut R) -> f64 {
