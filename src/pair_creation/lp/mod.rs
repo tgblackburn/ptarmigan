@@ -393,7 +393,7 @@ impl TotalRate {
         } else if tables::contains(a, eta) {
             tables::interpolate(a, eta)
         } else {
-           [0.0, 0.0]
+            [0.0, 0.0]
         };
 
         let prob = {
@@ -431,7 +431,7 @@ impl TotalRate {
         } else if tables::contains(a, eta) {
             tables::invert(a, eta, sv1, frac)
         } else {
-            panic!("out of bounds at {} {}", a, eta);
+            panic!("NBW [LP] rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
         };
 
         let mut spectrum = DoubleDiffPartialRate::new(n, a, eta);
