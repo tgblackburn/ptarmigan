@@ -1176,7 +1176,7 @@ mod table_generation {
 
         const LN_MIN_A: f64 = -consts::LN_10; // 0.1
         const A_DENSITY: usize = 10; // 20 points per order of magnitude
-        const N_COLS: usize = 2 * A_DENSITY + 4; // + 7; // points in a0, a <= 20
+        const N_COLS: usize = 2 * A_DENSITY + 5; // + 7; // points in a0, a <= 20
 
         const LN_MIN_ETA: f64 = consts::LN_2 - 3_f64 * consts::LN_10; // 0.002
         const ETA_DENSITY: usize = 20; // 20 points per order of magnitude
