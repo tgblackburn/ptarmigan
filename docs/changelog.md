@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.2
+
+2023-05-23
+
+Fixed:
+
+* Failure to set automatic pair rate increase when out of tabulated range.
+
 ## v1.3.1
 
 2023-05-17
