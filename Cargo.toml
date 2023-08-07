@@ -7,7 +7,7 @@ publish = false
 readme = "README.md"
 license = "Apache-2.0"
 build = "build.rs"
-rust-version = "1.60"
+rust-version = "1.64"
 
 [dependencies]
 rand = "0.7"
@@ -40,4 +40,4 @@ indicatif = {version = "0.17", features = ["rayon"]}
 rustfft = "6.1"
 
 [patch.crates-io]
-hdf5-sys = {git = "https://github.com/tgblackburn/hdf5-rust", branch = "patch"}
+hdf5-sys = {git = "https://github.com/aldanor/hdf5-rust"}
