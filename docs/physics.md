@@ -90,3 +90,14 @@ control:
 
 This model is only available under the LCFA.
 As it uses a deterministic radiation-reaction force, it does not include stochastic effects.
+
+## Validity
+
+Ptarmigan is a *single-particle + prescribed fields* code and it therefore ignores space-charge effects (negligible for relativistic bunches) and depletion of the laser pulse.
+
+In LMA mode, expect Ptarmigan to be accurate for laser pulses with $N \gtrsim 4$ and $w_0 \gtrsim 2 \lambda$, where $N$ is the number of cycles corresponding to the pulse duration and $w_0$ is the waist (focal spot size).
+There is no particular restriction on $a_0$, unless modelling classical RR using the LMA.
+In this case, energy losses must be small per cycle and therefore it is necessary to have $a_0^2 \eta_e \lesssim 30$.
+
+LCFA mode begins to work when $a_0 \gtrsim 5$ and is a good substitute for LMA mode when $a_0 \gtrsim 10$.
+Even so, radiation spectra $dN/d\omega'$ are only accurate for photon energies satisfying $\omega' / (\gamma_0 m) > 2 \eta_e / (1 + a_0^2 + 2 \eta_e) \sim 2 \chi_e / a_0^3$.

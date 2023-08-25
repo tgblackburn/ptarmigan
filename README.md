@@ -82,6 +82,6 @@ Contributors:
 
 The main reference for Ptarmigan is
 
-> T. G. Blackburn, B. King and S. Tang, "Simulations of laser-driven strong-field QED with Ptarmigan: Resolving wavelength-scale interference and ɣ-ray polarization,"  	[arXiv:2305.13061 \[hep-ph\]](https://arxiv.org/abs/2305.13061) (2023)
+> T. G. Blackburn, B. King and S. Tang, "Simulations of laser-driven strong-field QED with Ptarmigan: Resolving wavelength-scale interference and ɣ-ray polarization," [arXiv:2305.13061 \[hep-ph\]](https://arxiv.org/abs/2305.13061) (2023)
 
 and individual releases are archived on [Zenodo](https://doi.org/10.5281/zenodo.7956999).
