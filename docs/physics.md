@@ -18,12 +18,32 @@ LP = linear polarization, CP = circular polarization
 
 *Pair creation has no classical equivalent.
 
+## Particle tracking
+
+Particles (electrons, positrons and photons) are tracked as they travel on classical trajectories through the laser pulse.
+Tracking stops automatically when the particle is deemed to have left the strong-field region (which may occur at different times for different particles).
+The classical trajectory is determined either by the Lorentz force equation (in LCFA mode) or the relativistic ponderomotive force equation (in LMA mode): see [here](#lma-or-lcfa) for details.
+
+QED events occur pseudorandomly along the particle's trajectory with a frequency that is determined by the relevant probability rate.
+When these events occur, the original particle may be recoiled or destroyed, and new particles created.
+These new particles are tracked in the same way as the original ones, except that they are created inside the strong-field region at the specific location in space and time.
+
+Ptarmigan tracks one particle at a time, queueing any newly created ones, until the entirety of the incident beam and all its daughter products have been processed.
+Each particle in the simulation is given a unique ID.
+
+
 ## LMA or LCFA
 
 Ptarmigan models particle dynamics and strong-field QED events using one of two approximations:
 
 * the locally monochromatic approximation (LMA)
 * the locally constant crossed field approximation (LCFA).
+
+> [!IMPORTANT]
+> The LMA is available for $a_0 \leq 20$ and $\eta = \chi / a_0 \leq 2$.
+
+> [!NOTE]
+> The LCFA is available for arbitrary values of $a_0$ and $\eta$.
 
 In the LMA, the laser pulse is treated as slices of monochromatic plane wave with defined amplitude and frequency.
 Particle trajectories are only defined at the cycle-averaged level, using the quasimomentum $q^\mu$, and not at scales smaller than the laser wavelength.
@@ -54,9 +74,6 @@ control:
 ```
 
 If this key is absent (or `false`), the LMA is selected instead.
-
-The LMA is available for $a_0 \leq 20$ and $\eta = \chi / a_0 \leq 2$.
-The LCFA is available for arbitrary values of the same.
 
 ## QED or classical
 
