@@ -2,7 +2,11 @@
 
 ## v1.3.3
 
-In progress.
+2023-09-20
+
+Added:
+
+* Documentation of physics coverage
 
 Fixed:
 
