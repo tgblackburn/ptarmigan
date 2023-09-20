@@ -40,10 +40,10 @@ Ptarmigan models particle dynamics and strong-field QED events using one of two 
 * the locally constant crossed field approximation (LCFA).
 
 > [!IMPORTANT]
-> The LMA is available for $a_0 \leq 20$ and $\eta = \chi / a_0 \leq 2$.
+> The LMA is available for *a*<sub>0</sub> ≤ 20 and *η* = *χ* / *a*<sub>0</sub> ≤ 2.
 
 > [!NOTE]
-> The LCFA is available for arbitrary values of $a_0$ and $\eta$.
+> The LCFA is available for arbitrary values of *a*<sub>0</sub> and *η*.
 
 In the LMA, the laser pulse is treated as slices of monochromatic plane wave with defined amplitude and frequency.
 Particle trajectories are only defined at the cycle-averaged level, using the quasimomentum $q^\mu$, and not at scales smaller than the laser wavelength.
