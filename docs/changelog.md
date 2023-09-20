@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.3
+
+In progress.
+
+Fixed:
+
+* Support for HDF5 v1.14
+
 ## v1.3.2
 
 2023-05-23
