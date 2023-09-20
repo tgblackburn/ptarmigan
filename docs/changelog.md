@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.3
+
+2023-09-20
+
+Added:
+
+* Documentation of physics coverage
+
+Fixed:
+
+* Support for HDF5 v1.14
+
 ## v1.3.2
 
 2023-05-23

@@ -8,6 +8,10 @@ Simulate the interaction between a high-energy particle beam and an intense lase
   <img src="docs/collision.png" alt="A laser pulse (left) collides with a beam of electrons (right), lauching an electromagnetic shower">
 </p>
 
+## What's included
+
+A summary of Ptarmigan's physics coverage can be found [here](docs/physics.md).
+
 ## Build
 
 All of Ptarmigan's default dependencies are Rust crates, which are downloaded automatically by Cargo. Building the code in this case is as simple as running:
@@ -67,7 +71,6 @@ The code bins the final-state particles to generate the distribution functions r
 
 If `hdf5-output` is enabled, complete data about all particles can be written as a single HDF5 file.
 
-
 ## Contribute
 
 Pull requests, bug fixes and new features, are welcome!
@@ -76,3 +79,14 @@ Contributors:
 
 * Tom Blackburn
 * Kyle Fleck
+
+## Reference
+
+The main reference for Ptarmigan is
+
+> T. G. Blackburn, B. King and S. Tang,
+"Simulations of laser-driven strong-field QED with Ptarmigan: Resolving wavelength-scale interference and ɣ-ray polarization,"
+[Physics of Plasmas 30, 093903 (2023)](https://doi.org/10.1063/5.0159963),
+[arXiv:2305.13061 \[hep-ph\]](https://arxiv.org/abs/2305.13061)
+
+and individual releases are archived on [Zenodo](https://doi.org/10.5281/zenodo.7956999).
