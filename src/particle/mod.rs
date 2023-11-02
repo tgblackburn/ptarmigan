@@ -222,19 +222,20 @@ impl Particle {
     /// angle is requested. This function transforms the particle momenta
     /// and positions such that the positive z axis points along the beam
     /// propagation axis instead.
-    pub fn to_beam_coordinate_basis(&self, collision_angle: f64) -> Self {
+    pub fn to_beam_coordinate_basis(&self, collision_angle: f64, collision_plane_angle: f64) -> Self {
         let theta = std::f64::consts::PI - collision_angle;
+        let theta2 = -collision_plane_angle;
 
-        let u0 = ThreeVector::from(self.u[0]).rotate_around_y(theta);
+        let u0 = ThreeVector::from(self.u[0]).rotate_around_z(theta2).rotate_around_y(theta);
         let u0 = FourVector::new(self.u[0][0], u0[0], u0[1], u0[2]);
 
-        let u = ThreeVector::from(self.u[1]).rotate_around_y(theta);
+        let u = ThreeVector::from(self.u[1]).rotate_around_z(theta2).rotate_around_y(theta);
         let u = FourVector::new(self.u[1][0], u[0], u[1], u[2]);
 
-        let r0 = ThreeVector::from(self.r[0]).rotate_around_y(theta);
+        let r0 = ThreeVector::from(self.r[0]).rotate_around_z(theta2).rotate_around_y(theta);
         let r0 = FourVector::new(self.r[0][0], r0[0], r0[1], r0[2]);
 
-        let r = ThreeVector::from(self.r[1]).rotate_around_y(theta);
+        let r = ThreeVector::from(self.r[1]).rotate_around_z(theta2).rotate_around_y(theta);
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
 
         // let pol = ThreeVector::from(self.pol).rotate_around_y(theta);

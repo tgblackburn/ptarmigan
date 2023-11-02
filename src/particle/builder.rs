@@ -18,6 +18,7 @@ pub struct BeamBuilder {
     sigma_z: f64,
     energy_chirp: f64,
     angle: f64,
+    collision_plane_angle: f64,
     rms_div: f64,
     initial_z: f64,
     offset: ThreeVector,
@@ -39,6 +40,7 @@ impl BeamBuilder {
             sigma_z: 0.0,
             energy_chirp: 0.0,
             angle: 0.0,
+            collision_plane_angle: 0.0,
             rms_div: 0.0,
             initial_z,
             offset: ThreeVector::new(0.0, 0.0, 0.0),
@@ -81,6 +83,13 @@ impl BeamBuilder {
     pub fn with_collision_angle(&self, angle: f64) -> Self {
         BeamBuilder {
             angle,
+            ..*self
+        }
+    }
+
+    pub fn with_collision_plane_at(&self, angle: f64) -> Self {
+        BeamBuilder {
+            collision_plane_angle: angle,
             ..*self
         }
     }
@@ -177,9 +186,11 @@ impl BeamBuilder {
                 let theta_x = self.angle + self.rms_div * rng.sample::<f64,_>(StandardNormal);
                 let theta_y = self.rms_div * rng.sample::<f64,_>(StandardNormal);
 
+                let u = ThreeVector::new(u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos());
+                let u = u.rotate_around_z(self.collision_plane_angle);
                 let u = match self.species {
-                    Species::Electron | Species::Positron => FourVector::new(0.0, u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()).unitize(),
-                    Species::Photon => FourVector::lightlike(u * theta_x.sin() * theta_y.cos(), u * theta_y.sin(), u * theta_x.cos() * theta_y.cos()),
+                    Species::Electron | Species::Positron => FourVector::new(0.0, u[0], u[1], u[2]).unitize(),
+                    Species::Photon => FourVector::lightlike(u[0], u[1], u[2]),
                 };
 
                 let (t, z) = if self.offset[2] >= 0.0 {
@@ -195,6 +206,7 @@ impl BeamBuilder {
                 let (x, y) = (x + self.offset[0], y + self.offset[1]);
                 let r = ThreeVector::new(x, y, z);
                 let r = r.rotate_around_y(self.angle);
+                let r = r.rotate_around_z(self.collision_plane_angle);
                 let r = FourVector::new(t, r[0], r[1], r[2]);
 
                 Particle::create(self.species, r)

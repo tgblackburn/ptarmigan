@@ -1,12 +1,20 @@
 # Changelog
 
+## v1.3.4
+
+In progress
+
+Added:
+
+* Choice of collision plane.
+
 ## v1.3.3
 
 2023-09-20
 
 Added:
 
-* Documentation of physics coverage
+* Documentation of physics coverage.
 
 Fixed:
 

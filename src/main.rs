@@ -363,6 +363,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam:length").unwrap_or(0.0);
     let angle: f64 = input.read("beam:collision_angle").unwrap_or(0.0);
+
+    let angle2: f64 = input.read::<String, _>("beam:collision_plane")
+        .and_then(|s| match s.as_str() {
+            "horizontal" => Ok(0.0),
+            "vertical" => Ok(consts::FRAC_PI_2),
+            _ => input.evaluate(s).ok_or_else(|| InputError::conversion("beam:collision_plane", "collision_plane")),
+        })
+        .or_else(|e| match e.kind() {
+            // preserve error if parsing failed
+            InputErrorKind::Conversion => Err(e),
+            // if not present, default to horizontal
+            _ => Ok(0.0),
+        })
+        ?;
+
     let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
     let weight = input.read("beam:charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
@@ -710,6 +725,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_weight(weight)
             .with_divergence(rms_div)
             .with_collision_angle(angle)
+            .with_collision_plane_at(angle2)
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
             .with_polarization(sv)
@@ -805,7 +821,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if !laser_defines_z {
             for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
-                *pt = pt.to_beam_coordinate_basis(angle);
+                *pt = pt.to_beam_coordinate_basis(angle, angle2);
             }
         }
 

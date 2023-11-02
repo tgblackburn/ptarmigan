@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "ptarmigan"
-version = "1.3.3"
+version = "1.3.4"
 dependencies = [
  "enum_dispatch",
  "evalexpr",
