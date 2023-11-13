@@ -998,7 +998,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
                         .write(&r_max.convert(&units.length))?
                     .new_dataset("length")?.with_unit(units.length.name())?.write(&length.convert(&units.length))?
-                    .new_dataset("collision_angle")?.with_unit("rad")?.write(&angle)?
+                    .new_dataset("collision_angle")?
+                        .with_unit("rad")?
+                        .with_desc("polar angle between beam momentum and laser wavevector, zero if counterpropagating")?
+                        .write(&angle)?
+                    .new_dataset("collision_plane_angle")?
+                        .with_unit("rad")?
+                        .with_desc("azimuthal angle between beam momentum and laser wavevector, zero if p in E, k plane")?
+                        .write(&angle2)?
                     .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
                     .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
                     .new_dataset("polarization")?

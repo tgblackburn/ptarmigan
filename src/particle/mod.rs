@@ -222,24 +222,36 @@ impl Particle {
     /// angle is requested. This function transforms the particle momenta
     /// and positions such that the positive z axis points along the beam
     /// propagation axis instead.
-    pub fn to_beam_coordinate_basis(&self, collision_angle: f64, collision_plane_angle: f64) -> Self {
-        let theta = std::f64::consts::PI - collision_angle;
-        let theta2 = -collision_plane_angle;
+    pub fn to_beam_coordinate_basis(&self, theta: f64, phi: f64) -> Self {
+        // beam centroid v = (-cos phi sin theta, -sin theta sin phi, -cos theta)
+        // first, rotate centroid into x-z plane
+        let cos_vangle = theta.cos().hypot(theta.sin() * phi.cos());
+        let vangle = if phi == 0.0 || theta == 0.0 {
+            0.0
+        } else {
+            cos_vangle.acos().copysign(theta.sin() * phi.sin())
+        };
 
-        let u0 = ThreeVector::from(self.u[0]).rotate_around_z(theta2).rotate_around_y(theta);
+        // angle between projection of v on x-z plane and z axis
+        let hangle = if phi == 0.0 || theta == 0.0 {
+            std::f64::consts::PI - theta
+        } else {
+            (-(theta.cos()) / cos_vangle).acos().copysign(phi.cos() * theta.sin())
+        };
+
+        // println!("vangle = {:.2} deg, hangle = {:.2} deg", vangle.to_degrees(), hangle.to_degrees());
+
+        let u0 = ThreeVector::from(self.u[0]).rotate_around_y(hangle).rotate_around_x(-vangle);
         let u0 = FourVector::new(self.u[0][0], u0[0], u0[1], u0[2]);
 
-        let u = ThreeVector::from(self.u[1]).rotate_around_z(theta2).rotate_around_y(theta);
+        let u = ThreeVector::from(self.u[1]).rotate_around_y(hangle).rotate_around_x(-vangle);
         let u = FourVector::new(self.u[1][0], u[0], u[1], u[2]);
 
-        let r0 = ThreeVector::from(self.r[0]).rotate_around_z(theta2).rotate_around_y(theta);
+        let r0 = ThreeVector::from(self.r[0]).rotate_around_y(hangle).rotate_around_x(-vangle);
         let r0 = FourVector::new(self.r[0][0], r0[0], r0[1], r0[2]);
 
-        let r = ThreeVector::from(self.r[1]).rotate_around_z(theta2).rotate_around_y(theta);
+        let r = ThreeVector::from(self.r[1]).rotate_around_y(hangle).rotate_around_x(-vangle);
         let r = FourVector::new(self.r[1][0], r[0], r[1], r[2]);
-
-        // let pol = ThreeVector::from(self.pol).rotate_around_y(theta);
-        // let pol = FourVector::new(self.pol[0], pol[0], pol[1], pol[2]);
 
         Particle {
             species: self.species,
