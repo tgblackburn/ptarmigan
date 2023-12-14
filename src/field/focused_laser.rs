@@ -18,12 +18,13 @@ pub struct FocusedLaser {
     duration: f64,
     wavevector: FourVector,
     pol: Polarization,
+    pol_angle: f64,
     bandwidth: f64,
     envelope: Envelope,
 }
 
 impl FocusedLaser {
-    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization, pol_angle: f64) -> Self {
         let duration = n_cycles * wavelength / SPEED_OF_LIGHT;
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FocusedLaser {
@@ -32,6 +33,7 @@ impl FocusedLaser {
             duration,
             wavevector,
             pol,
+            pol_angle,
             bandwidth: 0.0,
             envelope: Envelope::Gaussian,
         }
@@ -243,7 +245,7 @@ impl Field for FocusedLaser {
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * width;
         let prob = nonlinear_compton::probability(kappa, u, dt, self.pol, mode).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, mode, rng);
+            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, self.pol_angle, mode, rng);
             // u' is ignored if recoil is disabled, so we may as well calculate it
             Some((k, pol, u + (n as f64) * kappa - k, a))
         } else {
@@ -261,7 +263,7 @@ impl Field for FocusedLaser {
             rate_increase
         };
         if rng.gen::<f64>() < prob * rate_increase {
-            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.pol, rng);
+            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.pol, self.pol_angle, rng);
             (prob, 1.0 / rate_increase, pol_new, Some((ell + (n as f64) * kappa - q_p, q_p, a)))
         } else {
             (prob, 0.0, pol_new, None)
@@ -286,7 +288,7 @@ mod tests {
     fn on_axis() {
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
-        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+        let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular, 0.0)
             .with_envelope(Envelope::Flattop);
         let dt = laser.max_timestep().unwrap();
 
@@ -314,7 +316,7 @@ mod tests {
         let lambda = 0.8e-6;
         let gamma = 1000.0;
         let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / lambda;
-        let laser = FocusedLaser::new(a0, lambda, w0, n_cycles, Polarization::Circular);
+        let laser = FocusedLaser::new(a0, lambda, w0, n_cycles, Polarization::Circular, 0.0);
 
         for k in 1..8 {
             let b = (k as f64) * 1.0e-6;

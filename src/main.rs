@@ -299,13 +299,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = input.read::<String, _>("laser:polarization")
+    let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
         .and_then(|s| match s.as_str() {
-            "linear" => Ok(Polarization::Linear),
-            "circular" => Ok(Polarization::Circular),
+            "circular" => Ok((Polarization::Circular, 0.0)),
+            "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
+            "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
             _ => {
-                eprintln!("Laser polarization must be linear | circular.");
-                Err(InputError::conversion("laser:polarization", "polarization"))
+                if let Some(expr) = s.strip_prefix("linear @") {
+                    if let Some(pol_angle) = input.evaluate(expr) {
+                        Ok((Polarization::Linear, pol_angle))
+                    } else {
+                        eprintln!("Linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                        Err(InputError::conversion("laser:polarization", "polarization"))
+                    }
+                } else {
+                    eprintln!("Laser polarization must be 'linear [|| x or y]' or 'circular'.");
+                    Err(InputError::conversion("laser:polarization", "polarization"))
+                }
             }
         })
         ?;
@@ -685,7 +695,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let laser: Laser = if focusing && !using_lcfa {
-            FocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
@@ -694,7 +704,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_envelope(envelope)
                 .into()
         } else if !using_lcfa {
-            PlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            PlaneWave::new(a0, wavelength, n_cycles, pol, pol_angle, chirp_b)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
@@ -923,6 +933,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("polarization")?
                         .with_desc("linear/circular")?
                         .write(&pol)?
+                    .new_dataset("polarization_angle")?
+                        .with_unit("rad")?
+                        .with_desc("angle between x-axis and electric field")?
+                        .with_condition(|| pol == Polarization::Linear)
+                        .write(&pol_angle)?
                     .new_dataset("focusing")?
                         .with_desc("true/false => pulse is modelled in 3d/1d")?
                         .write(&focusing)?
