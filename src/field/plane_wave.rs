@@ -264,7 +264,7 @@ impl Field for PlaneWave {
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
-        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol);
+        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol, self.pol_angle);
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {

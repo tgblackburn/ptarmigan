@@ -18,9 +18,10 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> (f64, StokesVector) {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization, pol_angle: f64) -> (f64, StokesVector) {
     let eta = k * ell;
     let sv = sv.in_lma_basis(ell);
+    let sv = sv.rotate_by(pol_angle);
     let dphi = eta * dt / (COMPTON_TIME * ell[0]);
 
     let (prob, sv) = match pol {
@@ -34,6 +35,7 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
         },
     };
 
+    let sv = sv.rotate_by(-pol_angle);
     let sv = sv.from_lma_basis(ell);
 
     (prob, sv)
@@ -47,6 +49,7 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
 pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, pol_angle: f64, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
     let sv = sv.in_lma_basis(ell);
+    let sv = sv.rotate_by(pol_angle);
 
     let (n, s, cphi_zmf) = match pol {
         Polarization::Circular => {

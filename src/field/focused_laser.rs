@@ -256,7 +256,7 @@ impl Field for FocusedLaser {
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>) {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
-        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol);
+        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol, self.pol_angle);
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {

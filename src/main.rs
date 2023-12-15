@@ -207,7 +207,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let a_rms = match pol { Polarization::Linear => a0 / consts::SQRT_2, Polarization::Circular => a0 };
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
+    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol, 0.0);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
     if pair_rate == 0.0 || photon_rate.is_none() {
         1.0

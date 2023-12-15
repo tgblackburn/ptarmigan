@@ -118,6 +118,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, pol_ang
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
+    let sv = sv.rotate_by(-pol_angle); // sv assumes laser is polarized along x
     let sv = sv.from_lma_basis(k_prime);
 
     // Verify construction of photon momentum
