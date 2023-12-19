@@ -709,7 +709,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
         } else {
-            FastPlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            FastPlaneWave::new(a0, wavelength, n_cycles, pol, pol_angle, chirp_b)
                 .with_envelope(envelope)
                 .into()
         };
