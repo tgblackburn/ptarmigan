@@ -142,7 +142,7 @@ mod tests {
         let n_cycles = 10.0;
         let envelope = Envelope::Flattop;
 
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular, 0.0)
             .with_envelope(envelope);
         let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular, 0.0)
             .with_envelope(envelope);
@@ -189,7 +189,7 @@ mod tests {
         let n_cycles = 10.0;
         let envelope = Envelope::Gaussian;
 
-        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear)
+        let fast_laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear, 0.0)
             .with_envelope(envelope);
         let laser = FocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Linear, 0.0)
             .with_envelope(envelope);

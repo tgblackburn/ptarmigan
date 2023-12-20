@@ -700,7 +700,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
         } else if focusing {
-            FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .into()
         } else if !using_lcfa {

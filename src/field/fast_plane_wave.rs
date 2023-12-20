@@ -28,7 +28,10 @@ impl FastPlaneWave {
             n_cycles,
             wavevector,
             pol,
-            pol_angle,
+            pol_angle: match pol {
+                Polarization::Circular => 0.0,
+                Polarization::Linear => pol_angle,
+            },
             chirp_b,
             envelope: Envelope::CosSquared,
         }

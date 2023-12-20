@@ -17,12 +17,13 @@ pub struct FastFocusedLaser {
     duration: f64,
     wavevector: FourVector,
     pol: Polarization,
+    pol_angle: f64,
     envelope: Envelope,
 }
 
 impl FastFocusedLaser {
     #[allow(unused)]
-    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization) -> Self {
+    pub fn new(a0: f64, wavelength: f64, waist: f64, n_cycles: f64, pol: Polarization, pol_angle: f64) -> Self {
         let duration = n_cycles * wavelength / SPEED_OF_LIGHT;
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         FastFocusedLaser {
@@ -31,6 +32,10 @@ impl FastFocusedLaser {
             duration,
             wavevector,
             pol,
+            pol_angle: match pol {
+                Polarization::Circular => 0.0,
+                Polarization::Linear => pol_angle,
+            },
             envelope: Envelope::Gaussian,
         }
     }
@@ -55,6 +60,7 @@ impl FastFocusedLaser {
     /// The beam is linearly polarized along the x axis.
     #[allow(non_snake_case)]
     fn beam(&self, r: FourVector, phase: f64) -> (ThreeVector, ThreeVector, ThreeVector, ThreeVector) {
+        let r = r.rotate_around_z(-self.pol_angle);
         let x = r[1] / self.waist;
         let y = r[2] / self.waist;
         let z = r[3] / self.rayleigh_range();
@@ -93,15 +99,15 @@ impl FastFocusedLaser {
             e * f * y
             + e.powi(3) * f * f * y * (1.0 + f * rho.powi(2) - f * f * rho.powi(4) / 2.0) / 2.0
         );
-        
+
         let E0 = ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0 / ELEMENTARY_CHARGE;
         let B0 = E0 / SPEED_OF_LIGHT;
 
         (
-            E0 * ThreeVector::new(Ex.re, Ey.re, Ez.re),
-            E0 * ThreeVector::new(Ex.im, Ey.im, Ez.im),
-            B0 * ThreeVector::new(Bx.re, By.re, Bz.re),
-            B0 * ThreeVector::new(Bx.im, By.im, Bz.im),
+            E0 * ThreeVector::new(Ex.re, Ey.re, Ez.re).rotate_around_z(self.pol_angle),
+            E0 * ThreeVector::new(Ex.im, Ey.im, Ez.im).rotate_around_z(self.pol_angle),
+            B0 * ThreeVector::new(Bx.re, By.re, Bz.re).rotate_around_z(self.pol_angle),
+            B0 * ThreeVector::new(Bx.im, By.im, Bz.im).rotate_around_z(self.pol_angle),
         )
     }
 
@@ -396,7 +402,7 @@ mod tests {
     fn on_axis() {
         let t_start = -20.0 * 0.8e-6 / (SPEED_OF_LIGHT);
         let n_cycles = 10.0; // SPEED_OF_LIGHT * 30.0e-15 / 0.8e-6;
-        let laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular)
+        let laser = FastFocusedLaser::new(100.0, 0.8e-6, 4.0e-6, n_cycles, Polarization::Circular, 0.0)
             .with_envelope(Envelope::Gaussian);
         let dt = laser.max_timestep().unwrap();
 
