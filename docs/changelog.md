@@ -2,12 +2,12 @@
 
 ## v1.3.4
 
-In progress
+2024-01-25
 
 Added:
 
 * Choice of collision plane.
-* Choice of laser polarization angle (LP only)
+* Choice of laser polarization angle (LP only).
 
 ## v1.3.3
 
