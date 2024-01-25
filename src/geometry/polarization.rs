@@ -42,10 +42,11 @@ impl StokesVector {
     /// Returns the Stokes vector if the polarization basis is rotated
     /// around the direction of propagation by an angle `theta`
     pub fn rotate_by(&self, theta: f64) -> Self {
+        let (sin_2theta, cos_2theta) = (2.0 * theta).sin_cos();
         Self {
             i: self.i,
-            q: (2.0 * theta).cos() * self.q + (2.0 * theta).sin() * self.u,
-            u: -(2.0 * theta).sin() * self.q + (2.0 * theta).cos() * self.u,
+            q: cos_2theta * self.q + sin_2theta * self.u,
+            u: -sin_2theta * self.q + cos_2theta * self.u,
             v: self.v,
         }
     }

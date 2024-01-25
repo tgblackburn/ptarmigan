@@ -107,7 +107,13 @@ impl ThreeVector {
     /// Rotates `self` around the z-axis by angle `theta` and returns
     /// the result.
     pub fn rotate_around_z(self, theta: f64) -> Self {
-        self.rotate_around(ThreeVector::new(0.0, 0.0, 1.0), theta)
+        // self.rotate_around(ThreeVector::new(0.0, 0.0, 1.0), theta)
+        let (s, c) = theta.sin_cos();
+        ThreeVector::new(
+            c * self.x - s * self.y,
+            c * self.y + s * self.x,
+            self.z,
+        )
     }
 }
 

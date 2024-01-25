@@ -1,12 +1,21 @@
 # Changelog
 
+## v1.3.4
+
+2024-01-25
+
+Added:
+
+* Choice of collision plane.
+* Choice of laser polarization angle (LP only).
+
 ## v1.3.3
 
 2023-09-20
 
 Added:
 
-* Documentation of physics coverage
+* Documentation of physics coverage.
 
 Fixed:
 

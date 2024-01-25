@@ -55,7 +55,7 @@ pub fn probability(k: FourVector, q: FourVector, dt: f64, pol: Polarization, mod
 /// Returns the harmonic index of the photon,
 /// the normalized momentum,
 /// and the polarization (if applicable).
-pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: RadiationMode, rng: &mut R) -> (i32, FourVector, StokesVector) {
+pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, pol_angle: f64, mode: RadiationMode, rng: &mut R) -> (i32, FourVector, StokesVector) {
     use {Polarization::*, RadiationMode::*};
 
     let a = (q * q - 1.0).sqrt(); // rms value!
@@ -98,7 +98,11 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: R
         Classical => ThreeVector::from((ell * k).boost_by(u_zmf)).normalize(),
         Quantum => -ThreeVector::from(q.boost_by(u_zmf)).normalize()
     };
-    let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
+
+    // Polarization basis vector in lab frame
+    let epsilon = FourVector::new(0.0, pol_angle.cos(), pol_angle.sin(), 0.0);
+
+    let epsilon = ThreeVector::from(epsilon.boost_by(u_zmf)).normalize();
     let epsilon = {
         let k = along;
         k.cross(epsilon.cross(k)).normalize()
@@ -114,6 +118,7 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, mode: R
     let k_prime = k_prime.boost_by(u_zmf.reverse());
     //println!("lab: k.k' = {}", k * k_prime);
 
+    let sv = sv.rotate_by(-pol_angle); // sv assumes laser is polarized along x
     let sv = sv.from_lma_basis(k_prime);
 
     // Verify construction of photon momentum
@@ -167,7 +172,7 @@ mod tests {
         let vs: Vec<_> = pool.install(|| {
             (0..1000).into_par_iter().map(|_i| {
                 let mut rng = thread_rng();
-                let (n, k_prime, sv) = generate(k, q, Polarization::Linear, mode, &mut rng);
+                let (n, k_prime, sv) = generate(k, q, Polarization::Linear, 0.0, mode, &mut rng);
                 let weight = sv.project_onto(ThreeVector::from(k_prime).normalize(), [0.0, 1.0, 0.0].into());
                 (k * k_prime / (k * q), k_prime[1], k_prime[2], n, sv[1], weight)
             })

@@ -42,7 +42,9 @@ Alternatively, specifying `a0:start`, `a0:step` and `a0:stop` will run a single 
 * `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
 * `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
-* `polarization`: the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
+* `polarization`: the polarization of the carrier wave, either `linear` or `circular`.
+In LP, the default is that the electric field is parallel to the `x` axis.
+Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, where the `angle` is defined with respect to the `x` axis.
 
 ## beam
 
@@ -58,6 +60,8 @@ The distribution (if normal) may be optionally truncated by specifying `[radius,
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `energy_chirp` (optional, default = `0.0`): if specified, introduces a correlation of the requested magnitude between the particle's energy and its longitudinal offset from the beam centroid. A positive chirp means that the head of the beam (which hits the laser first) has higher energy than the tail. The specified value must be between -1 and +1.
 * `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
+* `collision_plane` (optional, default = `horizontal`): by default, the collision angle in the plane spanned by the laser wavevector and the electric field (i.e. `x`-`z`).
+Switching this to `vertical` means that the collision occurs in the plane spanned by the wavevector and the magnetic field (i.e. `y`-`z`).
 * `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
 * `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
 The offsets are defined with respect to the beam propagation axis: the first two components are perpendicular to this axis and the third is parallel to it.

@@ -83,6 +83,18 @@ impl FourVector {
     pub fn reverse(self) -> Self {
         FourVector {0: self.0, 1: -self.1, 2: -self.2, 3: -self.3}
     }
+
+    /// Rotates the spatial components of `self` around the z-axis by `theta`
+    /// and returns the result.
+    pub fn rotate_around_z(self, theta: f64) -> Self {
+        let (s, c) = theta.sin_cos();
+        Self::new(
+            self.0,
+            c * self.1 - s * self.2,
+            c * self.2 + s * self.1,
+            self.3,
+        )
+    }
 }
 
 // Index into four vector

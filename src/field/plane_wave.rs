@@ -17,6 +17,7 @@ pub struct PlaneWave {
     n_cycles: f64,
     wavevector: FourVector,
     pol: Polarization,
+    pol_angle: f64,
     chirp_b: f64,
     bandwidth: f64,
     envelope: Envelope,
@@ -24,13 +25,14 @@ pub struct PlaneWave {
 
 impl PlaneWave {
     #[allow(unused)]
-    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization, chirp_b: f64) -> Self {
+    pub fn new(a0: f64, wavelength: f64, n_cycles: f64, pol: Polarization, pol_angle: f64, chirp_b: f64) -> Self {
         let wavevector = (2.0 * consts::PI / wavelength) * FourVector::new(1.0, 0.0, 0.0, 1.0);
         PlaneWave {
             a0,
             n_cycles,
             wavevector,
             pol,
+            pol_angle,
             chirp_b,
             bandwidth: 0.0,
             envelope: Envelope::CosSquared,
@@ -242,7 +244,7 @@ impl Field for PlaneWave {
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp * width;
         let prob = nonlinear_compton::probability(kappa, u, dt, self.pol, mode).unwrap_or(0.0);
         if rng.gen::<f64>() < prob {
-            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, mode, rng);
+            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, self.pol_angle, mode, rng);
             // u' is ignored if recoil is disabled, so we may as well calculate it
             Some((k, pol, u + (n as f64) * kappa - k, a))
         } else {
@@ -262,14 +264,14 @@ impl Field for PlaneWave {
             assert!(chirp > 0.0, "The specified chirp coefficient of {:.3e} causes the local frequency (eta/eta_0 = {:.3e}) at phase = {:.3} to fall below zero!", self.chirp_b, chirp, self.wavevector * r);
         }
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector * chirp;
-        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol);
+        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol, self.pol_angle);
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
         } else {
             rate_increase
         };
         if rng.gen::<f64>() < prob * rate_increase {
-            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.pol, rng);
+            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.pol, self.pol_angle, rng);
             (prob, 1.0 / rate_increase, pol_new, Some((ell + (n as f64) * kappa - q_p, q_p, a)))
         } else {
             (prob, 0.0, pol_new, None)
@@ -295,7 +297,7 @@ mod tests {
         let n_cycles = 8.0;
         let wavelength = 0.8e-6;
         let t_start = -0.25 * (n_cycles + 2.0) * wavelength / (SPEED_OF_LIGHT);
-        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0)
+        let laser = PlaneWave::new(100.0, wavelength, n_cycles, Polarization::Circular, 0.0, 0.0)
             .with_envelope(Envelope::Flattop);
         let dt = laser.max_timestep().unwrap();
 

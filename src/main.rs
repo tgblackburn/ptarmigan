@@ -207,7 +207,7 @@ fn increase_pair_rate_by(gamma: f64, a0: f64, wavelength: f64, pol: Polarization
     let a_rms = match pol { Polarization::Linear => a0 / consts::SQRT_2, Polarization::Circular => a0 };
     let q: FourVector = u + a_rms * a_rms * kappa / (2.0 * kappa * u);
     let dt = wavelength / SPEED_OF_LIGHT;
-    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol);
+    let (pair_rate, _) = pair_creation::probability(ell, StokesVector::unpolarized(), kappa, a_rms, dt, pol, 0.0);
     let photon_rate = nonlinear_compton::probability(kappa, q, dt, pol, RadiationMode::Quantum);
     if pair_rate == 0.0 || photon_rate.is_none() {
         1.0
@@ -299,13 +299,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
         )?;
 
-    let pol = input.read::<String, _>("laser:polarization")
+    let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
         .and_then(|s| match s.as_str() {
-            "linear" => Ok(Polarization::Linear),
-            "circular" => Ok(Polarization::Circular),
+            "circular" => Ok((Polarization::Circular, 0.0)),
+            "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
+            "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
             _ => {
-                eprintln!("Laser polarization must be linear | circular.");
-                Err(InputError::conversion("laser:polarization", "polarization"))
+                if let Some(expr) = s.strip_prefix("linear @") {
+                    if let Some(pol_angle) = input.evaluate(expr) {
+                        Ok((Polarization::Linear, pol_angle))
+                    } else {
+                        eprintln!("Linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                        Err(InputError::conversion("laser:polarization", "polarization"))
+                    }
+                } else {
+                    eprintln!("Laser polarization must be 'linear [|| x or y]' or 'circular'.");
+                    Err(InputError::conversion("laser:polarization", "polarization"))
+                }
             }
         })
         ?;
@@ -363,6 +373,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
     let length: f64 = input.read("beam:length").unwrap_or(0.0);
     let angle: f64 = input.read("beam:collision_angle").unwrap_or(0.0);
+
+    let angle2: f64 = input.read::<String, _>("beam:collision_plane")
+        .and_then(|s| match s.as_str() {
+            "horizontal" => Ok(0.0),
+            "vertical" => Ok(consts::FRAC_PI_2),
+            _ => input.evaluate(s).ok_or_else(|| InputError::conversion("beam:collision_plane", "collision_plane")),
+        })
+        .or_else(|e| match e.kind() {
+            // preserve error if parsing failed
+            InputErrorKind::Conversion => Err(e),
+            // if not present, default to horizontal
+            _ => Ok(0.0),
+        })
+        ?;
+
     let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
     let weight = input.read("beam:charge")
         .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
@@ -685,21 +710,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let laser: Laser = if focusing && !using_lcfa {
-            FocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
         } else if focusing {
-            FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol)
+            FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .into()
         } else if !using_lcfa {
-            PlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            PlaneWave::new(a0, wavelength, n_cycles, pol, pol_angle, chirp_b)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
                 .into()
         } else {
-            FastPlaneWave::new(a0, wavelength, n_cycles, pol, chirp_b)
+            FastPlaneWave::new(a0, wavelength, n_cycles, pol, pol_angle, chirp_b)
                 .with_envelope(envelope)
                 .into()
         };
@@ -710,6 +735,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             .with_weight(weight)
             .with_divergence(rms_div)
             .with_collision_angle(angle)
+            .with_collision_plane_at(angle2)
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
             .with_polarization(sv)
@@ -805,7 +831,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         if !laser_defines_z {
             for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
-                *pt = pt.to_beam_coordinate_basis(angle);
+                *pt = pt.to_beam_coordinate_basis(angle, angle2);
             }
         }
 
@@ -923,6 +949,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("polarization")?
                         .with_desc("linear/circular")?
                         .write(&pol)?
+                    .new_dataset("polarization_angle")?
+                        .with_unit("rad")?
+                        .with_desc("angle between x-axis and electric field")?
+                        .with_condition(|| pol == Polarization::Linear)
+                        .write(&pol_angle)?
                     .new_dataset("focusing")?
                         .with_desc("true/false => pulse is modelled in 3d/1d")?
                         .write(&focusing)?
@@ -982,7 +1013,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
                         .write(&r_max.convert(&units.length))?
                     .new_dataset("length")?.with_unit(units.length.name())?.write(&length.convert(&units.length))?
-                    .new_dataset("collision_angle")?.with_unit("rad")?.write(&angle)?
+                    .new_dataset("collision_angle")?
+                        .with_unit("rad")?
+                        .with_desc("polar angle between beam momentum and laser wavevector, zero if counterpropagating")?
+                        .write(&angle)?
+                    .new_dataset("collision_plane_angle")?
+                        .with_unit("rad")?
+                        .with_desc("azimuthal angle between beam momentum and laser wavevector, zero if p in E, k plane")?
+                        .write(&angle2)?
                     .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
                     .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
                     .new_dataset("polarization")?
