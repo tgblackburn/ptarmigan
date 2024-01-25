@@ -7,6 +7,7 @@ In progress
 Added:
 
 * Choice of collision plane.
+* Choice of laser polarization angle (LP only)
 
 ## v1.3.3
 
