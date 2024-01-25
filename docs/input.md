@@ -42,7 +42,9 @@ Alternatively, specifying `a0:start`, `a0:step` and `a0:stop` will run a single 
 * `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
 * `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
-* `polarization`: the polarization of the carrier wave, either `linear` (along `x`) or `circular`.
+* `polarization`: the polarization of the carrier wave, either `linear` or `circular`.
+In LP, the default is that the electric field is parallel to the `x` axis.
+Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, where the `angle` is defined with respect to the `x` axis.
 
 ## beam
 

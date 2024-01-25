@@ -18,9 +18,10 @@ mod lp;
 ///
 /// Both `ell` and `k` are expected to be normalized
 /// to the electron mass.
-pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization) -> (f64, StokesVector) {
+pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt: f64, pol: Polarization, pol_angle: f64) -> (f64, StokesVector) {
     let eta = k * ell;
     let sv = sv.in_lma_basis(ell);
+    let sv = sv.rotate_by(pol_angle);
     let dphi = eta * dt / (COMPTON_TIME * ell[0]);
 
     let (prob, sv) = match pol {
@@ -34,6 +35,7 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
         },
     };
 
+    let sv = sv.rotate_by(-pol_angle);
     let sv = sv.from_lma_basis(ell);
 
     (prob, sv)
@@ -44,9 +46,10 @@ pub fn probability(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, dt:
 /// by a photon with normalized momentum `ell` and polarization `sv`
 /// in a plane EM wave with root-mean-square amplitude `a`,
 /// (local) wavector `k` and polarization `pol`.
-pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, rng: &mut R) -> (i32, FourVector) {
+pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64, pol: Polarization, pol_angle: f64, rng: &mut R) -> (i32, FourVector) {
     let eta: f64 = k * ell;
     let sv = sv.in_lma_basis(ell);
+    let sv = sv.rotate_by(pol_angle);
 
     let (n, s, cphi_zmf) = match pol {
         Polarization::Circular => {
@@ -76,7 +79,8 @@ pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64
     // and perpendicular to it
     let along = -ThreeVector::from((j*k).boost_by(u_zmf)).normalize();
 
-    let epsilon = ThreeVector::from(FourVector::new(0.0, 1.0, 0.0, 0.0).boost_by(u_zmf)).normalize();
+    let epsilon = FourVector::new(0.0, pol_angle.cos(), pol_angle.sin(), 0.0);
+    let epsilon = ThreeVector::from(epsilon.boost_by(u_zmf)).normalize();
     let epsilon = {
         let k = along;
         k.cross(epsilon.cross(k)).normalize()
@@ -124,7 +128,7 @@ mod tests {
 
         let rt = std::time::Instant::now();
         let pts: Vec<(i32, f64, f64)> = (0..1_000_000)
-            .map(|_| generate(ell, pol, k, a, Polarization::Circular, &mut rng))
+            .map(|_| generate(ell, pol, k, a, Polarization::Circular, 0.0, &mut rng))
             .map(|(n, q)| (n, (k * q) / (k * ell), q[1].hypot(q[2])))
             .collect();
         let rt = rt.elapsed();
