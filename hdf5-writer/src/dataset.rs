@@ -193,3 +193,190 @@ impl<'a, G, C> Dataset<'a, G, C> where G: GroupHolder<C>, C: Communicator {
         Ok(self.parent)
     }
 }
+
+pub struct DatasetReader<'a, C> where C: Communicator {
+    comm: &'a C,
+    id: h5i::hid_t,
+    type_id: h5i::hid_t,
+    dims: Vec<usize>,
+    is_attribute: bool,
+}
+
+impl<'a, C> DatasetReader<'a, C> where C: Communicator {
+    pub fn open_in<G>(parent: &'a G, name: ffi::CString) -> Result<Self, OutputError> where G: GroupHolder<C> {
+        let id = unsafe {
+            check!( h5d::H5Dopen(
+                parent.id(),
+                name.as_ptr(),
+                h5p::H5P_DEFAULT,
+            ))?
+        };
+
+        let type_id = unsafe {
+            check!( h5d::H5Dget_type(id) )?
+        };
+
+        // Get information about the dataset's dimensions.
+        // A scalar dataset has zero rank.
+        let dims = unsafe {
+            let space_id = check!( h5d::H5Dget_space(id) )?;
+            let ndims = check!( h5s::H5Sget_simple_extent_ndims(space_id) )?;
+
+            let dims = if ndims == 0 { // scalar
+                vec![]
+            } else {
+                let mut dims = vec![0; ndims as usize];
+                let mut maxdims = vec![0; ndims as usize];
+                check!( h5s::H5Sget_simple_extent_dims(
+                    space_id,
+                    dims.as_mut_ptr(),
+                    maxdims.as_mut_ptr()
+                ))?;
+                dims
+            };
+
+            h5s::H5Sclose(space_id);
+            dims
+        };
+
+        let dims: Vec<_> = dims.into_iter().map(|n| n as usize).collect();
+
+        // println!("\tdataset open: {} got id {}, type {}", parent.comm().rank(), id, type_id);
+
+        Ok(Self {
+            comm: parent.comm(),
+            id,
+            type_id,
+            dims,
+            is_attribute: false,
+        })
+    }
+
+    pub fn comm(&self) -> &C {
+        &self.comm
+    }
+
+    pub fn id(&self) -> h5i::hid_t {
+        self.id
+    }
+
+    pub fn type_id(&self) -> h5i::hid_t {
+        self.type_id
+    }
+
+    /// Returns the size of the dataset along each dimension.
+    /// If the dataset is scalar, i.e. it contains only a single value,
+    /// the slice is empty.
+    pub fn dims(&self) -> &[usize] {
+        &self.dims
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.dims.is_empty()
+    }
+
+    pub fn is_attribute(&self) -> bool {
+        self.is_attribute
+    }
+
+    /// Returns the fully qualified path associated with this dataset.
+    pub fn path(&self) -> String {
+        // length is not known in advance
+        let len = unsafe {
+            h5i::H5Iget_name(
+                self.id,
+                std::ptr::null_mut(),
+                0
+            )
+        };
+
+        let len = len.max(0) as usize;
+
+        let str = unsafe {
+            // appends null terminator for us
+            let buffer = ffi::CString::from_vec_unchecked(vec![0; len])
+                .into_raw();
+
+            // read name into buffer
+            h5i::H5Iget_name(
+                self.id,
+                buffer,
+                len + 1
+            );
+
+            ffi::CString::from_raw(buffer)
+        };
+
+        str.into_string().unwrap_or_else(|_| String::new())
+    }
+
+    /// Reads the dataset and
+    /// * broadcasts a single value to all processes, if `T` is a scalar (e.g. `f64`), or
+    /// * divides the contents among all participating MPI processes, if `T` is a slice (e.g. `[f64]`).
+    pub fn read<T>(&self) -> Result<<T as Hdf5Data>::Output, OutputError> where T: Hdf5Data + ?Sized {
+        <T as Hdf5Data>::read_from(self)
+    }
+
+    /// Opens the attribute of the given name, which is attached to this dataset.
+    pub fn open_attribute(&'a self, name: &str) -> Result<Self, OutputError> {
+        let name = to_c_string(name)?;
+
+        let id = unsafe {
+            check!( h5a::H5Aopen(
+                self.id(),
+                name.as_ptr(),
+                h5p::H5P_DEFAULT,
+            ))?
+        };
+
+        let type_id = unsafe {
+            check!( h5a::H5Aget_type(id) )?
+        };
+
+        // Get information about the dataset's dimensions.
+        // A scalar dataset has zero rank.
+        let dims = unsafe {
+            let space_id = check!( h5a::H5Aget_space(id) )?;
+            let ndims = check!( h5s::H5Sget_simple_extent_ndims(space_id) )?;
+
+            let dims = if ndims == 0 { // scalar
+                vec![]
+            } else {
+                let mut dims = vec![0; ndims as usize];
+                let mut maxdims = vec![0; ndims as usize];
+                check!( h5s::H5Sget_simple_extent_dims(
+                    space_id,
+                    dims.as_mut_ptr(),
+                    maxdims.as_mut_ptr()
+                ))?;
+                dims
+            };
+
+            h5s::H5Sclose(space_id);
+            dims
+        };
+
+        let dims: Vec<_> = dims.into_iter().map(|n| n as usize).collect();
+
+        Ok(Self {
+            comm: self.comm(),
+            id,
+            type_id,
+            dims,
+            is_attribute: true,
+        })
+    }
+}
+
+impl<'a, C> Drop for DatasetReader<'a, C> where C: Communicator {
+    fn drop(&mut self) {
+        unsafe {
+            h5t::H5Tclose(self.type_id);
+            if self.is_attribute {
+                h5a::H5Aclose(self.id);
+            } else {
+                h5d::H5Dclose(self.id);
+            }
+        }
+    }
+}

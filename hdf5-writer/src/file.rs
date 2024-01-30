@@ -35,7 +35,7 @@ pub struct ParallelFile<'a, C> where C: Communicator {
 }
 
 impl<'a, C> ParallelFile<'a, C> where C: Communicator {
-    /// Opens a new HDF5 file handle, in parallel.
+    /// Creates, and opens a handle to, a new HDF5 file, in parallel.
     /// All future operations on this file handle must be executed by
     /// *all processes* in the communicator that opened it.
     /// ```
@@ -82,6 +82,64 @@ impl<'a, C> ParallelFile<'a, C> where C: Communicator {
                 h5p::H5P_DEFAULT,
                 plist
             ))?;
+
+            // Close property list
+            check!(h5p::H5Pclose(plist))?;
+
+            id
+        };
+
+        Ok(Self {
+            comm,
+            id,
+            specific_rank: None,
+        })
+    }
+
+    /// Opens a handle to an existing HDF5 file, in parallel.
+    /// ```
+    /// let universe = mpi::initialize().unwrap();
+    /// let world = universe.world();
+    /// let file = ParallelFile::open(&world, "test.h5").unwrap();
+    /// ```
+    pub fn open(comm: &'a C, filename: &str) -> Result<Self, OutputError> {
+        let filename = to_c_string(filename)?;
+
+        let id = unsafe {
+            // Silence errors
+            check!( h5e::H5Eset_auto(
+                h5e::H5E_DEFAULT,
+                None,
+                std::ptr::null_mut()
+            ))?;
+
+            // Set up file access property list with parallel IO
+            let plist = check!(
+                h5p::H5Pcreate(*h5p::H5P_CLS_FILE_ACCESS)
+            )?;
+
+            #[cfg(feature = "with-mpi")] {
+                // Get MPI_INFO_NULL
+                let info: mpi_sys::MPI_Info = {
+                    let mut info: MaybeUninit<_> = MaybeUninit::uninit();
+                    mpi_sys::MPI_Info_create(info.as_mut_ptr());
+                    let mut info = info.assume_init();
+                    mpi_sys::MPI_Info_free(&mut info);
+                    info
+                };
+
+                check!(h5p::H5Pset_fapl_mpio(plist, comm.as_raw(), info))?;
+            }
+
+            // Collectively open a file in read-only mode
+            let id = check!( h5f::H5Fopen(
+                filename.as_ptr(),
+                h5f::H5F_ACC_RDONLY,
+                // h5p::H5P_DEFAULT
+                plist
+            ))?;
+
+            // println!("\tfile open: {} got id {}", comm.rank(), id);
 
             // Close property list
             check!(h5p::H5Pclose(plist))?;

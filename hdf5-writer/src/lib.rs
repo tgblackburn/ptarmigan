@@ -14,6 +14,7 @@ pub use datatype::*;
 pub use error::*;
 pub use file::*;
 pub use group::*;
+pub use write::ScatteredDataset;
 use write::*;
 
 /// Copies a Rust string slice to a owned, nul-terminated C string
