@@ -1,4 +1,4 @@
-//! Writing to datasets
+//! Writing to and reading from datasets
 
 use std::{ffi, mem::MaybeUninit};
 
@@ -34,6 +34,13 @@ pub struct ScatteredDataset<T> {
     pub data: Vec<T>,
     /// Dimensions of the process-specific dataset
     pub dims: Vec<usize>,
+}
+
+impl<T> ScatteredDataset<T> {
+    /// Extract the data, consuming self.
+    pub fn take(self) -> Vec<T> {
+        self.data
+    }
 }
 
 /// Data that can be written to or read from an HDF5 dataset

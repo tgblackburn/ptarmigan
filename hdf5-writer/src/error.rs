@@ -69,6 +69,7 @@ pub unsafe extern "C" fn print_error_stack(n: libc::c_uint, error_desc: *const h
 
 pub enum OutputError {
     Identifier(String),
+    Missing(String),
     TypeMismatch(String),
     H5Call {
         func: String,
@@ -82,6 +83,9 @@ impl fmt::Debug for OutputError {
         match self {
             OutputError::Identifier(s) => {
                 write!(f, "Unable to convert requested identifier '{}' to nul-terminated string!", s)
+            },
+            OutputError::Missing(s) => {
+                write!(f, "Unable to access group/dataset at location '{}'.", s)
             },
             OutputError::TypeMismatch(s) => {
                 write!(f, "Target dataset is not of type '{}'.", s)

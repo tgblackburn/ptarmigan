@@ -9,7 +9,22 @@ use crate::geometry::*;
 mod builder;
 pub use builder::BeamBuilder;
 
+#[cfg(feature = "hdf5-output")]
+mod loader;
+#[cfg(feature = "hdf5-output")]
+pub use loader::BeamLoader;
+
 mod dstr;
+
+pub enum BeamParameters {
+    FromRng {
+        builder: BeamBuilder,
+    },
+    #[cfg(feature = "hdf5-output")]
+    FromHdf5 {
+        loader: BeamLoader,
+    }
+}
 
 #[derive(Copy,Clone,PartialEq,Eq,Debug)]
 #[repr(u8)]
@@ -49,7 +64,6 @@ pub struct Particle {
     r: [FourVector; 2],
     u: [FourVector; 2],
     pol: StokesVector,
-    optical_depth: f64,
     payload: f64,
     interaction_count: f64,
     weight: f64,
@@ -104,7 +118,6 @@ impl Particle {
             r: [r; 2],
             u: [u; 2],
             pol: StokesVector::unpolarized(),
-            optical_depth: std::f64::INFINITY,
             payload: 0.0,
             interaction_count: 0.0,
             weight: 1.0,
@@ -122,12 +135,6 @@ impl Particle {
     /// Updates the particle normalized momentum
     pub fn with_normalized_momentum(&mut self, u: FourVector) -> Self {
         self.u[1] = u;
-        *self
-    }
-
-    /// Updates the particle optical depth
-    pub fn with_optical_depth(&mut self, tau: f64) -> Self {
-        self.optical_depth = tau;
         *self
     }
 
@@ -258,7 +265,6 @@ impl Particle {
             r: [r0, r],
             u: [u0, u],
             pol: self.pol,
-            optical_depth: self.optical_depth,
             payload: self.payload,
             interaction_count: self.interaction_count,
             weight: self.weight,

@@ -2,20 +2,19 @@
 
 use std::ffi;
 
+mod data;
 mod dataset;
 mod datatype;
 mod error;
 mod file;
 mod group;
-mod write;
 
+pub use data::ScatteredDataset;
 pub use dataset::*;
 pub use datatype::*;
 pub use error::*;
 pub use file::*;
 pub use group::*;
-pub use write::ScatteredDataset;
-use write::*;
 
 /// Copies a Rust string slice to a owned, nul-terminated C string
 fn to_c_string(str: &str) -> Result<ffi::CString, OutputError> {

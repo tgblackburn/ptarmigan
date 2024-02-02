@@ -1,4 +1,4 @@
-//! Creating groups within the file structure
+//! Creating and opening groups within the file structure
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;

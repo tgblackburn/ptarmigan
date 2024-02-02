@@ -1,4 +1,4 @@
-//! Creating datasets
+//! Creating and opening datasets
 
 use std::marker::PhantomData;
 use std::ffi;
@@ -23,7 +23,7 @@ use crate::{
     to_c_string,
     GroupHolder,
     OutputError,
-    Hdf5Data,
+    data::Hdf5Data,
     check,
 };
 
@@ -256,11 +256,11 @@ impl<'a, C> DatasetReader<'a, C> where C: Communicator {
         &self.comm
     }
 
-    pub fn id(&self) -> h5i::hid_t {
+    pub(crate) fn id(&self) -> h5i::hid_t {
         self.id
     }
 
-    pub fn type_id(&self) -> h5i::hid_t {
+    pub(crate) fn type_id(&self) -> h5i::hid_t {
         self.type_id
     }
 
@@ -271,7 +271,7 @@ impl<'a, C> DatasetReader<'a, C> where C: Communicator {
         &self.dims
     }
 
-    pub fn is_scalar(&self) -> bool {
+    pub(crate) fn is_scalar(&self) -> bool {
         self.dims.is_empty()
     }
 

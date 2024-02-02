@@ -366,12 +366,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             .unwrap_or(0.0)
     };
 
-    let npart: usize = input.read("beam:n")
-        .or_else(|_| input.read("beam:ne"))
-        ?;
-    let gamma: f64 = input.read("beam:gamma")?;
-    let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
-    let length: f64 = input.read("beam:length").unwrap_or(0.0);
+    // Particle beam properties
+
+    // Following are common to both RNG-distributed and loaded beams:
+    // * species
+    // * collision angles
+    // * offset
+
+    let species = input.read::<String,_>("beam:species")
+        .map_or_else(
+            |e| match e.kind() {
+                // if the species is not specified, default to electron
+                InputErrorKind::Location => Ok(Species::Electron),
+                _ => Err(e)
+            },
+            |s| s.parse::<Species>().map_err(|_| InputError::conversion("beam:species", "species"))
+        )?;
+
     let angle: f64 = input.read("beam:collision_angle").unwrap_or(0.0);
 
     let angle2: f64 = input.read::<String, _>("beam:collision_plane")
@@ -385,88 +396,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             InputErrorKind::Conversion => Err(e),
             // if not present, default to horizontal
             _ => Ok(0.0),
-        })
-        ?;
-
-    let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
-    let weight = input.read("beam:charge")
-        .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
-        .unwrap_or(1.0);
-
-    let (radius, normally_distributed, max_radius) = input.read::<Vec<String>,_>("beam:radius")
-        .and_then(|vs| {
-            // whether a single f64 or a tuple of [f64, dstr],
-            // the first value must be the radius
-            let radius = vs.first().map(|s| input.evaluate(s)).flatten();
-
-            // a second entry, if present, is a distribution spec
-            let normally_distributed = match vs.get(1) {
-                None => Some(true), // if not specified at all, assume normally distributed
-                Some(s) if s == "normally_distributed" => Some(true),
-                Some(s) if s == "uniformly_distributed" => Some(false),
-                _ => None // anything else is an error
-            };
-
-            // a third entry, if present, would be the optional cutoff for a
-            // normal distribution
-            let max_radius = vs.get(2).and_then(|s| input.evaluate(s));
-
-            if let (Some(r), Some(b)) = (radius, normally_distributed) {
-                Ok((r, b, max_radius))
-            } else {
-                eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
-                            \tradius: 2.0e-6\n\
-                            or as a numerical value and a distribution, e.g,\n\
-                            \tradius: [2.0e-6, uniformly_distributed]\n\
-                            \tradius: [2.0e-6, normally_distributed].");
-                Err(InputError::conversion("beam:radius", "radius"))
-                //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
-            }
-        })
-        .or_else(|e| {
-            // if radius is just missing (as opposed to malformed), return 0.0
-            if e.kind() == InputErrorKind::Conversion {
-                Err(e)
-            } else {
-                Ok((0.0, true, None))
-            }
-        })?;
-
-    let species = input.read::<String,_>("beam:species")
-        .map_or_else(
-            |e| match e.kind() {
-                // if the species is not specified, default to electron
-                InputErrorKind::Location => Ok(Species::Electron),
-                _ => Err(e)
-            },
-            |s| s.parse::<Species>().map_err(|_| InputError::conversion("beam:species", "species"))
-        )?;
-    let use_brem_spec = if species == Species::Photon {
-        input.read("beam:bremsstrahlung_source").unwrap_or(false)
-    } else {
-        false
-    };
-    let gamma_min = if use_brem_spec {
-        input.read("beam:gamma_min")?
-    } else {
-        1.0
-    };
-
-    let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
-        .or_else(|e| match e.kind() {
-            InputErrorKind::Location => Ok(0.0),
-            _ => Err(e),
-        })
-        .and_then(|rho| {
-            if use_brem_spec && rho != 0.0 {
-                eprintln!("Energy chirp ignored for bremsstrahlung photons.");
-                Ok(0.0)
-            } else if rho.abs() > 1.0 {
-                eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
-                Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
-            } else {
-                Ok(rho)
-            }
         })
         ?;
 
@@ -485,28 +414,178 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    let sv = input.read::<Vec<f64>,_>("beam:stokes_pars")
-        // if missing, assume to be (0,0,0)
-        .or_else(|e| match e.kind() {
-            InputErrorKind::Location => Ok(vec![0.0; 3]),
-            _ => Err(e),
-        })
-        .and_then(|v| match v.len() {
-            3 => {
-                let sv = StokesVector::new(1.0, v[0], v[1], v[2]);
-                if sv.dop() <= 1.0 {
-                    Ok(sv)
+    let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
+        let filename: String = input.read("beam:from_hdf5:file")?;
+        let filename = format!("{}/{}", output_dir, filename);
+
+        let distance: f64 = input.read("beam:from_hdf5:distance_bt_ips")?;
+
+        let min_energy: f64 = input.read("beam:from_hdf5:min_energy")
+            .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE)
+            .unwrap_or(0.0);
+
+        let max_angle: f64 = input.read("beam:from_hdf5:max_angle")
+            .unwrap_or(consts::PI);
+
+        let loader = BeamLoader::from_file(&filename, species.to_string().as_str(), distance)
+            .with_collision_angle(angle)
+            .with_offset(offset)
+            .with_min_energy(min_energy)
+            .with_max_angle(max_angle);
+
+        BeamParameters::FromHdf5 { loader }
+    } else {
+        // Number, species and weight
+
+        let npart: usize = input.read("beam:n")
+            .or_else(|_| input.read("beam:ne"))
+            ?;
+
+        let weight = input.read("beam:charge")
+            .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
+            .unwrap_or(1.0);
+
+        // Energy distribution
+
+        let gamma: f64 = input.read("beam:gamma")?;
+        let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+
+        let use_brem_spec = if species == Species::Photon {
+            input.read("beam:bremsstrahlung_source").unwrap_or(false)
+        } else {
+            false
+        };
+
+        let gamma_min = if use_brem_spec {
+            input.read("beam:gamma_min")?
+        } else {
+            1.0
+        };
+
+        // Spatial structure
+
+        let length: f64 = input.read("beam:length").unwrap_or(0.0);
+
+        let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
+
+        let (radius, normally_distributed, max_radius) = input.read::<Vec<String>,_>("beam:radius")
+            .and_then(|vs| {
+                // whether a single f64 or a tuple of [f64, dstr],
+                // the first value must be the radius
+                let radius = vs.first().map(|s| input.evaluate(s)).flatten();
+
+                // a second entry, if present, is a distribution spec
+                let normally_distributed = match vs.get(1) {
+                    None => Some(true), // if not specified at all, assume normally distributed
+                    Some(s) if s == "normally_distributed" => Some(true),
+                    Some(s) if s == "uniformly_distributed" => Some(false),
+                    _ => None // anything else is an error
+                };
+
+                // a third entry, if present, would be the optional cutoff for a
+                // normal distribution
+                let max_radius = vs.get(2).and_then(|s| input.evaluate(s));
+
+                if let (Some(r), Some(b)) = (radius, normally_distributed) {
+                    Ok((r, b, max_radius))
                 } else {
-                    eprintln!("Specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
+                    eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
+                                \tradius: 2.0e-6\n\
+                                or as a numerical value and a distribution, e.g,\n\
+                                \tradius: [2.0e-6, uniformly_distributed]\n\
+                                \tradius: [2.0e-6, normally_distributed].");
+                    Err(InputError::conversion("beam:radius", "radius"))
+                    //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
+                }
+            })
+            .or_else(|e| {
+                // if radius is just missing (as opposed to malformed), return 0.0
+                if e.kind() == InputErrorKind::Conversion {
+                    Err(e)
+                } else {
+                    Ok((0.0, true, None))
+                }
+            })?;
+
+        let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Location => Ok(0.0),
+                _ => Err(e),
+            })
+            .and_then(|rho| {
+                if use_brem_spec && rho != 0.0 {
+                    eprintln!("Energy chirp ignored for bremsstrahlung photons.");
+                    Ok(0.0)
+                } else if rho.abs() > 1.0 {
+                    eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
+                    Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
+                } else {
+                    Ok(rho)
+                }
+            })
+            ?;
+
+        // Spin/polarization
+
+        let sv = input.read::<Vec<f64>,_>("beam:stokes_pars")
+            // if missing, assume to be (0,0,0)
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Location => Ok(vec![0.0; 3]),
+                _ => Err(e),
+            })
+            .and_then(|v| match v.len() {
+                3 => {
+                    let sv = StokesVector::new(1.0, v[0], v[1], v[2]);
+                    if sv.dop() <= 1.0 {
+                        Ok(sv)
+                    } else {
+                        eprintln!("Specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
+                        Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
+                    }
+                },
+                _ => {
+                    eprintln!("Particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
                     Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
                 }
-            },
-            _ => {
-                eprintln!("Particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
-                Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
+            })
+            ?;
+
+        // Number per MPI task
+        let nums: Vec<usize> = {
+                let tasks = ntasks as usize;
+                (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()
+            };
+        assert_eq!(nums.iter().sum::<usize>(), npart);
+        let num = nums[id as usize];
+
+        let builder = BeamBuilder::new(species, num)
+            .with_weight(weight)
+            .with_divergence(rms_div)
+            .with_collision_angle(angle)
+            .with_collision_plane_at(angle2)
+            .with_offset(offset)
+            .with_energy_chirp(energy_chirp)
+            .with_polarization(sv)
+            .with_length(length);
+
+        let builder = if normally_distributed {
+            if let Some(r_max) = max_radius {
+                builder.with_trunc_normally_distributed_xy(radius, radius, r_max, r_max)
+            } else {
+                builder.with_normally_distributed_xy(radius, radius)
             }
-        })
-        ?;
+        } else {
+            builder.with_uniformly_distributed_xy(radius)
+        };
+
+        let builder = if use_brem_spec {
+            builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
+        } else {
+            builder.with_normal_energy_spectrum(gamma, sigma)
+        };
+
+        BeamParameters::FromRng { builder }
+    };
 
     let ident: String = input.read("output:ident")
         .map(|s| {
@@ -666,11 +745,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             })
             // failing that, check for automatic increase
             .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
-                Ok(s) if s == "auto" => if using_lcfa {
-                    Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
-                } else {
-                    Ok(increase_pair_rate_by(gamma, a0, wavelength, pol))
+                Ok(s) if s == "auto" => match beam {
+                    BeamParameters::FromRng { builder } => {
+                        let gamma = builder.gamma;
+                        if using_lcfa {
+                            Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
+                        } else {
+                            Ok(increase_pair_rate_by(gamma, a0, wavelength, pol))
+                        }
+                    },
+                    #[cfg(feature = "hdf5-output")]
+                    BeamParameters::FromHdf5 { .. } => {
+                        eprintln!("Automatic increase in pair creation file not available when loading particles from file.");
+                        Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
+                    }
                 },
+                // Ok(s) if s == "auto" => if using_lcfa {
+                //     Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
+                // } else {
+                //     Ok(increase_pair_rate_by(gamma, a0, wavelength, pol))
+                // },
                 _ => Err(e),
             })
             .and_then(|r| if r < 1.0 {
@@ -684,29 +778,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let mut rng = Xoshiro256StarStar::seed_from_u64(seed);
         for _i in 0..id {
             rng.jump();
-        }
-
-        let nums: Vec<usize> = {
-            let tasks = ntasks as usize;
-            (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()
-        };
-        assert_eq!(nums.iter().sum::<usize>(), npart);
-        let num = nums[id as usize];
-
-        if id == 0 {
-            println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
-            if a0_values.len() > 1 {
-                println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
-            }
-            #[cfg(feature = "with-mpi")] {
-                println!("\t* with MPI support enabled");
-            }
-            #[cfg(feature = "hdf5-output")] {
-                println!("\t* writing HDF5 output");
-            }
-            if pair_rate_increase > 1.0 {
-                println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
-            }
         }
 
         let laser: Laser = if focusing && !using_lcfa {
@@ -729,35 +800,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .into()
         };
 
-        let initial_z = laser.ideal_initial_z() + 3.0 * length;
-
-        let builder = BeamBuilder::new(species, num, initial_z)
-            .with_weight(weight)
-            .with_divergence(rms_div)
-            .with_collision_angle(angle)
-            .with_collision_plane_at(angle2)
-            .with_offset(offset)
-            .with_energy_chirp(energy_chirp)
-            .with_polarization(sv)
-            .with_length(length);
-
-        let builder = if normally_distributed {
-            if let Some(r_max) = max_radius {
-                builder.with_trunc_normally_distributed_xy(radius, radius, r_max, r_max)
-            } else {
-                builder.with_normally_distributed_xy(radius, radius)
+        let primaries = match beam {
+            BeamParameters::FromRng { builder } => {
+                let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
+                builder.with_initial_z(initial_z).build(&mut rng)
+            },
+            #[cfg(feature = "hdf5-output")]
+            BeamParameters::FromHdf5 { ref loader } => {
+                let initial_z = laser.ideal_initial_z();
+                loader.clone().with_initial_z(initial_z).build(&world)?
             }
-        } else {
-            builder.with_uniformly_distributed_xy(radius)
         };
 
-        let builder = if use_brem_spec {
-            builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
-        } else {
-            builder.with_normal_energy_spectrum(gamma, sigma)
-        };
-
-        let primaries = builder.build(&mut rng);
+        let num = primaries.len();
 
         let mut current_id = num as u64;
 
@@ -779,6 +834,22 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             (e, g, p)
         };
+
+        if id == 0 {
+            println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+            if a0_values.len() > 1 {
+                println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
+            }
+            #[cfg(feature = "with-mpi")] {
+                println!("\t* with MPI support enabled");
+            }
+            #[cfg(feature = "hdf5-output")] {
+                println!("\t* writing HDF5 output");
+            }
+            if pair_rate_increase > 1.0 {
+                println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
+            }
+        }
 
         let runtime = std::time::Instant::now();
 
@@ -980,39 +1051,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_condition(|| matches!(envelope, Envelope::CosSquared | Envelope::Flattop))
                         .write(&n_cycles)?;
 
-                let charge = match species {
-                    Species::Electron => (npart as f64) * weight * ELECTRON_CHARGE,
-                    Species::Positron => (npart as f64) * weight * -ELECTRON_CHARGE,
-                    Species::Photon => 0.0,
+                let npart = {
+                    #[cfg(feature = "with-mpi")]
+                    use mpi::collective::SystemOperation;
+                    #[cfg(not(feature = "with-mpi"))]
+                    use no_mpi::*;
+                    let mut npart: usize = 0;
+                    world.all_reduce_into(&num, &mut npart, SystemOperation::sum());
+                    npart
                 };
 
-                let r_max = if normally_distributed {
-                    max_radius.unwrap_or(std::f64::INFINITY)
-                } else { // uniformly distributed
-                    radius
-                };
+                let group = conf.new_group("beam")?;
 
-                conf.new_group("beam")?
-                    .new_dataset("n")?
+                group.new_dataset("n")?
                         .with_unit("1")?
                         .with_desc("number of primary macroparticles")?
                         .write(&npart)?
-                    .new_dataset("n_real")?
-                        .with_unit("1")?
-                        .with_desc("total number of real particles represented by the primary macroparticles")?
-                        .write(&((npart as f64) * weight))?
-                    .new_dataset("charge")?.with_unit("C")?.write(&charge)?
-                    .new_dataset("species")?.write(species.to_string().as_str())?
-                    .new_dataset("gamma")?.with_unit("1")?.write(&gamma)?
-                    .new_dataset("sigma")?.with_unit("1")?.write(&sigma)?
-                    .new_dataset("bremsstrahlung_source")?.write(&use_brem_spec)?
-                    .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| use_brem_spec).write(&gamma_min)?
-                    .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
-                    .new_dataset("radius_max")?
-                        .with_unit(units.length.name())?
-                        .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
-                        .write(&r_max.convert(&units.length))?
-                    .new_dataset("length")?.with_unit(units.length.name())?.write(&length.convert(&units.length))?
+                    .new_dataset("species")?
+                        .write(species.to_string().as_str())?
                     .new_dataset("collision_angle")?
                         .with_unit("rad")?
                         .with_desc("polar angle between beam momentum and laser wavevector, zero if counterpropagating")?
@@ -1021,15 +1077,63 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_unit("rad")?
                         .with_desc("azimuthal angle between beam momentum and laser wavevector, zero if p in E, k plane")?
                         .write(&angle2)?
-                    .new_dataset("rms_divergence")?.with_unit("rad")?.write(&rms_div)?
-                    .new_dataset("offset")?.with_unit(units.length.name())?.write(&offset.convert(&units.length))?
-                    .new_dataset("polarization")?
-                        .with_unit("1")?
-                        .with_desc("Stokes parameters of the primary particles: I, Q, U, V")?
-                        .with_alias("polarisation")?
-                        .write(&sv)?
-                    .new_dataset("transverse_distribution_is_normal")?.write(&normally_distributed)?
-                    .new_dataset("longitudinal_distribution_is_normal")?.write(&true)?;
+                    .new_dataset("offset")?
+                        .with_unit(units.length.name())?
+                        .write(&offset.convert(&units.length))?;
+
+                match beam {
+                    BeamParameters::FromRng { ref builder } => {
+                        let charge = match species {
+                            Species::Electron => (npart as f64) * builder.weight * ELECTRON_CHARGE,
+                            Species::Positron => (npart as f64) * builder.weight * -ELECTRON_CHARGE,
+                            Species::Photon => 0.0,
+                        };
+
+                        let (radius, r_max) = builder.radius();
+
+                        group.new_dataset("imported_from_file")?
+                                .write(&false)?
+                            .new_dataset("n_real")?
+                                .with_unit("1")?
+                                .with_desc("total number of real particles represented by the primary macroparticles")?
+                                .write(&((npart as f64) * builder.weight))?
+                            .new_dataset("charge")?.with_unit("C")?.write(&charge)?
+                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma)?
+                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma)?
+                            .new_dataset("bremsstrahlung_source")?.write(&builder.has_brem_spec())?
+                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min)?
+                            .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
+                            .new_dataset("radius_max")?
+                                .with_unit(units.length.name())?
+                                .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
+                                .write(&r_max.convert(&units.length))?
+                            .new_dataset("length")?.with_unit(units.length.name())?.write(&builder.sigma_z.convert(&units.length))?
+                            .new_dataset("rms_divergence")?.with_unit("rad")?.write(&builder.rms_div)?
+                            .new_dataset("polarization")?
+                                .with_unit("1")?
+                                .with_desc("Stokes parameters of the primary particles: I, Q, U, V")?
+                                .with_alias("polarisation")?
+                                .write(&builder.pol)?
+                            .new_dataset("transverse_distribution_is_normal")?.write(&builder.transverse_dstr_is_normal())?
+                            .new_dataset("longitudinal_distribution_is_normal")?.write(&true)?;
+                    },
+                    BeamParameters::FromHdf5 { ref loader } => {
+                        group.new_dataset("imported_from_file")?
+                                .write(&true)?
+                            .new_dataset("distance_bt_ips")?
+                                .with_desc("distance between particle beam source and focal spot")?
+                                .with_unit(units.length.name())?
+                                .write(&loader.distance_bt_ips.convert(&units.length))?
+                            .new_dataset("min_energy")?
+                                .with_desc("primaries with energies below this threshold are discarded")?
+                                .with_unit(units.energy.name())?
+                                .write(&loader.min_energy.convert(&units.energy))?
+                            .new_dataset("max_angle")?
+                                .with_desc("primaries propagating at angles larger than this are discarded")?
+                                .with_unit("rad")?
+                                .write(&loader.max_angle)?;
+                    }
+                }
 
                 conf.new_group("output")?
                     .new_dataset("laser_defines_positive_z")?.write(&laser_defines_z)?

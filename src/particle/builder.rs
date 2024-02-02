@@ -1,5 +1,5 @@
 use rand::prelude::*;
-use rand_distr::{Exp1, StandardNormal};
+use rand_distr::StandardNormal;
 use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use super::{Species, Particle};
 use super::dstr::RadialDistribution;
@@ -8,25 +8,25 @@ use super::dstr::RadialDistribution;
 pub struct BeamBuilder {
     species: Species,
     num: usize,
-    weight: f64,
+    pub weight: f64,
     normal_espec: Option<bool>,
-    gamma: f64,
-    sigma: f64,
-    gamma_min: f64,
+    pub gamma: f64,
+    pub sigma: f64,
+    pub gamma_min: f64,
     gamma_max: f64,
     radial_dstr: RadialDistribution,
-    sigma_z: f64,
+    pub sigma_z: f64,
     energy_chirp: f64,
     angle: f64,
     collision_plane_angle: f64,
-    rms_div: f64,
+    pub rms_div: f64,
     initial_z: f64,
     offset: ThreeVector,
-    pol: StokesVector,
+    pub pol: StokesVector,
 }
 
 impl BeamBuilder {
-    pub fn new(species: Species, num: usize, initial_z: f64) -> Self {
+    pub fn new(species: Species, num: usize) -> Self {
         BeamBuilder {
             species,
             num,
@@ -42,9 +42,16 @@ impl BeamBuilder {
             angle: 0.0,
             collision_plane_angle: 0.0,
             rms_div: 0.0,
-            initial_z,
+            initial_z: 0.0,
             offset: ThreeVector::new(0.0, 0.0, 0.0),
             pol: StokesVector::unpolarized(),
+        }
+    }
+
+    pub fn with_initial_z(&self, initial_z: f64) -> Self {
+        BeamBuilder {
+            initial_z,
+            ..*self
         }
     }
 
@@ -143,6 +150,22 @@ impl BeamBuilder {
         }
     }
 
+    pub fn transverse_dstr_is_normal(&self) -> bool {
+        matches!(self.radial_dstr, RadialDistribution::Normal {..} | RadialDistribution::TruncNormal {..})
+    }
+
+    pub fn has_brem_spec(&self) -> bool {
+        self.normal_espec.map(|b| !b).unwrap_or(false)
+    }
+
+    pub fn radius(&self) -> (f64, f64) {
+        match self.radial_dstr {
+            RadialDistribution::Normal { sigma_x, sigma_y: _ } => (sigma_x, std::f64::INFINITY),
+            RadialDistribution::TruncNormal { sigma_x, sigma_y: _, x_max, y_max: _ } => (sigma_x, x_max),
+            RadialDistribution::Uniform { r_max } => (r_max, r_max),
+        }
+    }
+
     pub fn build<R: Rng>(&self, rng: &mut R) -> Vec<Particle> {
         let normal_espec = self.normal_espec.expect("primary energy spectrum not specified");
         (0..self.num).into_iter()
@@ -212,7 +235,6 @@ impl BeamBuilder {
                 Particle::create(self.species, r)
                     .with_normalized_momentum(u)
                     .with_polarization(self.pol)
-                    .with_optical_depth(rng.sample(Exp1))
                     .with_weight(self.weight)
                     .with_id(i as u64)
                     .with_parent_id(i as u64)

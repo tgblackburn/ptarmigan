@@ -1,4 +1,4 @@
-//! Creating HDF5 files in parallel
+//! Creating and opening HDF5 files in parallel
 
 #[cfg(feature = "with-mpi")]
 use {
