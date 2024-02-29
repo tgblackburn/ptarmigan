@@ -797,7 +797,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         let (mut electrons, mut photons, mut positrons) = primaries
-            .chunks(num / 20)
+            .chunks((num / 20).max(1))
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()

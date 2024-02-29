@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.5
+
+In progress.
+
+Fixed:
+
+* Crash when running with fewer than 20 particles per task.
+* Choice of timestep at very large a0.
+
 ## v1.3.4
 
 2024-01-25
