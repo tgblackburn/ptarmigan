@@ -80,6 +80,7 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
 pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, Option<f64>, f64) {
     use tables::{LN_CHI_MIN, LN_CHI_STEP, QUANTUM_CDF};
     use tables::{LN_DELTA_MIN, LN_DELTA_STEP, Y_CDF, Y_INFINITE_DELTA_CDF};
+    use tables::{HIGH_CHI_CDF, HIGH_CHI_PEAK_CDF};
 
     // index of closest tabulated chi
     let index = (chi.ln() - LN_CHI_MIN) / LN_CHI_STEP;
@@ -90,9 +91,76 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
     if chi.ln() <= LN_CHI_MIN {
         let (omega_mc2, theta, cphi) = classical::sample(chi, gamma, rand1, rand2, rand3);
         // omega = u gamma m classically, but u/(1+u) gamma m in QED
-        (omega_mc2 * gamma / (gamma + omega_mc2), theta, cphi)
-    } else if index >= QUANTUM_CDF.len() - 1 {
-        unimplemented!();
+        return (omega_mc2 * gamma / (gamma + omega_mc2), theta, cphi);
+    }
+
+    let u = if index >= QUANTUM_CDF.len() - 1 {
+        // The CDF is split into two parts: 0 < frac < 1 - 8 / chi, where the shape
+        // is universal, and 1 - 8 / chi < frac < 1, where the shape of the peak
+        // depends on chi. Is rand1 above or below the boundary?
+        let u_bdy = (chi - 8.0) / 8.0;
+
+        // HIGH_CHI_CDF tabulates ln u vs ln[-ln(1 - cdf)], where
+        // cdf(u) = int_0^u dN/du du is properly normalised.
+        let lower = pwmci::Interpolant::new(&HIGH_CHI_CDF);
+
+        let p_lower = if u_bdy.ln() < HIGH_CHI_CDF[0][0] {
+            1.06327715546 * u_bdy.cbrt()
+        } else if u_bdy.ln() < HIGH_CHI_CDF[31][0] {
+            let y = lower.evaluate(u_bdy.ln()).unwrap();
+            1.0 - (-1.0 * y.exp()).exp()
+        } else {
+            1.0 - 0.265819288864 * u_bdy.powf(-2.0/3.0)
+        };
+
+        // HIGH_CHI_PEAK_CDF tabulates ln y vs ln[-ln(1 - cdf)],
+        // scaled appropriately, where y = u / chi - 1 / 9.
+        // The contribution of the peak is p_higher = A [1 - cdf(y_bdy)],
+        // where the scaling factor is A = ... / chi^(2/3).
+        let y_bdy = u_bdy / chi - 1.0 / 9.0;
+        let scale = 0.84626000931 * chi.powf(-2.0/3.0);
+        let higher = pwmci::Interpolant::new(&HIGH_CHI_PEAK_CDF)
+            .extrapolate(true);
+
+        let p_higher = if y_bdy.ln() < HIGH_CHI_PEAK_CDF[0][0] {
+            scale * (1.0 - 7.7567692587 * y_bdy)
+        } else if y_bdy.ln() < HIGH_CHI_PEAK_CDF[31][0] {
+            let t = higher.evaluate(y_bdy.ln()).unwrap();
+            scale * (-1.0 * t.exp()).exp()
+        } else {
+            scale * 0.46534912384 * (-0.45 * u_bdy / chi).exp() * y_bdy.powf(-5.0/3.0)
+        };
+
+        // Now invert r = cdf(u)
+        let r = rand1 * (p_lower + p_higher);
+
+        let u = if r <= p_lower {
+            // invert from lower table
+            let target = (-(1.0 - r).ln()).ln();
+            if target < HIGH_CHI_CDF[0][1] {
+                // cdf = 1.06327715546 * u^(1/3)
+                let u = (r / 1.06327715546).powi(3);
+                u + 1.5 * u * u // add next-order correction
+            } else if target < HIGH_CHI_CDF[31][1] {
+                lower.invert(target).unwrap().exp()
+            } else {
+                // cdf = 1 - 0.265819288864 / u^(2/3)
+                (0.265819288864 / (1.0 - r)).powf(1.5)
+            }
+        } else {
+            // solve A [cdf(y) - cdf(y_bdy)] == r - p_L, r < p_L + p_H
+            // => 1 - cdf(y) = (p_L + p_H - r) / A
+            let target = (p_lower + p_higher - r) / scale;
+            let y = if target < HIGH_CHI_PEAK_CDF[0][1] {
+                (1.0 - target) / 7.7567692587
+            } else {
+                let target = (-1.0 * target.ln()).ln();
+                higher.invert(target).unwrap().exp()
+            };
+            (y + 1.0 / 9.0) * chi
+        };
+
+        u
     } else {
         // First sample u from r_1 = cdf(u; chi)
         let lower = &QUANTUM_CDF[index];
@@ -117,6 +185,10 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         let u = ((1.0 - weight) * ln_u_lower + weight * ln_u_upper).exp();
         //println!("rand1 = {}, u = {}", rand1, u);
 
+        u
+    };
+
+    let theta = {
         // Now get the angle, sampling r_2 = cdf(z|u; chi)
         let beta = 2.0 * u / (3.0 * chi);
         let delta = (1.0 + (1.0 + u).powi(2)) * beta.powf(-2.0/3.0) / (1.0 + u);
@@ -141,9 +213,6 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         };
 
         let z = (y / beta).max(1.0);
-        //if z < 1.0 {
-        //    println!("got f = {:e}, beta = {:e}, delta = {:e}, returning y = {:e}, z = {:e}", u / (1.0 + u), beta, delta, y, z);
-        //}
         //assert!(y >= beta);
         //assert!(z >= 1.0);
         let cos_theta = (gamma - z.powf(2.0/3.0) / (2.0 * gamma)) / (gamma.powi(2) - 1.0).sqrt();
@@ -154,10 +223,11 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         } else {
             None
         };
-        //let theta = cos_theta.min(1.0f64).max(-1.0f64).acos(); // if cos_theta is NaN, it's replaced with 1.0 by the first min
 
-        (gamma * u / (1.0 + u), theta, 2.0 * consts::PI * rand3)
-    }
+        theta
+    };
+
+    (gamma * u / (1.0 + u), theta, 2.0 * consts::PI * rand3)
 }
 
 /// Returns the Stokes vector of the photon with four-momentum `k` (normalized to the
@@ -417,76 +487,60 @@ mod tests {
     }
 
     // #[test]
-    // fn classical_spectrum() {
-    //     use rand::prelude::*;
-    //     use rand_xoshiro::*;
+    // fn extreme_chi() {
     //     use std::fs::File;
     //     use std::io::Write;
 
-    //     let chi = 0.01;
-    //     let gamma = 1000.0;
+    //     const N: usize = 4000;
+    //     const M: usize = 500;
+    //     let chi = 100.0;
+    //     let mut hgram = vec![0.0; N];
+    //     let mut angle = vec![[0.0; 4]; M];
+    //     let mut count = 0.0;
     //     let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-    //     let mut results: Vec<(f64, f64)> = Vec::new();
 
-    //     // 2_000_000 for something more stringent
-    //     for _i in 0..100_000 {
-    //         let (omega_mc2, theta, _) = classical_sample(chi, gamma, rng.gen(), rng.gen(), rng.gen());
-    //         results.push((omega_mc2 / gamma, gamma * theta));
+    //     for _i in 0..100_000_000 {
+    //         let (omega_mc2, theta, _) = sample(chi, 1000.0, rng.gen(), rng.gen(), rng.gen());
+    //         let f = omega_mc2 / 1000.0;
+
+    //         let bin = ((N as f64) * f) as usize;
+    //         if bin < N {
+    //             hgram[bin] += f * 1.0e-8;
+    //         }
+
+    //         if theta.is_some() {
+    //             count += 1.0e-8;
+    //         }
+
+    //         let theta = 1000.0 * theta.unwrap_or(consts::PI);
+    //         let bin = ((M as f64) * theta / 20.0) as usize;
+    //         if bin < M {
+    //             if f > 0.1 - 0.01 && f <= 0.1 + 0.01 {
+    //                 angle[bin][0] += 1.0e-8;
+    //             } else if f > 0.5 - 0.01 && f <= 0.5 + 0.01 {
+    //                 angle[bin][1] += 1.0e-8;
+    //             } else if f > 0.8 - 0.01 && f <= 0.8 + 0.01 {
+    //                 angle[bin][2] += 1.0e-8;
+    //             } else if f > 0.95 - 0.01 && f <= 0.95 + 0.01 {
+    //                 angle[bin][3] += 1.0e-8;
+    //             }
+    //         }
     //     }
 
-    //     let mut file = File::create("ClassicalSpectrumTest.dat").unwrap();
-    //     for result in &results {
-    //         writeln!(file, "{} {}", result.0, result.1).unwrap();
-    //     }
-    // }
-
-    // #[test]
-    // fn quantum_spectrum() {
-    //     use rand::prelude::*;
-    //     use rand_xoshiro::*;
-    //     use std::fs::File;
-    //     use std::io::Write;
-    //     use crate::particle::hgram::*;
-
-    //     let chi = 0.07;
-    //     let gamma = 1000.0;
-    //     let gamma_theta_max = 10.0;
-    //     let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-    //     let mut results: Vec<(f64, f64)> = Vec::new();
-
-    //     // 4_000_000 for something more stringent
-    //     for _i in 0..100_000 {
-    //         let (omega_mc2, theta, _) = sample(chi, gamma, rng.gen(), rng.gen(), rng.gen());
-    //         results.push((omega_mc2 / gamma, gamma * theta));
+    //     let mut file = File::create("spectrum.dat").unwrap();
+    //     for (i, c) in hgram.iter().enumerate() {
+    //         writeln!(file, "{:.3e} {:.3e}", ((i as f64) + 0.5) / (N as f64), (N as f64) * c).unwrap();
     //     }
 
-    //     let mut file = File::create("QuantumSpectrumTest.dat").unwrap();
-    //     for result in &results {
-    //         writeln!(file, "{} {}", result.0, result.1).unwrap();
+    //     let mut file = File::create("angle_spectrum.dat").unwrap();
+    //     for (i, c) in angle.iter().enumerate() {
+    //         writeln!(
+    //             file, "{:.3e} {:.3e} {:.3e} {:.3e} {:.3e}",
+    //             20.0 * ((i as f64) + 0.5) / (M as f64),
+    //             (M as f64) * c[0] / 20.0, (M as f64) * c[1] / 20.0, (M as f64) * c[2] / 20.0, (M as f64) * c[3] / 20.0,
+    //         ).unwrap();
     //     }
 
-    //     let universe = mpi::initialize().unwrap();
-    //     let world = universe.world();
-
-    //     let first = Box::new(|t: &(f64, f64)| t.0.ln()) as Box<dyn Fn(&(f64,f64)) -> f64>;
-    //     let second = Box::new(|t: &(f64, f64)| t.1.ln()) as Box<dyn Fn(&(f64,f64)) -> f64>;
-    //     let hgram = Histogram::generate_2d(&world, &results, [&first, &second], &|_t| 1.0, ["omega/mc^2", "gamma theta"], ["1", "1"], [BinSpec::Automatic, BinSpec::Automatic], HeightSpec::ProbabilityDensity).unwrap();
-    //     hgram.write_fits("!QuantumSpectrumTest_LogScaled.fits").unwrap();
-
-    //     //let subset: Vec<(f64, f64)> = results.into_iter().filter(|t| t.1 < 10.0).collect();
-    //     let subset: Vec<(f64, f64)> = results
-    //         .iter()
-    //         .map(|t|
-    //             if t.1 > gamma_theta_max {
-    //                 (t.0, std::f64::NAN)
-    //             } else {
-    //                 *t
-    //             })
-    //         .collect();
-
-    //     let first = Box::new(|t: &(f64, f64)| t.0) as Box<dyn Fn(&(f64,f64)) -> f64>;
-    //     let second = Box::new(|t: &(f64, f64)| t.1) as Box<dyn Fn(&(f64,f64)) -> f64>;
-    //     let hgram = Histogram::generate_2d(&world, &subset, [&first, &second], &|_t| 1.0, ["omega/mc^2", "gamma theta"], ["1", "1"], [BinSpec::Automatic, BinSpec::Automatic], HeightSpec::ProbabilityDensity).unwrap();
-    //     hgram.write_fits("!QuantumSpectrumTest.fits").unwrap();
+    //     println!("fraction with correct theta = {:.4}", count);
     // }
 }

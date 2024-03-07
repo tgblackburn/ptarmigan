@@ -8,6 +8,7 @@ Fixed:
 
 * Crash when running with fewer than 20 particles per task.
 * Choice of timestep at very large a0.
+* Photon energy sampling at very large chi (LCFA).
 
 ## v1.3.4
 
