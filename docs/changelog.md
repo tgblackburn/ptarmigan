@@ -2,7 +2,7 @@
 
 ## v1.3.5
 
-In progress.
+2024-03-08
 
 Fixed:
 
