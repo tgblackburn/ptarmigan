@@ -184,7 +184,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     pt.with_position(r);
                 }
 
-                if !has_decayed && !options.discard_bg_ph {
+                if !has_decayed && (pt.id() != primary_id || !options.discard_bg_ph) {
                     secondaries.push(pt);
                 }
             }
