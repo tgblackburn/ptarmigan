@@ -348,7 +348,9 @@ impl FastFocusedLaser {
 
 impl Field for FastFocusedLaser {
     fn max_timestep(&self) -> Option<f64> {
-        Some(0.1 / self.omega())
+        let dt = 1.0 / self.omega();
+        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
+        Some(dt * multiplier)
     }
 
     fn contains(&self, r: FourVector) -> bool {

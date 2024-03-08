@@ -138,7 +138,9 @@ impl Field for FastPlaneWave {
         } else {
             1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
         };
-        Some( 0.1 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp) )
+        let dt = 1.0 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp);
+        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
+        Some(dt * multiplier)
     }
 
     fn contains(&self, r: FourVector) -> bool {
