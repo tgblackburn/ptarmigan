@@ -184,7 +184,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     pt.with_position(r);
                 }
 
-                if !has_decayed && !options.discard_bg_ph {
+                if !has_decayed && (pt.id() != primary_id || !options.discard_bg_ph) {
                     secondaries.push(pt);
                 }
             }
@@ -868,7 +868,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         let (mut electrons, mut photons, mut positrons) = primaries
-            .chunks(num / 20)
+            .chunks((num / 20).max(1))
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
