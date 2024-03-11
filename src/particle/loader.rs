@@ -218,7 +218,7 @@ impl BeamLoader {
             let keep_particle = {
                 let p = pt.momentum();
                 let n = ThreeVector::from(p).normalize();
-                let n0: ThreeVector = [-self.collision_angle.cos(), 0.0, -self.collision_angle.cos()].into();
+                let n0: ThreeVector = [-self.collision_angle.sin(), 0.0, -self.collision_angle.cos()].into();
                 p[0] > self.min_energy && n0 * n > self.max_angle.cos()
             };
 

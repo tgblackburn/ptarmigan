@@ -81,6 +81,7 @@ impl Filter {
                 let name = match name {
                     "p^-" | "p-" => "p_minus",
                     "p^+" | "p+" => "p_plus",
+                    "rho" => "radius",
                     _ => name,
                 };
                 functions::identify(name).map(|(f, ftype)| (f, ftype, name))
@@ -209,6 +210,7 @@ impl DistributionFunction {
                 match s {
                     "p^-" | "p-" => Some("p_minus"),
                     "p^+" | "p+" => Some("p_plus"),
+                    "rho" => Some("radius"),
                     _ => Some(s),
             }})
             .collect();
