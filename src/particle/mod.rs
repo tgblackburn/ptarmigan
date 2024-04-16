@@ -88,6 +88,7 @@ impl fmt::Display for Particle {
 pub struct Shower {
     pub primary: Particle,
     pub secondaries: Vec<Particle>,
+    pub intermediates: Vec<Particle>,
 }
 
 impl Particle {
