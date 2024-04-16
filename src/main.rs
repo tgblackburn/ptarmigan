@@ -109,7 +109,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
-                    let (r, mut u, dt_actual) = field.push(
+                    let (r, mut u, dt_actual, work_done) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
@@ -138,6 +138,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
 
                     pt.with_position(r);
                     pt.with_normalized_momentum(u);
+                    pt.update_absorbed_energy(work_done);
                 }
 
                 if pt.id() != primary_id || !options.discard_bg_e || pt.interaction_count() > 0.0 {

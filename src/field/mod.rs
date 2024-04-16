@@ -103,7 +103,8 @@ pub trait Field {
     /// by a timestep `dt`, returning a tuple of the new
     /// position and momentum, as well as the change in
     /// lab time (which may differ from `dt`)
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64);
+    /// and the energy absorbed from the background field.
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64);
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
@@ -155,7 +156,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = laser.max_timestep().unwrap();
-        let mut pond = (r, u, dt);
+        let mut pond = (r, u, dt, 0.0);
         while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -164,7 +165,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = fast_laser.max_timestep().unwrap();
-        let mut lorentz = (r, u, dt);
+        let mut lorentz = (r, u, dt, 0.0);
         while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -202,7 +203,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = laser.max_timestep().unwrap();
-        let mut pond = (r, u, dt);
+        let mut pond = (r, u, dt, 0.0);
         while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -211,7 +212,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = fast_laser.max_timestep().unwrap();
-        let mut lorentz = (r, u, dt);
+        let mut lorentz = (r, u, dt, 0.0);
         while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }

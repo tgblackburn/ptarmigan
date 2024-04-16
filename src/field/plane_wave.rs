@@ -180,7 +180,7 @@ impl Field for PlaneWave {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -214,6 +214,7 @@ impl Field for PlaneWave {
             EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
         };
         let u = u + (f + g) * dtau;
+        let dwork = f[0] * dtau;
 
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
@@ -224,7 +225,7 @@ impl Field for PlaneWave {
 
         //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
         //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
-        (r, u, dt_actual)
+        (r, u, dt_actual, dwork)
     }
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
