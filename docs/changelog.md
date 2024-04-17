@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0
+
+In progress.
+
+Added:
+
+* Decayed photons can be included in the HDF5 output file, if desired, via new optional flag `dump_decayed_photons`.
+
 ## v1.3.5
 
 2024-03-08
