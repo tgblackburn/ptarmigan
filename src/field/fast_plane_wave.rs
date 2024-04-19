@@ -5,7 +5,7 @@ use crate::field::{Field, Polarization, FastFocusedLaser};
 use crate::constants::*;
 use crate::geometry::{FourVector, ThreeVector, StokesVector};
 
-use super::{RadiationMode, EquationOfMotion, Envelope};
+use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
 
 /// Represents a plane-wave laser pulse, including the
 /// fast oscillating carrier wave
@@ -161,11 +161,19 @@ impl Field for FastPlaneWave {
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng, mode == RadiationMode::Classical)
-            .map(|(k, pol)| (k, pol, u - k, a))
+            .map(|(k, pol)| {
+                RadiationEvent {
+                    k,
+                    u_prime: u - k,
+                    pol,
+                    a_eff: a,
+                    absorption: 0.0
+                }
+            })
     }
 
     #[allow(non_snake_case)]

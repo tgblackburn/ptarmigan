@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion, Envelope};
+use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
 
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
@@ -228,7 +228,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -247,7 +247,14 @@ impl Field for PlaneWave {
         if rng.gen::<f64>() < prob {
             let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, self.pol_angle, mode, rng);
             // u' is ignored if recoil is disabled, so we may as well calculate it
-            Some((k, pol, u + (n as f64) * kappa - k, a))
+            let event = RadiationEvent {
+                k,
+                u_prime: u + (n as f64) * kappa - k,
+                pol,
+                a_eff: a,
+                absorption: (n as f64) * kappa[0],
+            };
+            Some(event)
         } else {
             None
         }

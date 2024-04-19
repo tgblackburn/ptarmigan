@@ -117,23 +117,24 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         eqn,
                     );
 
-                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
-                            .with_polarization(pol)
-                            .with_normalized_momentum(k);
+                            .with_polarization(event.pol)
+                            .with_normalized_momentum(event.k);
                         primaries.push(photon);
 
                         if electron_recoils {
-                            u = u_prime;
+                            u = event.u_prime;
                         }
 
                         pt.update_interaction_count(1.0);
+                        pt.update_absorbed_energy(event.absorption);
                     }
 
                     pt.with_position(r);

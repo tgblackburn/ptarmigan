@@ -78,6 +78,21 @@ pub enum RadiationMode {
     Classical,
 }
 
+#[derive(Copy, Clone)]
+pub struct RadiationEvent {
+    /// The normalized momentum of the emitted photon
+    pub k: FourVector,
+    /// The normalized momentum of the recoiling electron/positron
+    pub u_prime: FourVector,
+    /// The polarization of the emitted photon
+    pub pol: StokesVector,
+    /// The effective a0 of the interaction
+    pub a_eff: f64,
+    /// The energy absorbed from the field during the interaction,
+    /// in units of the electron rest energy
+    pub absorption: f64,
+}
+
 /// Specific field structures, i.e. types that implement `trait Field`.
 #[enum_dispatch]
 pub enum Laser {
@@ -108,11 +123,8 @@ pub trait Field {
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
-    /// returns the momentum of that photon,
-    /// its polarization,
-    /// the new momentum of the electron,
-    /// and the effective a0 of the interaction.
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)>;
+    /// returns information about the event (see [RadiationEvent]).
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
