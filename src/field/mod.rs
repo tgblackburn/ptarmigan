@@ -37,7 +37,7 @@ impl Hdf5Type for Polarization {
 }
 
 /// Temporal profile of the laser
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Envelope {
     CosSquared = 0,
@@ -143,6 +143,12 @@ pub trait Field {
     /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
     /// sufficiently distant from the laser so as not to be affected by it.
     fn ideal_initial_z(&self) -> f64;
+
+    /// Returns the total energy of the electromagnetic field and the
+    /// units of that energy (`"J"`, `"J/m"`, `"J/m^2"` , `"J/m^3"`, as appropriate).
+    /// If the field is infinitely extended in one or more dimensions,
+    /// the energy is calculated per unit length in those dimensions.
+    fn energy(&self) -> (f64, &'static str);
 }
 
 #[cfg(test)]

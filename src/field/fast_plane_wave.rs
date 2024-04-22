@@ -111,7 +111,7 @@ impl FastPlaneWave {
                 let arg = -0.5 * (phi / (consts::PI * self.n_cycles)).powi(2);
                 (
                     arg.exp2(),
-                    -2.0 * consts::LN_2 * phi * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
+                    -consts::LN_2 * phi * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
                 )
             }
         };
@@ -128,6 +128,39 @@ impl FastPlaneWave {
         let B = B.rotate_around_z(self.pol_angle);
 
         (E, B)
+    }
+
+    /// Calculates the integrated intensity, i.e. the power per unit area,
+    /// by numerically integration.
+    fn integrated_intensity(&self, points_per_wavelength: i32) -> f64 {
+        let max_phase = match self.envelope {
+            Envelope::CosSquared => consts::PI * self.n_cycles,
+            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles,
+        };
+
+        let dphi = 2.0 * consts::PI / (points_per_wavelength as f64);
+        let dz = dphi / self.wavevector[0];
+        let n_pts = (max_phase / dphi) as i64;
+        let mut energy_flux = 0.0;
+        let mut c = 0.0;
+
+        for n in -n_pts..n_pts {
+            let phi = (n as f64) * dphi;
+            let r: FourVector = [0.0, 0.0, 0.0, -phi / self.wavevector[0]].into();
+            let (e, b) = self.fields(r);
+            let u = 0.5 * VACUUM_PERMITTIVITY * (e.norm_sqr() + SPEED_OF_LIGHT_SQD * b.norm_sqr());
+
+            let weight = if n % 2 == 0 { 2.0 / 3.0 } else { 4.0 / 3.0 };
+            // let weight = 1.0;
+            let y = weight * u * dz - c;
+            let t = energy_flux + y;
+            c = (t - energy_flux) - y;
+            energy_flux = t;
+            // energy_flux += u * dz;
+        }
+
+        energy_flux
     }
 }
 
@@ -192,6 +225,48 @@ impl Field for FastPlaneWave {
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
         }
     }
+
+    fn energy(&self) -> (f64, &'static str) {
+        if self.chirp_b != 0.0 || cfg!(feature = "compensating-chirp") {
+            let ppw = 1.0 + 2.0 * consts::PI * self.chirp_b * self.n_cycles;
+            let ppw = (10.0 * ppw) as i32;
+            return (self.integrated_intensity(ppw), "J/m^2");
+        }
+
+        let intensity = {
+            let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0) / ELEMENTARY_CHARGE;
+            SPEED_OF_LIGHT * VACUUM_PERMITTIVITY * amplitude.powi(2)
+        };
+
+        let delta = match self.pol {
+            Polarization::Linear => 0.0,
+            Polarization::Circular => 1.0,
+        };
+
+        let duration = match self.envelope {
+            Envelope::CosSquared => {
+                let phase = (1.0 + 3.0 * self.n_cycles.powi(2)) * consts::PI / (8.0 * self.n_cycles);
+                (1.0 + delta) * phase / self.omega()
+            },
+            Envelope::Gaussian => {
+                let (phase_x, phase_y) = {
+                    let arg = -(consts::PI * self.n_cycles).powi(2) / consts::LN_2;
+                    let large_n_contr = 0.5 * self.n_cycles * (consts::PI.powi(3) / consts::LN_2).sqrt();
+                    (
+                        large_n_contr - arg.exp_m1() * (consts::LN_2 / consts::PI).sqrt() / (4.0 * self.n_cycles),
+                        large_n_contr + (1.0 + arg.exp()) * (consts::LN_2 / consts::PI).sqrt() / (4.0 * self.n_cycles)
+                    )
+                };
+                (phase_x + delta * phase_y) / self.omega()
+            },
+            Envelope::Flattop => {
+                let phase = (self.n_cycles - 3.0 / 16.0) * consts::PI;
+                (1.0 + delta) * phase / self.omega()
+            },
+        };
+
+        (intensity * duration, "J/m^2")
+    }
 }
 
 #[cfg(test)]
@@ -241,5 +316,29 @@ mod tests {
         assert!(u[1] < 1.0e-3);
         assert!(u[2] < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn energy_flux() {
+        let n_cycles = 2.0;
+        let wavelength = 0.8e-6;
+        let a0 = 10.0;
+        let pol = Polarization::Circular;
+
+        for envelope in [Envelope::CosSquared, Envelope::Gaussian, Envelope::Flattop].iter() {
+            let laser = FastPlaneWave::new(a0, wavelength, n_cycles, pol, 0.0, 0.0)
+                .with_envelope(*envelope);
+
+            let (energy, energy_unit) = laser.energy();
+            let numerical_energy = laser.integrated_intensity(10);
+            let error = (energy - numerical_energy).abs() / numerical_energy;
+
+            println!(
+                "Laser energy ({:?}, {}) = {:.6e} [analytical] {:.6e} [integrated] => error = {:.3e}",
+                envelope, energy_unit, energy, numerical_energy, error
+            );
+
+            assert!(error < 1.0e-4);
+        }
     }
 }

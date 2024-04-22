@@ -408,6 +408,50 @@ impl Field for FastFocusedLaser {
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles(),
         }
     }
+
+    fn energy(&self) -> (f64, &'static str) {
+        let intensity = {
+            let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0) / ELEMENTARY_CHARGE;
+            SPEED_OF_LIGHT * VACUUM_PERMITTIVITY * amplitude.powi(2)
+        };
+
+        let power = {
+            let p0 = 0.5 * consts::PI * intensity * self.waist.powi(2);
+            let e = self.waist / self.rayleigh_range();
+            p0 * (1.0 + e * e / 4.0 + e.powi(4) / 8.0)
+        };
+
+        let delta = match self.pol {
+            Polarization::Linear => 0.0,
+            Polarization::Circular => 1.0,
+        };
+
+        let n_cycles = self.n_cycles();
+
+        let duration = match self.envelope {
+            Envelope::CosSquared => {
+                let phase = (1.0 + 3.0 * n_cycles.powi(2)) * consts::PI / (8.0 * n_cycles);
+                (1.0 + delta) * phase / self.omega()
+            },
+            Envelope::Gaussian => {
+                let (phase_x, phase_y) = {
+                    let arg = -(consts::PI * n_cycles).powi(2) / consts::LN_2;
+                    let large_n_contr = 0.5 * n_cycles * (consts::PI.powi(3) / consts::LN_2).sqrt();
+                    (
+                        large_n_contr - arg.exp_m1() * (consts::LN_2 / consts::PI).sqrt() / (4.0 * n_cycles),
+                        large_n_contr + (1.0 + arg.exp()) * (consts::LN_2 / consts::PI).sqrt() / (4.0 * n_cycles)
+                    )
+                };
+                (phase_x + delta * phase_y) / self.omega()
+            },
+            Envelope::Flattop => {
+                let phase = (n_cycles - 3.0 / 16.0) * consts::PI;
+                (1.0 + delta) * phase / self.omega()
+            },
+        };
+
+        (power * duration, "J")
+    }
 }
 
 #[cfg(test)]
@@ -435,5 +479,29 @@ mod tests {
         assert!(u[1].abs() < 1.0e-3);
         assert!(u[2].abs() < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn energy() {
+        let expected_energy = 1.2_f64;
+        let wavelength = 0.8e-6;
+        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / wavelength;
+        let a0 = 3.0;
+        let waist = 147.839 * expected_energy.sqrt() * wavelength / (a0 * 30_f64.sqrt()); // from LUXE input file
+        let pol = Polarization::Circular;
+        let envelope = Envelope::Gaussian;
+
+        let laser = FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol, 0.0)
+            .with_envelope(envelope);
+
+        let (energy, energy_unit) = laser.energy();
+        let error = (energy - expected_energy).abs() / expected_energy;
+
+        println!(
+            "Laser energy ({:?}, {}) = {:.6e} [analytical] {:.6e} [expected] => error = {:.3e}",
+            envelope, energy_unit, energy, expected_energy, error,
+        );
+
+        assert!(error < 1.0e-3);
     }
 }

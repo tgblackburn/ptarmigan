@@ -286,6 +286,14 @@ impl Field for FocusedLaser {
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles(),
         }
     }
+
+    fn energy(&self) -> (f64, &'static str) {
+        use super::FastFocusedLaser;
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        FastFocusedLaser::new(self.a0, wavelength, self.waist, self.n_cycles(), self.pol, 0.0)
+            .with_envelope(self.envelope)
+            .energy()
+    }
 }
 
 #[cfg(test)]

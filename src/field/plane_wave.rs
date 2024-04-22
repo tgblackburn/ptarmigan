@@ -294,6 +294,14 @@ impl Field for PlaneWave {
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
         }
     }
+
+    fn energy(&self) -> (f64, &'static str) {
+        use super::FastPlaneWave;
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        FastPlaneWave::new(self.a0, wavelength, self.n_cycles, self.pol, 0.0, self.chirp_b)
+            .with_envelope(self.envelope)
+            .energy()
+    }
 }
 
 #[cfg(test)]

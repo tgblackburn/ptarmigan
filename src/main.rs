@@ -5,11 +5,14 @@ use std::f64::consts;
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
 
+#[cfg(feature = "with-mpi")]
+use mpi::collective::SystemOperation;
+
 #[cfg(not(feature = "with-mpi"))]
 extern crate no_mpi as mpi;
 
 #[cfg(not(feature = "with-mpi"))]
-use mpi::Communicator;
+use mpi::{Communicator, SystemOperation};
 
 use rand::prelude::*;
 use rand_xoshiro::*;
@@ -821,6 +824,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
 
         // Particle/parent ids are only unique within a single parallel process
+        let mut absorption = 0.0;
         let mut id_offsets = vec![0u64; world.size() as usize];
         #[cfg(feature = "with-mpi")]
         world.all_gather_into(&current_id, &mut id_offsets[..]);
@@ -829,12 +833,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
             pt.with_id(pt.id() + id_offsets[id as usize]);
             pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
+            absorption += pt.weight() * pt.absorbed_energy();
         }
+
+        let mut total_absorption = 0.0;
+        world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
+        let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
 
         if !laser_defines_z {
             for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
                 *pt = pt.to_beam_coordinate_basis(angle, angle2);
             }
+        }
+
+        let (energy, energy_unit) = laser.energy();
+        let f_abs = total_absorption / energy;
+        if f_abs > 0.1 && id == 0 {
+            println!("Warning: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", 100.0 * f_abs);
         }
 
         // Updating 'ident' in case of a0 looping
@@ -1178,6 +1193,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_unit(units.momentum.name())?
                         .with_desc("four-momentum of the positron")?
                         .write(&p[..])?;
+
+                fs.new_group("laser")?
+                    .only_task(0)
+                    .new_dataset("energy")?
+                        .with_unit(&energy_unit)?
+                        .with_desc("total energy of the laser pulse")?
+                        .with_condition(|| focusing)
+                        .write(&energy)?
+                    .new_dataset("energy_flux")?
+                        .with_unit(&energy_unit)?
+                        .with_desc("total energy of the laser pulse, per unit area")?
+                        .with_condition(|| !focusing)
+                        .write(&energy)?
+                    .new_dataset("absorption")?
+                        .with_unit("J")?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&total_absorption)?;
             },
             OutputMode::None => {},
         }
