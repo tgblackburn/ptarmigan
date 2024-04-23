@@ -20,9 +20,11 @@ use rand_xoshiro::*;
 #[cfg(feature = "hdf5-output")]
 use hdf5_writer;
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 6);
+unzip_n::unzip_n!(pub 7);
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 8);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 9);
 
 mod constants;
 mod field;
@@ -1107,13 +1109,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the photon")?
                         .write(&p[..])?;
 
-                let (x, p, w, n, id, pid) = electrons
+                let (x, p, w, n, abs, id, pid) = electrons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
                         pt.weight(),
                         pt.interaction_count(),
+                        pt.absorbed_energy().convert(&units.energy),
                         pt.id(),
                         pt.parent_id()
                     ))
@@ -1136,6 +1139,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("parent_id")?
                         .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")?
                         .write(&pid[..])?
+                    .new_dataset("absorption")?
+                        .with_unit(units.energy.name())?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&abs[..])?
                     .new_dataset("position")?
                         .with_unit(units.length.name())?
                         .with_desc("four-position of the electron")?
@@ -1145,7 +1152,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the electron")?
                         .write(&p[..])?;
 
-                let (x, x0, p, w, n, id, pid, a) = positrons
+                let (x, x0, p, w, n, abs, id, pid, a) = positrons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
@@ -1153,6 +1160,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         pt.momentum().convert(&units.momentum),
                         pt.weight(),
                         pt.interaction_count(),
+                        pt.absorbed_energy().convert(&units.energy),
                         pt.id(),
                         pt.parent_id(),
                         pt.payload()
@@ -1181,6 +1189,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("parent_id")?
                         .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")?
                         .write(&pid[..])?
+                    .new_dataset("absorption")?
+                        .with_unit(units.energy.name())?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&abs[..])?
                     .new_dataset("position")?
                         .with_unit(units.length.name())?
                         .with_desc("four-position of the positron")?
