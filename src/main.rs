@@ -5,11 +5,14 @@ use std::f64::consts;
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
 
+#[cfg(feature = "with-mpi")]
+use mpi::collective::SystemOperation;
+
 #[cfg(not(feature = "with-mpi"))]
 extern crate no_mpi as mpi;
 
 #[cfg(not(feature = "with-mpi"))]
-use mpi::Communicator;
+use mpi::{Communicator, SystemOperation};
 
 use rand::prelude::*;
 use rand_xoshiro::*;
@@ -17,9 +20,11 @@ use rand_xoshiro::*;
 #[cfg(feature = "hdf5-output")]
 use hdf5_writer;
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 6);
+unzip_n::unzip_n!(pub 7);
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 8);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 9);
 
 mod constants;
 mod field;
@@ -113,7 +118,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
-                    let (r, mut u, dt_actual) = field.push(
+                    let (r, mut u, dt_actual, work_done) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
                         pt.charge_to_mass_ratio(),
@@ -121,27 +126,32 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         eqn,
                     );
 
-                    if let Some((k, pol, u_prime, a_eff)) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
-                            .with_polarization(pol)
-                            .with_normalized_momentum(k);
+                            .with_polarization(event.pol)
+                            .with_normalized_momentum(event.k);
                         primaries.push(photon);
 
                         if electron_recoils {
-                            u = u_prime;
+                            u = event.u_prime;
                         }
 
                         pt.update_interaction_count(1.0);
+
+                        if !options.classical {
+                            pt.update_absorbed_energy(event.absorption);
+                        }
                     }
 
                     pt.with_position(r);
                     pt.with_normalized_momentum(u);
+                    pt.update_absorbed_energy(work_done);
                 }
 
                 if pt.id() != primary_id || !options.discard_bg_e || pt.interaction_count() > 0.0 {
@@ -833,6 +843,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             );
 
         // Particle/parent ids are only unique within a single parallel process
+        let mut absorption = 0.0;
         let mut id_offsets = vec![0u64; world.size() as usize];
         #[cfg(feature = "with-mpi")]
         world.all_gather_into(&current_id, &mut id_offsets[..]);
@@ -841,12 +852,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
             pt.with_id(pt.id() + id_offsets[id as usize]);
             pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
+            absorption += pt.weight() * pt.absorbed_energy();
         }
+
+        let mut total_absorption = 0.0;
+        world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
+        let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
 
         if !laser_defines_z {
             for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
                 *pt = pt.to_beam_coordinate_basis(angle, angle2);
             }
+        }
+
+        #[cfg(feature = "hdf5-output")]
+        let (energy, energy_unit) = laser.energy();
+        #[cfg(not(feature = "hdf5-output"))]
+        let (energy, _) = laser.energy();
+
+        let f_abs = total_absorption / energy;
+        if f_abs > 0.1 && id == 0 {
+            println!("Warning: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", 100.0 * f_abs);
         }
 
         // Updating 'ident' in case of a0 looping
@@ -1105,13 +1131,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the photon")?
                         .write(&p[..])?;
 
-                let (x, p, w, n, id, pid) = electrons
+                let (x, p, w, n, abs, id, pid) = electrons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
                         pt.momentum().convert(&units.momentum),
                         pt.weight(),
                         pt.interaction_count(),
+                        pt.absorbed_energy().convert(&units.energy),
                         pt.id(),
                         pt.parent_id()
                     ))
@@ -1134,6 +1161,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("parent_id")?
                         .with_desc("ID of the particle that created the electron (for primary particles, parent_id = id)")?
                         .write(&pid[..])?
+                    .new_dataset("absorption")?
+                        .with_unit(units.energy.name())?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&abs[..])?
                     .new_dataset("position")?
                         .with_unit(units.length.name())?
                         .with_desc("four-position of the electron")?
@@ -1143,7 +1174,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the electron")?
                         .write(&p[..])?;
 
-                let (x, x0, p, w, n, id, pid, a) = positrons
+                let (x, x0, p, w, n, abs, id, pid, a) = positrons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
@@ -1151,6 +1182,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         pt.momentum().convert(&units.momentum),
                         pt.weight(),
                         pt.interaction_count(),
+                        pt.absorbed_energy().convert(&units.energy),
                         pt.id(),
                         pt.parent_id(),
                         pt.payload()
@@ -1179,6 +1211,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     .new_dataset("parent_id")?
                         .with_desc("ID of the particle that created the positron (for primary particles, parent_id = id)")?
                         .write(&pid[..])?
+                    .new_dataset("absorption")?
+                        .with_unit(units.energy.name())?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&abs[..])?
                     .new_dataset("position")?
                         .with_unit(units.length.name())?
                         .with_desc("four-position of the positron")?
@@ -1250,6 +1286,23 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .with_desc("four-momentum of the photon")?
                             .write(&p[..])?;
                 }
+
+                fs.new_group("laser")?
+                    .only_task(0)
+                    .new_dataset("energy")?
+                        .with_unit(&energy_unit)?
+                        .with_desc("total energy of the laser pulse")?
+                        .with_condition(|| focusing)
+                        .write(&energy)?
+                    .new_dataset("energy_flux")?
+                        .with_unit(&energy_unit)?
+                        .with_desc("total energy of the laser pulse, per unit area")?
+                        .with_condition(|| !focusing)
+                        .write(&energy)?
+                    .new_dataset("absorption")?
+                        .with_unit("J")?
+                        .with_desc("energy absorbed from the laser")?
+                        .write(&total_absorption)?;
             },
             OutputMode::None => {},
         }

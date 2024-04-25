@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion, Envelope};
+use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
 
 /// Represents the envelope of a focusing laser pulse, i.e.
 /// the field after cycle averaging
@@ -165,6 +165,19 @@ impl FocusedLaser {
         let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
         -2.0 * ALPHA_FINE * self.a_sqd(r) * eta.powi(2) * u / (3.0 * COMPTON_TIME)
     }
+
+    /// Returns the leading order contribution to the work done by the
+    /// external field in association with radiation losses, per unit proper time.
+    /// The work is cycle-averaged and normalized to the electron mass.
+    fn landau_lifshitz_work(&self, r: FourVector, u: FourVector) -> f64 {
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
+        let omega = SPEED_OF_LIGHT * self.wavevector[0];
+        let delta = match self.pol {
+            Polarization::Circular => 1.0,
+            Polarization::Linear => 0.75,
+        };
+        2.0 * ALPHA_FINE * omega * eta * delta * self.a_sqd(r).powi(2) / 3.0
+    }
 }
 
 impl Field for FocusedLaser {
@@ -189,7 +202,7 @@ impl Field for FocusedLaser {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -226,6 +239,12 @@ impl Field for FocusedLaser {
 
         let u = u + (f + g) * dtau;
 
+        let dwork = match eqn {
+            EquationOfMotion::Lorentz => f[0] * dtau,
+            EquationOfMotion::LandauLifshitz => (f[0] + self.landau_lifshitz_work(r, u_mid)) * dtau,
+            EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
+        };
+
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
         let dt_actual = dt_actual + 0.5 * u[0] * dtau;
@@ -235,10 +254,10 @@ impl Field for FocusedLaser {
 
         //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
         //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
-        (r, u, dt_actual)
+        (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
@@ -247,7 +266,14 @@ impl Field for FocusedLaser {
         if rng.gen::<f64>() < prob {
             let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, self.pol_angle, mode, rng);
             // u' is ignored if recoil is disabled, so we may as well calculate it
-            Some((k, pol, u + (n as f64) * kappa - k, a))
+            let event = RadiationEvent {
+                k,
+                u_prime: u + (n as f64) * kappa - k,
+                pol,
+                a_eff: a,
+                absorption: (n as f64) * kappa[0],
+            };
+            Some(event)
         } else {
             None
         }
@@ -277,6 +303,14 @@ impl Field for FocusedLaser {
             Envelope::Flattop => 0.5 * wavelength * (self.n_cycles() + 1.0),
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles(),
         }
+    }
+
+    fn energy(&self) -> (f64, &'static str) {
+        use super::FastFocusedLaser;
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        FastFocusedLaser::new(self.a0, wavelength, self.waist, self.n_cycles(), self.pol, 0.0)
+            .with_envelope(self.envelope)
+            .energy()
     }
 }
 
