@@ -165,6 +165,19 @@ impl FocusedLaser {
         let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
         -2.0 * ALPHA_FINE * self.a_sqd(r) * eta.powi(2) * u / (3.0 * COMPTON_TIME)
     }
+
+    /// Returns the leading order contribution to the work done by the
+    /// external field in association with radiation losses, per unit proper time.
+    /// The work is cycle-averaged and normalized to the electron mass.
+    fn landau_lifshitz_work(&self, r: FourVector, u: FourVector) -> f64 {
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
+        let omega = SPEED_OF_LIGHT * self.wavevector[0];
+        let delta = match self.pol {
+            Polarization::Circular => 1.0,
+            Polarization::Linear => 0.75,
+        };
+        2.0 * ALPHA_FINE * omega * eta * delta * self.a_sqd(r).powi(2) / 3.0
+    }
 }
 
 impl Field for FocusedLaser {
@@ -225,7 +238,12 @@ impl Field for FocusedLaser {
         };
 
         let u = u + (f + g) * dtau;
-        let dwork = f[0] * dtau;
+
+        let dwork = match eqn {
+            EquationOfMotion::Lorentz => f[0] * dtau,
+            EquationOfMotion::LandauLifshitz => (f[0] + self.landau_lifshitz_work(r, u_mid)) * dtau,
+            EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
+        };
 
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;

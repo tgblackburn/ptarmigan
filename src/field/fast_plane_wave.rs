@@ -341,4 +341,42 @@ mod tests {
             assert!(error < 1.0e-4);
         }
     }
+
+    #[test]
+    fn depletion() {
+        let n_cycles = 8.0;
+        let wavelength = 0.8e-6;
+        let a0 = 20.0;
+        let pol = Polarization::Linear;
+
+        let laser = FastPlaneWave::new(a0, wavelength, n_cycles, pol, 0.0, 0.0)
+            .with_envelope(Envelope::Gaussian);
+
+        let z0 = laser.ideal_initial_z();
+        let dt = 0.1 * laser.max_timestep().unwrap();
+
+        let mut r = FourVector::new(-z0, 0.0, 0.0, z0);
+        let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
+        let mut work = 0.0;
+
+        while laser.contains(r) {
+            let (r_new, u_new, _, dwork) = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::LandauLifshitz);
+            r = r_new;
+            u = u_new;
+            work += dwork;
+        }
+
+        let expected_work = {
+            let phase = consts::PI.powf(1.5) * laser.n_cycles / 4_f64.ln().sqrt();
+            let omega_mc2 = SPEED_OF_LIGHT * COMPTON_TIME * laser.wavevector[0];
+            let delta = match pol { Polarization::Circular => 1.0, Polarization::Linear => 1.0 / 8.0 };
+            ALPHA_FINE * a0.powi(4) * omega_mc2 * delta * phase / 3.0
+        };
+
+        let error = (work - expected_work).abs() / expected_work;
+
+        println!("LL + LCFA: work/mc^2 = {:.6e} [numerical], {:.6e} [analytical] => error = {:.3e}", work, expected_work, error);
+
+        assert!(error < 1.0e-3);
+    }
 }

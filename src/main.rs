@@ -139,7 +139,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         }
 
                         pt.update_interaction_count(1.0);
-                        pt.update_absorbed_energy(event.absorption);
+
+                        if !options.classical {
+                            pt.update_absorbed_energy(event.absorption);
+                        }
                     }
 
                     pt.with_position(r);
@@ -848,7 +851,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
+        #[cfg(feature = "hdf5-output")]
         let (energy, energy_unit) = laser.energy();
+        #[cfg(not(feature = "hdf5-output"))]
+        let (energy, _) = laser.energy();
+
         let f_abs = total_absorption / energy;
         if f_abs > 0.1 && id == 0 {
             println!("Warning: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", 100.0 * f_abs);

@@ -199,21 +199,21 @@ impl FastFocusedLaser {
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
         let v = SPEED_OF_LIGHT * u / gamma;
 
-        // classical work done by external field, first half:
-        let dwork = 0.5 * rqm * (E * u) * dt / (gamma * SPEED_OF_LIGHT);
-
         // u_i = u_{i-1/2} + (q dt/2 m c) (E + v_{i-1/2} x B)
         let alpha = rqm * dt / (2.0 * SPEED_OF_LIGHT);
         let u_half = u + alpha * (E + v.cross(B));
 
+        // classical work done by external field, time centered
+        let gamma_half = (1.0 + u_half * u_half).sqrt();
+        let dwork = rqm * (E * u_half) * dt / (gamma_half * SPEED_OF_LIGHT);
+
         // (classical) radiated momentum
         let u_rad = if eqn.includes_rr() {
-            let gamma = (1.0 + u_half * u_half).sqrt();
             let u_half_mag = u_half.norm_sqr().sqrt();
             let beta = u_half / u_half_mag;
             let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
             let chi = if E_rf_sqd > 0.0 {
-                gamma * E_rf_sqd.sqrt() / CRITICAL_FIELD
+                gamma_half * E_rf_sqd.sqrt() / CRITICAL_FIELD
             } else {
                 0.0
             };
@@ -248,9 +248,6 @@ impl FastFocusedLaser {
         let u_new = s * (u_prime + (u_prime * t) * t + u_prime.cross(t));
         let u_new = u_new - u_rad;
         let gamma = (1.0 + u_new * u_new).sqrt();
-
-        // classical work done by external field, second half:
-        let dwork = dwork + 0.5 * rqm * (E * u_new) * dt / (gamma * SPEED_OF_LIGHT);
 
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
         let r_new = r + 0.5 * SPEED_OF_LIGHT * u_new * dt / gamma;
