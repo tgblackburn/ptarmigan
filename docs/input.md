@@ -126,6 +126,7 @@ The possible distributions `dstr` are:
 either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value, `e E / m c omega` (if using LCFA).
 * `S_1`, `S_2` and `S_3`: the Stokes parameters associated with the particle polarization. `S_1` is associated with linear polarization along x (+1) or y (-1); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
 In the current version of Ptarmigan, these are meaningful only for photons.
+* `absorption`: the amount of energy the particle has absorbed from the laser pulse.
 
 It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing an additional, bracketed, argument to the output specifier.
 The possible weight functions are:
