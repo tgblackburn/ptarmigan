@@ -1092,10 +1092,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .write(&n_cycles)?;
 
                 let npart = {
-                    #[cfg(feature = "with-mpi")]
-                    use mpi::collective::SystemOperation;
-                    #[cfg(not(feature = "with-mpi"))]
-                    use no_mpi::*;
                     let mut npart: usize = 0;
                     world.all_reduce_into(&num, &mut npart, SystemOperation::sum());
                     npart
