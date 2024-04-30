@@ -7,7 +7,7 @@ use crate::constants::*;
 use crate::geometry::{FourVector, ThreeVector, StokesVector};
 use crate::lcfa;
 
-use super::{RadiationMode, EquationOfMotion, Envelope};
+use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
 
 /// Represents a focusing laser pulse, including
 /// the fast oscillating carrier wave
@@ -193,7 +193,7 @@ impl FastFocusedLaser {
     /// as part of the particle push, following the classical LL prescription.
     #[allow(non_snake_case)]
     #[inline]
-    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    pub fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
         // velocity in SI units
         let u = ThreeVector::from(ui);
         let gamma = (1.0 + u * u).sqrt(); // enforce mass-shell condition
@@ -203,14 +203,17 @@ impl FastFocusedLaser {
         let alpha = rqm * dt / (2.0 * SPEED_OF_LIGHT);
         let u_half = u + alpha * (E + v.cross(B));
 
+        // classical work done by external field, time centered
+        let gamma_half = (1.0 + u_half * u_half).sqrt();
+        let dwork = rqm * (E * u_half) * dt / (gamma_half * SPEED_OF_LIGHT);
+
         // (classical) radiated momentum
         let u_rad = if eqn.includes_rr() {
-            let gamma = (1.0 + u_half * u_half).sqrt();
             let u_half_mag = u_half.norm_sqr().sqrt();
             let beta = u_half / u_half_mag;
             let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
             let chi = if E_rf_sqd > 0.0 {
-                gamma * E_rf_sqd.sqrt() / CRITICAL_FIELD
+                gamma_half * E_rf_sqd.sqrt() / CRITICAL_FIELD
             } else {
                 0.0
             };
@@ -249,7 +252,7 @@ impl FastFocusedLaser {
         let u_new = FourVector::new(gamma, u_new[0], u_new[1], u_new[2]);
         let r_new = r + 0.5 * SPEED_OF_LIGHT * u_new * dt / gamma;
 
-        (r_new, u_new, dt)
+        (r_new, u_new, dt, dwork)
     }
 
     /// Pseudorandomly emit a photon from an electron with normalized
@@ -364,18 +367,26 @@ impl Field for FastFocusedLaser {
     }
 
     #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
         let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
         let (E, B) = self.fields(r);
         FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn)
     }
 
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
         FastFocusedLaser::emit_photon(u, E, B, dt, rng, mode == RadiationMode::Classical)
-            .map(|(k, pol)| (k, pol, u - k, a))
+            .map(|(k, pol)| {
+                RadiationEvent {
+                    k,
+                    u_prime: u - k,
+                    pol,
+                    a_eff: a,
+                    absorption: 0.0
+                }
+            })
     }
 
     #[allow(non_snake_case)]
@@ -393,6 +404,50 @@ impl Field for FastFocusedLaser {
             Envelope::Flattop => 0.5 * wavelength * (self.n_cycles() + 1.0),
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles(),
         }
+    }
+
+    fn energy(&self) -> (f64, &'static str) {
+        let intensity = {
+            let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega() * self.a0) / ELEMENTARY_CHARGE;
+            SPEED_OF_LIGHT * VACUUM_PERMITTIVITY * amplitude.powi(2)
+        };
+
+        let power = {
+            let p0 = 0.5 * consts::PI * intensity * self.waist.powi(2);
+            let e = self.waist / self.rayleigh_range();
+            p0 * (1.0 + e * e / 4.0 + e.powi(4) / 8.0)
+        };
+
+        let delta = match self.pol {
+            Polarization::Linear => 0.0,
+            Polarization::Circular => 1.0,
+        };
+
+        let n_cycles = self.n_cycles();
+
+        let duration = match self.envelope {
+            Envelope::CosSquared => {
+                let phase = (1.0 + 3.0 * n_cycles.powi(2)) * consts::PI / (8.0 * n_cycles);
+                (1.0 + delta) * phase / self.omega()
+            },
+            Envelope::Gaussian => {
+                let (phase_x, phase_y) = {
+                    let arg = -(consts::PI * n_cycles).powi(2) / consts::LN_2;
+                    let large_n_contr = 0.5 * n_cycles * (consts::PI.powi(3) / consts::LN_2).sqrt();
+                    (
+                        large_n_contr - arg.exp_m1() * (consts::LN_2 / consts::PI).sqrt() / (4.0 * n_cycles),
+                        large_n_contr + (1.0 + arg.exp()) * (consts::LN_2 / consts::PI).sqrt() / (4.0 * n_cycles)
+                    )
+                };
+                (phase_x + delta * phase_y) / self.omega()
+            },
+            Envelope::Flattop => {
+                let phase = (n_cycles - 3.0 / 16.0) * consts::PI;
+                (1.0 + delta) * phase / self.omega()
+            },
+        };
+
+        (power * duration, "J")
     }
 }
 
@@ -421,5 +476,29 @@ mod tests {
         assert!(u[1].abs() < 1.0e-3);
         assert!(u[2].abs() < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn energy() {
+        let expected_energy = 1.2_f64;
+        let wavelength = 0.8e-6;
+        let n_cycles = SPEED_OF_LIGHT * 30.0e-15 / wavelength;
+        let a0 = 3.0;
+        let waist = 147.839 * expected_energy.sqrt() * wavelength / (a0 * 30_f64.sqrt()); // from LUXE input file
+        let pol = Polarization::Circular;
+        let envelope = Envelope::Gaussian;
+
+        let laser = FastFocusedLaser::new(a0, wavelength, waist, n_cycles, pol, 0.0)
+            .with_envelope(envelope);
+
+        let (energy, energy_unit) = laser.energy();
+        let error = (energy - expected_energy).abs() / expected_energy;
+
+        println!(
+            "Laser energy ({:?}, {}) = {:.6e} [analytical] {:.6e} [expected] => error = {:.3e}",
+            envelope, energy_unit, energy, expected_energy, error,
+        );
+
+        assert!(error < 1.0e-3);
     }
 }

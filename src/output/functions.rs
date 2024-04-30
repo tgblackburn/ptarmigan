@@ -75,6 +75,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "n_inter" | "n_gamma" | "n_pos" => Some(
             (interaction_count as ParticleOutput, Dimensionless)
         ),
+        "absorption" | "energy_abs" => Some(
+            (absorbed_energy as ParticleOutput, Energy)
+        ),
         "weight" | "number" => Some(
             (weighted_by_number as ParticleOutput, Dimensionless)
         ),
@@ -205,6 +208,10 @@ pub fn payload(pt: &Particle) -> f64 {
 
 pub fn interaction_count(pt: &Particle) -> f64 {
     pt.interaction_count()
+}
+
+pub fn absorbed_energy(pt: &Particle) -> f64 {
+    pt.absorbed_energy()
 }
 
 pub fn stokes_1(pt: &Particle) -> f64 {

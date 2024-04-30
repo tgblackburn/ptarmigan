@@ -66,6 +66,7 @@ pub struct Particle {
     pol: StokesVector,
     payload: f64,
     interaction_count: f64,
+    work: f64,
     weight: f64,
     id: u64,
     parent_id: u64,
@@ -102,6 +103,7 @@ impl fmt::Display for Particle {
 pub struct Shower {
     pub primary: Particle,
     pub secondaries: Vec<Particle>,
+    pub intermediates: Vec<Particle>,
 }
 
 impl Particle {
@@ -120,6 +122,7 @@ impl Particle {
             pol: StokesVector::unpolarized(),
             payload: 0.0,
             interaction_count: 0.0,
+            work: 0.0,
             weight: 1.0,
             id: 0,
             parent_id: 0,
@@ -224,6 +227,21 @@ impl Particle {
         self.interaction_count
     }
 
+    /// Increments the classical work done on the particle by the
+    /// given amount, which is assumed to be normalised to the
+    /// electron rest energy.
+    pub fn update_absorbed_energy(&mut self, delta: f64) -> Self {
+        self.work += delta;
+        *self
+    }
+
+    /// The total amount of energy that this particle has absorbed from
+    /// the laser pulse, in MeV. (Not necessarily equal to the change in the
+    /// particle energy because of radiation losses.)
+    pub fn absorbed_energy(&self) -> f64 {
+        self.work * ELECTRON_MASS_MEV
+    }
+
     /// In the default coordinate system, the laser propagates towards
     /// positive z, and it is the beam that is rotated when a finite collision
     /// angle is requested. This function transforms the particle momenta
@@ -267,6 +285,7 @@ impl Particle {
             pol: self.pol,
             payload: self.payload,
             interaction_count: self.interaction_count,
+            work: self.work,
             weight: self.weight,
             id: self.id,
             parent_id: self.parent_id,

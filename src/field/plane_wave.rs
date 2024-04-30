@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion, Envelope};
+use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
 
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
@@ -156,6 +156,19 @@ impl PlaneWave {
         let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
         -2.0 * ALPHA_FINE * self.a_sqd(r) * eta.powi(2) * u / (3.0 * COMPTON_TIME)
     }
+
+    /// Returns the leading order contribution to the work done by the
+    /// external field in association with radiation losses, per unit proper time.
+    /// The work is cycle-averaged and normalized to the electron mass.
+    fn landau_lifshitz_work(&self, r: FourVector, u: FourVector) -> f64 {
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector * u);
+        let omega = SPEED_OF_LIGHT * self.wavevector[0];
+        let delta = match self.pol {
+            Polarization::Circular => 1.0,
+            Polarization::Linear => 0.75,
+        };
+        2.0 * ALPHA_FINE * omega * eta * delta * self.a_sqd(r).powi(2) / 3.0
+    }
 }
 
 impl Field for PlaneWave {
@@ -180,7 +193,7 @@ impl Field for PlaneWave {
     /// Advances particle position and momentum using a leapfrog method
     /// in proper time. As a consequence, the change in the time may not
     /// be identical to the requested `dt`.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64) {
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
         // equations of motion are:
         //   du/dtau = c grad<a^2>(r) / 2 = f(r)
         //   dr/dtau = c u
@@ -207,13 +220,21 @@ impl Field for PlaneWave {
 
         // u_{n+1} = u_n + f(r_{n+1/2}) * dtau
         let f = 0.5 * SPEED_OF_LIGHT * scale * self.grad_a_sqd(r);
+
         // RR contribution
         let g: FourVector = match eqn {
             EquationOfMotion::Lorentz => [0.0; 4].into(),
             EquationOfMotion::LandauLifshitz =>  scale.powi(2) * self.landau_lifshitz_force(r, u_mid),
             EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
         };
+
         let u = u + (f + g) * dtau;
+
+        let dwork = match eqn {
+            EquationOfMotion::Lorentz => f[0] * dtau,
+            EquationOfMotion::LandauLifshitz => (f[0] + self.landau_lifshitz_work(r, u_mid)) * dtau,
+            EquationOfMotion::ModifiedLandauLifshitz => panic!("Gaunt factor correction is unavailable in LMA mode!"),
+        };
 
         // r_{n+1} = r_{n+1/2} + c u_{n+1} * dtau / 2
         let r = r + 0.5 * SPEED_OF_LIGHT * u * dtau;
@@ -224,10 +245,10 @@ impl Field for PlaneWave {
 
         //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
         //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
-        (r, u, dt_actual)
+        (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -246,7 +267,14 @@ impl Field for PlaneWave {
         if rng.gen::<f64>() < prob {
             let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.pol, self.pol_angle, mode, rng);
             // u' is ignored if recoil is disabled, so we may as well calculate it
-            Some((k, pol, u + (n as f64) * kappa - k, a))
+            let event = RadiationEvent {
+                k,
+                u_prime: u + (n as f64) * kappa - k,
+                pol,
+                a_eff: a,
+                absorption: (n as f64) * kappa[0],
+            };
+            Some(event)
         } else {
             None
         }
@@ -285,6 +313,14 @@ impl Field for PlaneWave {
             Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
             Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
         }
+    }
+
+    fn energy(&self) -> (f64, &'static str) {
+        use super::FastPlaneWave;
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        FastPlaneWave::new(self.a0, wavelength, self.n_cycles, self.pol, 0.0, self.chirp_b)
+            .with_envelope(self.envelope)
+            .energy()
     }
 }
 
@@ -331,5 +367,43 @@ mod tests {
         assert!(u[1] < 1.0e-3);
         assert!(u[2] < 1.0e-3);
         assert!((u * u - 1.0).abs() < 1.0e-3);
+    }
+
+    #[test]
+    fn depletion() {
+        let n_cycles = 8.0;
+        let wavelength = 0.8e-6;
+        let a0 = 20.0;
+        let pol = Polarization::Linear;
+
+        let laser = PlaneWave::new(a0, wavelength, n_cycles, pol, 0.0, 0.0)
+            .with_envelope(Envelope::Gaussian);
+
+        let z0 = laser.ideal_initial_z();
+        let dt = 0.5 * laser.max_timestep().unwrap();
+
+        let mut r = FourVector::new(-z0, 0.0, 0.0, z0);
+        let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
+        let mut work = 0.0;
+
+        while laser.contains(r) {
+            let (r_new, u_new, _, dwork) = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::LandauLifshitz);
+            r = r_new;
+            u = u_new;
+            work += dwork;
+        }
+
+        let expected_work = {
+            let phase = consts::PI.powf(1.5) * laser.n_cycles / 4_f64.ln().sqrt();
+            let omega_mc2 = SPEED_OF_LIGHT * COMPTON_TIME * laser.wavevector[0];
+            let delta = match pol { Polarization::Circular => 1.0, Polarization::Linear => 1.0 / 8.0 };
+            ALPHA_FINE * a0.powi(4) * omega_mc2 * delta * phase / 3.0
+        };
+
+        let error = (work - expected_work).abs() / expected_work;
+
+        println!("LL + LMA: work/mc^2 = {:.6e} [numerical], {:.6e} [analytical] => error = {:.3e}", work, expected_work, error);
+
+        assert!(error < 1.0e-3);
     }
 }

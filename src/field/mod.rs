@@ -37,7 +37,7 @@ impl Hdf5Type for Polarization {
 }
 
 /// Temporal profile of the laser
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Envelope {
     CosSquared = 0,
@@ -78,6 +78,21 @@ pub enum RadiationMode {
     Classical,
 }
 
+#[derive(Copy, Clone)]
+pub struct RadiationEvent {
+    /// The normalized momentum of the emitted photon
+    pub k: FourVector,
+    /// The normalized momentum of the recoiling electron/positron
+    pub u_prime: FourVector,
+    /// The polarization of the emitted photon
+    pub pol: StokesVector,
+    /// The effective a0 of the interaction
+    pub a_eff: f64,
+    /// The energy absorbed from the field during the interaction,
+    /// in units of the electron rest energy
+    pub absorption: f64,
+}
+
 /// Specific field structures, i.e. types that implement `trait Field`.
 #[enum_dispatch]
 pub enum Laser {
@@ -103,15 +118,13 @@ pub trait Field {
     /// by a timestep `dt`, returning a tuple of the new
     /// position and momentum, as well as the change in
     /// lab time (which may differ from `dt`)
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64);
+    /// and the energy absorbed from the background field.
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64);
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
-    /// returns the momentum of that photon,
-    /// its polarization,
-    /// the new momentum of the electron,
-    /// and the effective a0 of the interaction.
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<(FourVector, StokesVector, FourVector, f64)>;
+    /// returns information about the event (see [RadiationEvent]).
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent>;
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
@@ -130,6 +143,12 @@ pub trait Field {
     /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
     /// sufficiently distant from the laser so as not to be affected by it.
     fn ideal_initial_z(&self) -> f64;
+
+    /// Returns the total energy of the electromagnetic field and the
+    /// units of that energy (`"J"`, `"J/m"`, `"J/m^2"` , `"J/m^3"`, as appropriate).
+    /// If the field is infinitely extended in one or more dimensions,
+    /// the energy is calculated per unit length in those dimensions.
+    fn energy(&self) -> (f64, &'static str);
 }
 
 #[cfg(test)]
@@ -155,7 +174,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = laser.max_timestep().unwrap();
-        let mut pond = (r, u, dt);
+        let mut pond = (r, u, dt, 0.0);
         while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -164,7 +183,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = fast_laser.max_timestep().unwrap();
-        let mut lorentz = (r, u, dt);
+        let mut lorentz = (r, u, dt, 0.0);
         while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -202,7 +221,7 @@ mod tests {
 
         // ponderomotive solver
         let dt = laser.max_timestep().unwrap();
-        let mut pond = (r, u, dt);
+        let mut pond = (r, u, dt, 0.0);
         while laser.contains(pond.0) {
             pond = laser.push(pond.0, pond.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }
@@ -211,7 +230,7 @@ mod tests {
         // Lorentz force solve
         // ponderomotive solver
         let dt = fast_laser.max_timestep().unwrap();
-        let mut lorentz = (r, u, dt);
+        let mut lorentz = (r, u, dt, 0.0);
         while fast_laser.contains(lorentz.0) {
             lorentz = fast_laser.push(lorentz.0, lorentz.1, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
         }

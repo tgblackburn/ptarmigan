@@ -74,18 +74,34 @@ The default behaviour is to assume that the particles are unpolarized.
 
 ## output
 
+Ptarmigan has two main modes for generating output.
+[Complete information](#Complete_information) about all particles in the final state (positions, momenta, etc) can be written to a single structured file.
+The code can also generate 1D or 2D spectra from the final-state particle populations: these [distributions](#Distributions) are specified on a per-species basis and are written as individual files.
 All output is written to the directory where the input file is found.
 
+The following options apply to both kinds of output:
+
 * `ident` (optional, default = no prefix): prepends a identifier string to the filenames of all produced output. Uses the name of the input file if `auto` is specified.
-* `file_format`: select how to output particle distribution functions. Possible formats are: `plain_text` or `fits`.
 * `min_energy` (optional, default = `0.0`): if specified, discard secondary particles below a certain energy before creating the output distributions.
 * `max_angle` (optional, default = `pi`): if specified, discard secondary particles that are moving, with respect to the shower's primary particle, at angles greater than the given limit.
-* `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `hdf5` (only available if Ptarmigan has been compiled with the feature `hdf5-output`). A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
 * `coordinate_system` (optional, default = `laser`): by default, particle positions and momenta are output in the simulation coordinate system, where the laser travels towards positive z. If set to `beam`, these are transformed such that the beam propagation defines the positive z direction.
 * `discard_background` (optional, default = `false`): whether to discard primary electrons that have not radiated, or primary photons that have not pair-created, before generating output.
 `discard_background_e`, which applies to electrons only, is accepted for backwards compatibility but has lower priority than `discard_background`.
-* `units` (optional, default = `auto`): select the units to be used when generating distribution or particle output (FITS/HDF5-formatted). Possible choices of unit system are `hep` (distances in mm, momenta in GeV/c, etc), `si` (distances in m, momenta in kg/m/s, etc) or `auto` (distances in m, momenta in MeV/c, etc).
+* `units` (optional, default = `auto`): select the units to be used when generating distribution or particle output. Possible choices of unit system are `hep` (distances in mm, momenta in GeV/c, etc), `si` (distances in m, momenta in kg/m/s, etc) or `auto` (distances in m, momenta in MeV/c, etc).
 In future, it will be possible to select each unit individually.
+
+### Complete information
+
+These options control the output of complete information:
+
+* `dump_all_particles` (optional): if present, information about all particles in the simulation will be written to file in the specified format. Possible formats are: `hdf5` (only available if Ptarmigan has been compiled with the feature `hdf5-output`). A brief guide to the structure and use of the HDF5 output file is explained in [this notebook](hdf5_import_guide.ipynb).
+* `dump_decayed_photons` (optional, default = `false`): if true, information about photons not in the final state (i.e. photons that have pair-created) will be included in the above output file.
+
+### Distributions
+
+These options control the output of particle spectra (distribution functions).
+
+* `file_format`: select how to output particle distribution functions. Possible formats are: `plain_text` or `fits`.
 
 The desired distribution outputs are specified per species:
 
@@ -110,6 +126,7 @@ The possible distributions `dstr` are:
 either the cycle-averaged (RMS) value (if using LMA) or the instantaneous value, `e E / m c omega` (if using LCFA).
 * `S_1`, `S_2` and `S_3`: the Stokes parameters associated with the particle polarization. `S_1` is associated with linear polarization along x (+1) or y (-1); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
 In the current version of Ptarmigan, these are meaningful only for photons.
+* `absorption`: the amount of energy the particle has absorbed from the laser pulse.
 
 It is possible to generate weighted distributions, e.g. `x:y:(energy)`, by passing an additional, bracketed, argument to the output specifier.
 The possible weight functions are:
