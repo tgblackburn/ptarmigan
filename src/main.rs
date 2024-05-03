@@ -166,25 +166,28 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
-                    let (prob, frac, pol_new, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
-                    if let Some((q_e, q_p, a_eff)) = momenta {
+                    let (prob, pol_new, event) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
+
+                    if let Some(event) = event {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(frac * pt.weight())
+                            .with_weight(event.frac * pt.weight())
                             .with_id(id)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
                             .with_parent_id(pt.id())
-                            .with_normalized_momentum(q_e);
+                            .update_absorbed_energy(0.5 * event.absorption)
+                            .with_normalized_momentum(event.u_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(frac * pt.weight())
+                            .with_weight(event.frac * pt.weight())
                             .with_id(id + 1)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
                             .with_parent_id(pt.id())
-                            .with_normalized_momentum(q_p);
+                            .update_absorbed_energy(0.5 * event.absorption)
+                            .with_normalized_momentum(event.u_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - frac));
+                        pt.with_weight(pt.weight() * (1.0 - event.frac));
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }

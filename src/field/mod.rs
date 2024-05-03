@@ -2,7 +2,7 @@
 
 use rand::prelude::*;
 use enum_dispatch::enum_dispatch;
-use crate::geometry::{FourVector, StokesVector};
+use crate::geometry::{FourVector, StokesVector, ThreeVector};
 
 #[cfg(feature = "hdf5-output")]
 use hdf5_writer::{Hdf5Type, Datatype};
@@ -11,6 +11,7 @@ mod focused_laser;
 mod fast_focused_laser;
 mod plane_wave;
 mod fast_plane_wave;
+mod lcf;
 
 pub use self::focused_laser::*;
 pub use self::fast_focused_laser::*;
@@ -93,6 +94,21 @@ pub struct RadiationEvent {
     pub absorption: f64,
 }
 
+#[derive(Copy, Clone)]
+pub struct PairCreationEvent {
+    /// The normalized momentum of the electron
+    pub u_e: FourVector,
+    /// The normalized momentum of the positron
+    pub u_p: FourVector,
+    /// The fraction of the photon that has decayed
+    pub frac: f64,
+    /// The effective a0 of the interaction
+    pub a_eff: f64,
+    /// The energy absorbed from the field during the interaction,
+    /// in units of the electron rest energy
+    pub absorption: f64,
+}
+
 /// Specific field structures, i.e. types that implement `trait Field`.
 #[enum_dispatch]
 pub enum Laser {
@@ -113,36 +129,56 @@ pub trait Field {
     /// Is the specified four-position within the field?
     fn contains(&self, r: FourVector) -> bool;
 
+    /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
+    /// sufficiently distant from the laser so as not to be affected by it.
+    fn ideal_initial_z(&self) -> f64;
+
     /// Advances the position `r` and normalized momentum `u`
     /// of a particle with charge to mass ratio `rqm`
     /// by a timestep `dt`, returning a tuple of the new
     /// position and momentum, as well as the change in
     /// lab time (which may differ from `dt`)
     /// and the energy absorbed from the background field.
-    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64);
+    #[allow(non_snake_case)]
+    fn push(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
+        use crate::constants::SPEED_OF_LIGHT;
+        let r = r + 0.5 * SPEED_OF_LIGHT * u * dt / u[0];
+        let (E, B, _) = self.fields(r);
+        lcf::vay_push(r, u, E, B, rqm, dt, eqn)
+    }
 
     /// Checks to see whether an electron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
     /// returns information about the event (see [RadiationEvent]).
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent>;
+    #[allow(non_snake_case)]
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+        let (E, B, a) = self.fields(r);
+        lcf::radiate(u, E, B, a, dt, rng, mode)
+    }
 
     /// Checks to see if an electron-positron pair is produced by
     /// a photon (position `r`, normalized momentum `ell`, polarization `pol`),
-    /// returning the probability that it occurs in the specified interval `dt` and,
-    /// if so, the fraction of the photon that decays, the
-    /// new Stokes parameters of the photon, the
-    /// the momentum of the electron and positron, and the effective
-    /// a0 of the interaction.
+    /// returning the probability that it occurs in the specified interval `dt`,
+    /// new Stokes parameters of the photon, and information about
+    /// the event (see [PairCreationEvent]).
     ///
     /// A non-unity `rate_increase` makes pair creation more probable
     /// by the given factor, increasing the statistics for what would
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>);
+    #[allow(non_snake_case)]
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+        let (E, B, a) = self.fields(r);
+        lcf::pair_create(ell, pol, E, B, a, dt, rng, rate_increase)
+    }
 
-    /// Returns `z0` such that an ultrarelatistic particle, initialized with `z = z0` at time `-z0/c`, is
-    /// sufficiently distant from the laser so as not to be affected by it.
-    fn ideal_initial_z(&self) -> f64;
+    /// Returns a tuple of the electric and magnetic fields, as well
+    /// as the normalized amplitude (if applicable), at the
+    /// specified four-position `r`.
+    #[allow(unused_variables)]
+    fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
+        ([0.0; 3].into(), [0.0; 3].into(), 0.0)
+    }
 
     /// Returns the total energy of the electromagnetic field and the
     /// units of that energy (`"J"`, `"J/m"`, `"J/m^2"` , `"J/m^3"`, as appropriate).

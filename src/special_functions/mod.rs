@@ -7,7 +7,6 @@ mod airy;
 mod double_bessel;
 
 pub use bessel::*;
-pub use factorial::*;
 pub use airy::*;
 pub use double_bessel::*;
 
