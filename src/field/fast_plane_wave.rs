@@ -117,6 +117,7 @@ impl Field for FastPlaneWave {
     }
 
     #[allow(non_snake_case)]
+    #[inline(always)]
     fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
         // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
         // where delta = 0 for LP and 1 for CP

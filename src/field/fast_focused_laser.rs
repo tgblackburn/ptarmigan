@@ -57,6 +57,7 @@ impl FastFocusedLaser {
     /// at four position `r`, assuming a given carrier envelope `phase`.
     /// The beam is linearly polarized along the x axis.
     #[allow(non_snake_case)]
+    #[inline(always)]
     fn beam(&self, r: FourVector, phase: f64) -> (ThreeVector, ThreeVector, ThreeVector, ThreeVector) {
         let r = r.rotate_around_z(-self.pol_angle);
         let x = r[1] / self.waist;
@@ -118,6 +119,7 @@ impl FastFocusedLaser {
 
     /// Returns the pulse envelope f(ϕ) and its gradient
     /// df(ϕ)/dϕ at the given phase ϕ
+    #[inline(always)]
     fn envelope_and_grad(&self, phase: f64) -> (f64, f64) {
         match self.envelope {
             Envelope::CosSquared => {
@@ -184,6 +186,7 @@ impl Field for FastFocusedLaser {
     /// "Fields of a Gaussian beam beyond the paraxial approximation",
     /// Appl. Phys. B 86, 319 (2007).
     #[allow(non_snake_case)]
+    #[inline(always)]
     fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
         let phase = self.wavevector * r;
         let (f, df_phi) = self.envelope_and_grad(phase);

@@ -14,6 +14,7 @@ use super::{EquationOfMotion, RadiationMode, RadiationEvent, PairCreationEvent};
 /// If `with_rr` is true, the energy loss due to radiation emission is handled
 /// as part of the particle push, following the classical LL prescription.
 #[allow(non_snake_case)]
+#[inline(always)]
 pub(super) fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
     // velocity in SI units
     let u = ThreeVector::from(ui);
@@ -80,6 +81,7 @@ pub(super) fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVe
 /// momentum `u`, which is accelerated by an electric field `E` and
 /// magnetic field `B`.
 #[allow(non_snake_case)]
+#[inline(always)]
 pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: f64, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
     let classical = mode == RadiationMode::Classical;
     let beta = ThreeVector::from(u) / u[0];
@@ -137,6 +139,7 @@ pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: 
 /// the momenta of the electron and positron that are created and
 /// the effective amplitude at the point of creation.
 #[allow(non_snake_case)]
+#[inline(always)]
 pub(super) fn pair_create<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVector, B: ThreeVector, a: f64, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
     let n = ThreeVector::from(u).normalize();
 
