@@ -676,6 +676,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
+    // Temporary warning that stats parsing has changed
+    for stat in estats.iter().chain(gstats.iter()).chain(pstats.iter()) {
+        if stat.has_version_incompatible_filter() && id == 0 {
+            println!(concat!(
+                "Warning: as of Ptarmigan v1.4.0, all bounds in summary statistics are assumed to be in SI units.\n",
+                "         Energy and momentum bounds, previously interpreted as MeV and MeV/c, must be corrected,\n",
+                "         using conversion constants if necessary. Continuing."
+            ));
+            break;
+        }
+    }
+
     // Simulation building and running starts here
     for (run, a0_v) in a0_values.iter().enumerate() {
         let a0: f64 = *a0_v; 

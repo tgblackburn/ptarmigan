@@ -169,9 +169,13 @@ where `op` is one of:
 * `minimum`, `maximum`
 * `circmean`, `circvariance`, `circstd`
 
-and `var` is a desired output (`px`, the x-component of momentum, for example). The range of values to be used can be specified by `var`, or another output entirely, `var2`. Both `min` and `max` can be arbitrary mathematical expressions, using values given in the [constants](#constants) block, or `auto`, in which case the range is detected automatically. The contribution of each particle to the statistic is either its weight (i.e. number) or may given in terms of another variable.
+and `var` is a desired output (`px`, the x-component of momentum, for example).
+The range of values to be used can be specified by `var`, or another output entirely, `var2`.
+Both `min` and `max` can be arbitrary mathematical expressions, using values given in the [constants](#constants) block, or `auto`, in which case the range is detected automatically.
+They are assumed to be given in SI units: use conversion constants, e.g. `MeV` or `MeV/c` for energies and momenta, if necessary.
+The contribution of each particle to the statistic is either its weight (i.e. number) or may given in terms of another variable.
 
-For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0; auto)` computes the average px for all particles that have px greater than 1; `total number for px in (1.0; 2.0)` calculates the number of particles with momentum component between the specified bounds.
+For example: `mean energy` computes the average of the particle energy; ``variance angle_x`energy`` computes the energy-weighted variance of the angle between the particle momentum and the x axis; `mean px in (1.0 * MeV/c; auto)` computes the average px for all particles that have px greater than 1 MeV/c; `total number for px in (1.0 * MeV/c; 2.0 * MeV/c)` calculates the number of particles with momentum component between the specified bounds.
 
 The summary statistics `circmean`, `circvariance` and `circstd`, which compute the circular mean, variance and standard deviation respectively, are meaningful only for angular quantities.
 The circular variance is defined as $ 1- \langle R \rangle$, and the circular standard deviation as $\sqrt{-2\ln\langle R \rangle}$, where $\langle R \rangle$ is the mean resultant vector.

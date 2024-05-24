@@ -9,8 +9,9 @@ use no_mpi::*;
 
 use crate::particle::*;
 
-use super::{ParticleOutput, OutputError, functions};
+use super::{ParticleOutput, ParticleOutputType, OutputError, functions};
 use super::ParticleOutputType::*;
+use super::units::*;
 
 /// Ways an array of particle data can be reduced to
 /// a single, representative value
@@ -55,8 +56,9 @@ impl Reduction {
 #[derive(Clone)]
 struct Operator {
     f: ParticleOutput,
+    f_type: ParticleOutputType,
     name: String,
-    unit: String,
+    unit: Unit,
 }
 
 /// Summarizes a set of observations in a single value,
@@ -94,7 +96,6 @@ impl SummaryStatistic {
 
         // If it does, remove it from the original string
         let words = if let Some(from) = range {
-            //println!("Range spec: '{}'", from);
             spec.replace(from, "")
         } else {
             spec.to_owned()
@@ -103,25 +104,19 @@ impl SummaryStatistic {
         // which is then split up
         let words: Vec<&str> = words.split_whitespace().collect();
 
-        //println!("Words: {:?}, length = {}", words, words.len());
-
         // Check for optional filter variable
         let filter = if words.len() == 5 {
             let tmp = functions::identify(words[3]);
             if tmp.is_none() || words[2] != "for" {
-                return Err(OutputError::conversion(spec, "summary statistic"));
+                return Err(OutputError::conversion_explained(spec, "summary statistic", "the requested filter is not recognised"));
             } else {
-                let unit = match tmp.unwrap().1 {
-                    Dimensionless => "1",
-                    Angle => "rad",
-                    Length => "m",
-                    Energy => "MeV",
-                    Momentum => "MeV/c",
-                };
+                let (f, f_type) = tmp.unwrap();
+                let unit = f_type.into_unit(&UnitSystem::default());
                 Some(Operator {
-                    f: tmp.unwrap().0,
+                    f,
+                    f_type,
                     name: words[3].to_owned(),
-                    unit: unit.to_owned(),
+                    unit,
                 })
             }
         } else {
@@ -135,9 +130,7 @@ impl SummaryStatistic {
             }
             let range = range.unwrap();
             let rs: Vec<&str> = range[1..range.len()-1].split(';').collect();
-            //println!("Broke range spec into {:?}", rs);
             let rs: Vec<String> = rs.iter().map(|&s| s.replace(char::is_whitespace, "")).collect();
-            //println!("Broke range spec into {:?}", rs);
             let (min, max) = if rs.len() == 2 {
                 let min = if rs[0] == "auto" {
                     Some(std::f64::NEG_INFINITY)
@@ -182,7 +175,6 @@ impl SummaryStatistic {
                     _ => return Err(OutputError::conversion_explained(spec, "summary statistic", "the requested operation is not recognised")),
                 };
 
-
                 // The second word can be either 'variable' or 'variable`weight'
                 let varstr: Vec<&str> = words[1].split('`').collect();
                 let (varstr, weightstr) = match varstr.len() {
@@ -192,25 +184,19 @@ impl SummaryStatistic {
                 };
 
                 let variable = if let Some((f, f_type)) = functions::identify(varstr) {
-                    let unit = match f_type {
-                        Dimensionless => "1",
-                        Angle => "rad",
-                        Length => "m",
-                        Energy => "MeV",
-                        Momentum => "MeV/c",
-                    };
+                    let unit = f_type.into_unit(&UnitSystem::default());
 
                     // unit is associated with the function at the moment - but needs to
                     // be consistent with op
                     let unit = match op {
-                        Reduction::Fraction => "1".to_owned(),
-                        Reduction::Variance => if unit == "1" {
-                            "1".to_owned()
+                        Reduction::Fraction => Unit::new(1.0, "1"),
+                        Reduction::Variance => if unit.name() == "1" {
+                            Unit::new(1.0, "1")
                         } else {
-                            format!("({})^2", unit)
+                            Unit::new(1.0, &format!("({})^2", unit.name()))
                         },
-                        Reduction::CircVar => "1".to_owned(),
-                        _ => unit.to_owned(),
+                        Reduction::CircVar => Unit::new(1.0, "1"),
+                        _ => unit.clone(),
                     };
 
                     // CircMean, CircVar, CircStdDev can only be applied to angles
@@ -219,6 +205,7 @@ impl SummaryStatistic {
                     } else {
                         Operator {
                             f,
+                            f_type,
                             name: varstr.to_owned(),
                             unit,
                         }
@@ -228,17 +215,12 @@ impl SummaryStatistic {
                 };
 
                 let weight = if let Some((f, f_type)) = functions::identify(weightstr) {
-                    let unit = match f_type {
-                        Dimensionless => "1",
-                        Angle => "rad",
-                        Length => "m",
-                        Energy => "MeV",
-                        Momentum => "MeV/c",
-                    };
+                    let unit = f_type.into_unit(&UnitSystem::default());
                     Operator {
-                        f: f,
+                        f,
+                        f_type,
                         name: weightstr.to_owned(),
-                        unit: unit.to_owned(),
+                        unit,
                     }
                 } else {
                     return Err(OutputError::conversion(spec, "summary statistic"));
@@ -256,6 +238,15 @@ impl SummaryStatistic {
         } else {
             filter
         };
+
+        // Finally, fix min and max so that they're in the default unit system
+        let unit = if let Some(ref filter) = filter {
+            filter.f_type.into_unit(&UnitSystem::si())
+        } else {
+            variable.f_type.into_unit(&UnitSystem::si())
+        };
+        let min = min.from_si(&unit);
+        let max = max.from_si(&unit);
 
         Ok(SummaryStatistic {
             name: "".to_owned(),
@@ -487,6 +478,16 @@ impl SummaryStatistic {
             }
         };
     }
+
+    /// Checks if this summary stat has a filter with energy or momentum bounds,
+    /// because the parsing of these bounds has been changed for consistency
+    /// with the rest of the input file.
+    pub fn has_version_incompatible_filter(&self) -> bool {
+        self.filter.as_ref().map(|f| {
+            use ParticleOutputType::*;
+            matches!(f.f_type, Energy | Momentum)
+        }).unwrap_or(false)
+    }
 }
 
 impl fmt::Display for SummaryStatistic {
@@ -495,11 +496,11 @@ impl fmt::Display for SummaryStatistic {
         // "photon: mean energy (1.00e+3 < r_perp < 2.00e+3) = 1.000e+3 [MeV]"
         let bounds = if self.filter.is_some() {
             if self.min.is_finite() && self.max.is_infinite() {
-                format!(" ({} [{}] > {:.6e})", self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit, self.min)
+                format!(" ({} [{}] > {:.6e})", self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit.name(), self.min)
             } else if self.min.is_infinite() && self.max.is_finite() {
-                format!(" ({} [{}] < {:.6e})", self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit, self.max)
+                format!(" ({} [{}] < {:.6e})", self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit.name(), self.max)
             } else {
-                format!(" ({:.6e} < {} [{}] < {:.6e})", self.min, self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit, self.max)
+                format!(" ({:.6e} < {} [{}] < {:.6e})", self.min, self.filter.as_ref().unwrap().name, self.filter.as_ref().unwrap().unit.name(), self.max)
             }
         } else {
             "".to_owned()
@@ -509,7 +510,7 @@ impl fmt::Display for SummaryStatistic {
         } else {
             "".to_owned()
         };
-        write!(f, "{}: {} {}{}{} = {:.6e} [{}]", self.name, self.op, self.variable.name, wstr, bounds, self.val, self.variable.unit)
+        write!(f, "{}: {} {}{}{} = {:.6e} [{}]", self.name, self.op, self.variable.name, wstr, bounds, self.val, self.variable.unit.name())
     }
 }
 
@@ -578,15 +579,21 @@ mod tests {
 
     #[test]
     fn parsing() {
+        use crate::constants::*;
         use evalexpr::*;
+
         let ctx = context_map! {
             "a" => 2.0,
-        }.unwrap();
+            "c" => SPEED_OF_LIGHT,
+            "MeV" => 1.0e6 * ELEMENTARY_CHARGE,
+            "micro" => 1.0e-6,
+        }.unwrap()
+;
         let parser = |s: &str| -> Option<f64> {
             eval_number_with_context(s, &ctx).ok()
         };
 
-        let test = "mean energy in (1.0; auto)";
+        let test = "mean energy in (1.0 * MeV; auto)";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
         println!("Got stat = {}", stat);
         assert_eq!(stat.op, Reduction::Mean);
@@ -609,7 +616,7 @@ mod tests {
         }
         assert!(stat.is_err());
 
-        let test = "frac number for p_perp in (auto; 100.0)";
+        let test = "frac number for p_perp in (auto; 100.0 * MeV/c)";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
         println!("Got stat = {}", stat);
         assert_eq!(stat.op, Reduction::Fraction);
@@ -617,13 +624,23 @@ mod tests {
         assert_eq!(stat.min, std::f64::NEG_INFINITY);
         assert_eq!(stat.max, 100.0);
 
-        let test = "total r_perp for p^- in (a / (1.0 + a); 1000.0)";
+        let test = "total r_perp for p^- in (a / (1.0 + a) * MeV/c; 1000.0 * MeV/c)";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
         println!("Got stat = {}", stat);
         assert_eq!(stat.op, Reduction::Total);
         assert!(stat.filter.is_some());
-        assert_eq!(stat.min, 2.0 / 3.0);
-        assert_eq!(stat.max, 1000.0);
+        assert!((stat.min - 2.0 / 3.0) / (2.0 / 3.0) < 1.0e-10);
+        assert!((stat.max - 1000.0) / 1000.0 < 1.0e-10);
+
+        let test = "mean p_x for x in (-1.0 * micro; 1.0 * micro)";
+        let stat = SummaryStatistic::load(test, &parser).unwrap();
+        println!("Got stat = {}", stat);
+        assert_eq!(stat.op, Reduction::Mean);
+        assert_eq!(stat.variable.unit.name(), "MeV/c");
+        assert!(stat.filter.is_some());
+        assert_eq!(stat.filter.unwrap().unit.name(), "m");
+        assert_eq!(stat.min, -1.0e-6);
+        assert_eq!(stat.max, 1.0e-6);
 
         let test = "circmean angle_x`energy";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
