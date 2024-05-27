@@ -122,6 +122,7 @@ pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: 
                 u_prime: u - k,
                 pol,
                 a_eff: a,
+                chi,
                 absorption: 0.0
             })
         } else {
@@ -181,6 +182,7 @@ pub(super) fn pair_create<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVecto
             u_p,
             frac: 1.0 / rate_increase,
             a_eff: a,
+            chi,
             absorption: 0.0,
         };
 

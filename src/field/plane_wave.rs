@@ -272,6 +272,7 @@ impl Field for PlaneWave {
                 u_prime: u + (n as f64) * kappa - k,
                 pol,
                 a_eff: a,
+                chi: a * (u * kappa),
                 absorption: (n as f64) * kappa[0],
             };
             Some(event)
@@ -305,6 +306,7 @@ impl Field for PlaneWave {
                 u_p: q_p,
                 frac: 1.0 / rate_increase,
                 a_eff: a,
+                chi: a * (ell * kappa),
                 absorption: (n as f64) * kappa[0],
             };
             (prob, pol_new, Some(event))

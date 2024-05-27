@@ -69,6 +69,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "birth_a" => Some(
             (payload as ParticleOutput, Dimensionless)
         ),
+        "parent_chi" => Some(
+            (parent_chi as ParticleOutput, Dimensionless)
+        ),
         "n_inter" | "n_gamma" | "n_pos" => Some(
             (interaction_count as ParticleOutput, Dimensionless)
         ),
@@ -196,6 +199,10 @@ pub fn z(pt: &Particle) -> f64 {
 
 pub fn payload(pt: &Particle) -> f64 {
     pt.payload()
+}
+
+pub fn parent_chi(pt: &Particle) -> f64 {
+    pt.parent_chi()
 }
 
 pub fn interaction_count(pt: &Particle) -> f64 {

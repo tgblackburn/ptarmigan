@@ -89,6 +89,8 @@ pub struct RadiationEvent {
     pub pol: StokesVector,
     /// The effective a0 of the interaction
     pub a_eff: f64,
+    /// The quantum parameter of the parent particle
+    pub chi: f64,
     /// The energy absorbed from the field during the interaction,
     /// in units of the electron rest energy
     pub absorption: f64,
@@ -104,6 +106,8 @@ pub struct PairCreationEvent {
     pub frac: f64,
     /// The effective a0 of the interaction
     pub a_eff: f64,
+    /// The quantum parameter of the parent particle
+    pub chi: f64,
     /// The energy absorbed from the field during the interaction,
     /// in units of the electron rest energy
     pub absorption: f64,

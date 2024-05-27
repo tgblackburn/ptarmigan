@@ -8,6 +8,7 @@ Added:
 
 * Decayed photons can be included in the HDF5 output file, if desired, via new optional flag `dump_decayed_photons`.
 * Tracking of laser depletion: new output variable `absorption` can be used to examine how much energy electrons and positrons have drawn from the laser pulse.
+* Tracking of quantum parameters at point of creation, via new output variable `parent_chi`.
 
 ## v1.3.5
 

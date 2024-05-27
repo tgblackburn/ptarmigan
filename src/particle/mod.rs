@@ -51,6 +51,7 @@ pub struct Particle {
     pol: StokesVector,
     optical_depth: f64,
     payload: f64,
+    parent_chi: f64,
     interaction_count: f64,
     work: f64,
     weight: f64,
@@ -108,6 +109,7 @@ impl Particle {
             pol: StokesVector::unpolarized(),
             optical_depth: std::f64::INFINITY,
             payload: 0.0,
+            parent_chi: 0.0,
             interaction_count: 0.0,
             work: 0.0,
             weight: 1.0,
@@ -209,6 +211,15 @@ impl Particle {
         self.payload
     }
 
+    pub fn with_parent_chi(&mut self, chi: f64) -> Self {
+        self.parent_chi = chi;
+        *self
+    }
+
+    pub fn parent_chi(&self) -> f64 {
+        self.parent_chi
+    }
+
     /// Increments the particle interaction count by the given
     /// delta.
     pub fn update_interaction_count(&mut self, delta: f64) -> Self {
@@ -278,6 +289,7 @@ impl Particle {
             pol: self.pol,
             optical_depth: self.optical_depth,
             payload: self.payload,
+            parent_chi: self.parent_chi,
             interaction_count: self.interaction_count,
             work: self.work,
             weight: self.weight,
