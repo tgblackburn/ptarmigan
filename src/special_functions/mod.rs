@@ -2,9 +2,11 @@
 //! provided by the standard lib.
 
 mod bessel;
-mod factorial;
 mod airy;
 mod double_bessel;
+
+#[cfg(feature = "leading-order-only")]
+mod factorial;
 
 pub use bessel::*;
 pub use airy::*;
