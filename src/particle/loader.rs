@@ -157,12 +157,14 @@ impl BeamLoader {
 
         // Translating the coordinate system
         let laser_defines_z = file
-            .open_dataset("config/output/laser_defines_positive_z")?
-            .read::<bool>()?;
+            .open_dataset("config/output/laser_defines_positive_z")
+            .and_then(|ds| ds.read::<bool>())
+            .unwrap_or(true);
 
         let collision_angle = file
-            .open_dataset("config/beam/collision_angle")?
-            .read::<f64>()?;
+            .open_dataset("config/beam/collision_angle")
+            .and_then(|ds| ds.read::<f64>())
+            .unwrap_or(0.0);
 
         // introduced in v1.3.4, optionally supported
         let _collision_plane_angle = file
@@ -170,18 +172,23 @@ impl BeamLoader {
             .and_then(|ds| ds.read::<f64>())
             .unwrap_or(0.0);
 
-        // println!("\tlaser coordinate system? {}, collision angle = {} deg, collision plane angle = {} deg", laser_defines_z, collision_angle * (180.0 / std::f64::consts::PI), collision_plane_angle * (180.0 / std::f64::consts::PI));
+        // println!("\tlaser coordinate system? {}, collision angle = {} deg, collision plane angle = {} deg", laser_defines_z, collision_angle * (180.0 / std::f64::consts::PI), _collision_plane_angle * (180.0 / std::f64::consts::PI));
 
         let weight = file.open_dataset(&self.weight_path)?
             .read::<[f64]>()?
             .take();
 
+        // println!("\tgot {} weights ({}, ...)", weight.len(), weight[0]);
+
         let dataset = file.open_dataset(&self.position_path)?;
-        // let unit = dataset.open_attribute("unit")?.read::<String>();
+        // let unit: Result<Unit, _> = dataset.open_attribute("unit")
+        //     .and_then(|ds| ds.read::<String>())
+        //     .and_then(|s| s.parse().map_err(|_| OutputError::TypeMismatch("valid position unit".to_owned())))
+        //     ;
+        // println!("\tunit from attribute = {:?}", unit);
         let position = dataset.read::<[FourVector]>()?.take();
 
         let dataset = file.open_dataset(&self.momentum_path)?;
-        // let unit = dataset.open_attribute("unit")?.read::<String>();
         let momentum = dataset.read::<[FourVector]>()?.take();
 
         let polarization = file.open_dataset(&self.polarization_path)

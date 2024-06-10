@@ -25,6 +25,7 @@ use crate::{
     OutputError,
     data::Hdf5Data,
     check,
+    check_silent,
 };
 
 pub struct Dataset<'a, G, C> where G: GroupHolder<C>, C: Communicator {
@@ -205,7 +206,7 @@ pub struct DatasetReader<'a, C> where C: Communicator {
 impl<'a, C> DatasetReader<'a, C> where C: Communicator {
     pub fn open_in<G>(parent: &'a G, name: ffi::CString) -> Result<Self, OutputError> where G: GroupHolder<C> {
         let id = unsafe {
-            check!( h5d::H5Dopen(
+            check_silent!( h5d::H5Dopen(
                 parent.id(),
                 name.as_ptr(),
                 h5p::H5P_DEFAULT,
@@ -322,7 +323,7 @@ impl<'a, C> DatasetReader<'a, C> where C: Communicator {
         let name = to_c_string(name)?;
 
         let id = unsafe {
-            check!( h5a::H5Aopen(
+            check_silent!( h5a::H5Aopen(
                 self.id(),
                 name.as_ptr(),
                 h5p::H5P_DEFAULT,

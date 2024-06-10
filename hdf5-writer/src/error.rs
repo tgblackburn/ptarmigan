@@ -40,6 +40,24 @@ macro_rules! check {
     }}
 }
 
+#[macro_export]
+macro_rules! check_silent {
+    ($class:ident::$func:ident($($args:expr),* $(,)?)) => {{
+        use crate::{OutputError, Checkable};
+        // invoke function
+        let val = $class::$func($($args,)*);
+        if val.is_error_code() {
+            Err(OutputError::H5Call {
+                func: stringify!($func).to_owned(),
+                file: file!().to_owned(),
+                line: line!(),
+            })
+        } else {
+            Ok(val)
+        }
+    }}
+}
+
 // Callback that prints the error stack, which can be passed to HDF5 library
 #[allow(deprecated)]
 pub unsafe extern "C" fn print_error_stack(n: libc::c_uint, error_desc: *const h5e::H5E_error_t, _: *mut libc::c_void) -> h5::herr_t {

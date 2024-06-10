@@ -666,34 +666,68 @@ impl Hdf5Data for str {
             return Err(OutputError::TypeMismatch(type_name));
         }
 
+        // some idiot might be using variable-length strings...
+        let is_vlen_string = unsafe {
+            h5t::H5Tis_variable_str(ds.type_id()) == 1
+        };
+
         unsafe {
-            let len = h5t::H5Tget_size(ds.type_id()); // not including null terminator
-            let mut buffer: Vec<u8> = vec![0; len];
+            if is_vlen_string {
+                // interpret data as pointer to char
+                let mut ptr: *const ffi::c_char = std::ptr::null();
 
-            if ds.is_attribute() {
-                check!( h5a::H5Aread(
-                    ds.id(),
-                    ds.type_id(),
-                    buffer.as_mut_ptr() as *mut ffi::c_void,
-                ))?;
+                if ds.is_attribute() {
+                    check!( h5a::H5Aread(
+                        ds.id(),
+                        ds.type_id(),
+                        &mut ptr as *mut _ as *mut ffi::c_void,
+                    ))?;
+                } else {
+                    check!( h5d::H5Dread(
+                        ds.id(),
+                        ds.type_id(),
+                        h5s::H5S_ALL,
+                        h5s::H5S_ALL,
+                        h5p::H5P_DEFAULT,
+                        &mut ptr as *mut _ as *mut ffi::c_void,
+                    ))?;
+                }
+
+                ffi::CStr::from_ptr(ptr)
+                    .to_str()
+                    .map_err(|_| OutputError::TypeMismatch("valid UTF-8".to_owned()))
+                    .map(|s| s.to_owned())
             } else {
-                let filespace = check!( h5d::H5Dget_space(ds.id()) )?;
-                let memspace = check!( h5s::H5Screate(h5s::H5S_SCALAR))?;
+                let len = h5t::H5Tget_size(ds.type_id()); // not including null terminator
+                let mut buffer: Vec<u8> = vec![0; len];
 
-                check!( h5d::H5Dread(
-                    ds.id(),
-                    ds.type_id(),
-                    memspace,
-                    filespace,
-                    h5p::H5P_DEFAULT,
-                    buffer.as_mut_ptr() as *mut ffi::c_void,
-                ))?;
+                if ds.is_attribute() {
+                    check!( h5a::H5Aread(
+                        ds.id(),
+                        ds.type_id(),
+                        buffer.as_mut_ptr() as *mut ffi::c_void,
+                    ))?;
+                } else {
+                    let filespace = check!( h5d::H5Dget_space(ds.id()) )?;
+                    let memspace = check!( h5s::H5Screate(h5s::H5S_SCALAR))?;
 
-                check!( h5s::H5Sclose(memspace) )?;
-                check!( h5s::H5Sclose(filespace) )?;
+                    check!( h5d::H5Dread(
+                        ds.id(),
+                        ds.type_id(),
+                        memspace,
+                        filespace,
+                        h5p::H5P_DEFAULT,
+                        buffer.as_mut_ptr() as *mut ffi::c_void,
+                    ))?;
+
+                    println!("\tbuffer holding {:?} => {:?}", buffer, String::from_utf8_lossy(&buffer));
+
+                    check!( h5s::H5Sclose(memspace) )?;
+                    check!( h5s::H5Sclose(filespace) )?;
+                }
+
+                String::from_utf8(buffer).map_err(|_| OutputError::TypeMismatch("valid UTF-8".to_owned()))
             }
-
-            String::from_utf8(buffer).map_err(|_| OutputError::TypeMismatch("valid UTF-8".to_owned()))
         }
     }
 }
