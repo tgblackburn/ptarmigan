@@ -22,9 +22,9 @@ use hdf5_writer;
 #[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 7);
 #[cfg(feature = "hdf5-output")]
-unzip_n::unzip_n!(pub 8);
-#[cfg(feature = "hdf5-output")]
 unzip_n::unzip_n!(pub 9);
+#[cfg(feature = "hdf5-output")]
+unzip_n::unzip_n!(pub 10);
 
 mod constants;
 mod field;
@@ -131,6 +131,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
                             .with_payload(event.a_eff)
+                            .with_parent_chi(event.chi)
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
@@ -166,25 +167,30 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
-                    let (prob, frac, pol_new, momenta) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
-                    if let Some((q_e, q_p, a_eff)) = momenta {
+                    let (prob, pol_new, event) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
+
+                    if let Some(event) = event {
                         let id = *current_id;
                         *current_id = *current_id + 2;
                         let electron = Particle::create(Species::Electron, r)
-                            .with_weight(frac * pt.weight())
+                            .with_weight(event.frac * pt.weight())
                             .with_id(id)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
+                            .with_parent_chi(event.chi)
                             .with_parent_id(pt.id())
-                            .with_normalized_momentum(q_e);
+                            .update_absorbed_energy(0.5 * event.absorption)
+                            .with_normalized_momentum(event.u_e);
                         let positron = Particle::create(Species::Positron, r)
-                            .with_weight(frac * pt.weight())
+                            .with_weight(event.frac * pt.weight())
                             .with_id(id + 1)
-                            .with_payload(a_eff)
+                            .with_payload(event.a_eff)
+                            .with_parent_chi(event.chi)
                             .with_parent_id(pt.id())
-                            .with_normalized_momentum(q_p);
+                            .update_absorbed_energy(0.5 * event.absorption)
+                            .with_normalized_momentum(event.u_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - frac));
+                        pt.with_weight(pt.weight() * (1.0 - event.frac));
                         if pt.weight() <= 0.0 {
                             has_decayed = true;
                         }
@@ -1093,7 +1099,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Write particle data
                 let fs = file.new_group("final-state")?;
 
-                let (x, p, pol, w, a, n, id, pid) = photons
+                let (x, p, pol, w, a, chi, n, id, pid) = photons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
@@ -1101,6 +1107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         pt.polarization(),
                         pt.weight(),
                         pt.payload(),
+                        pt.parent_chi(),
                         pt.interaction_count(),
                         pt.id(),
                         pt.parent_id()
@@ -1119,6 +1126,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("normalized amplitude (RMS under LMA) at point of emission")?
                         .with_alias("xi")?
                         .write(&a[..])?
+                    .new_dataset("parent_chi")?
+                        .with_unit("1")?
+                        .with_desc("quantum parameter (RMS under LMA) of parent at point of emission")?
+                        .write(&chi[..])?
                     .new_dataset("n_pos")?
                         .with_unit("1")?
                         .with_desc("total probability of pair creation for the photon")?
@@ -1186,7 +1197,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the electron")?
                         .write(&p[..])?;
 
-                let (x, x0, p, w, n, abs, id, pid, a) = positrons
+                let (x, x0, p, w, n, abs, id, pid, a, chi) = positrons
                     .iter()
                     .map(|pt| (
                         pt.position().convert(&units.length),
@@ -1197,7 +1208,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                         pt.absorbed_energy().convert(&units.energy),
                         pt.id(),
                         pt.parent_id(),
-                        pt.payload()
+                        pt.payload(),
+                        pt.parent_chi(),
                     ))
                     .unzip_n_vec();
 
@@ -1213,6 +1225,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .with_desc("normalized amplitude (RMS under LMA) at point of creation")?
                         .with_alias("xi")?
                         .write(&a[..])?
+                    .new_dataset("parent_chi")?
+                        .with_unit("1")?
+                        .with_desc("quantum parameter (RMS under LMA) of parent at point of creation")?
+                        .write(&chi[..])?
                     .new_dataset("n_gamma")?
                         .with_unit("1")?
                         .with_desc("total number of photons emitted by the positron")?
@@ -1243,7 +1259,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if keep_decayed_photons {
                     let is = file.new_group("intermediate-state")?;
 
-                    let (x, p, pol, w, a, n, id, pid) = decayed_photons
+                    let (x, p, pol, w, a, chi, n, id, pid) = decayed_photons
                         .iter()
                         .map(|pt| (
                             pt.position().convert(&units.length),
@@ -1252,6 +1268,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             pt.polarization(),
                             pt.weight(),
                             pt.payload(),
+                            pt.parent_chi(),
                             pt.interaction_count(),
                             pt.id(),
                             pt.parent_id()
@@ -1270,6 +1287,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             .with_desc("normalized amplitude (RMS under LMA) at point of emission")?
                             .with_alias("xi")?
                             .write(&a[..])?
+                        .new_dataset("parent_chi")?
+                            .with_unit("1")?
+                            .with_desc("quantum parameter (RMS under LMA) of parent at point of emission")?
+                            .write(&chi[..])?
                         .new_dataset("n_pos")?
                             .with_unit("1")?
                             .with_desc("total probability of pair creation for the photon")?

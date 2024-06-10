@@ -1,11 +1,10 @@
 use std::f64::consts;
-use rand::prelude::*;
 
-use crate::field::{Field, Polarization, FastFocusedLaser};
+use crate::field::{Field, Polarization};
 use crate::constants::*;
-use crate::geometry::{FourVector, ThreeVector, StokesVector};
+use crate::geometry::{FourVector, ThreeVector};
 
-use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
+use super::Envelope;
 
 /// Represents a plane-wave laser pulse, including the
 /// fast oscillating carrier wave
@@ -52,10 +51,74 @@ impl FastPlaneWave {
         SPEED_OF_LIGHT * self.wavevector[0]
     }
 
-    /// The electric and magnetic fields of a pulsed plane wave
-    /// at four position `r`.
+    /// Calculates the integrated intensity, i.e. the power per unit area,
+    /// by numerically integration.
+    fn integrated_intensity(&self, points_per_wavelength: i32) -> f64 {
+        let max_phase = match self.envelope {
+            Envelope::CosSquared => consts::PI * self.n_cycles,
+            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles,
+        };
+
+        let dphi = 2.0 * consts::PI / (points_per_wavelength as f64);
+        let dz = dphi / self.wavevector[0];
+        let n_pts = (max_phase / dphi) as i64;
+        let mut energy_flux = 0.0;
+        let mut c = 0.0;
+
+        for n in -n_pts..n_pts {
+            let phi = (n as f64) * dphi;
+            let r: FourVector = [0.0, 0.0, 0.0, -phi / self.wavevector[0]].into();
+            let (e, b, _) = self.fields(r);
+            let u = 0.5 * VACUUM_PERMITTIVITY * (e.norm_sqr() + SPEED_OF_LIGHT_SQD * b.norm_sqr());
+
+            let weight = if n % 2 == 0 { 2.0 / 3.0 } else { 4.0 / 3.0 };
+            // let weight = 1.0;
+            let y = weight * u * dz - c;
+            let t = energy_flux + y;
+            c = (t - energy_flux) - y;
+            energy_flux = t;
+            // energy_flux += u * dz;
+        }
+
+        energy_flux
+    }
+}
+
+impl Field for FastPlaneWave {
+    fn max_timestep(&self) -> Option<f64> {
+        let chirp = if cfg!(feature = "compensating-chirp") {
+            1.0 + self.a0.powi(2)
+        } else {
+            1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
+        };
+        let dt = 1.0 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp);
+        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
+        Some(dt * multiplier)
+    }
+
+    fn contains(&self, r: FourVector) -> bool {
+        let phase = self.wavevector * r;
+        let max_phase = match self.envelope {
+            Envelope::CosSquared => consts::PI * self.n_cycles,
+            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles, // = 3 omega tau
+        };
+        phase < max_phase
+    }
+
+    fn ideal_initial_z(&self) -> f64 {
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        match self.envelope {
+            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles,
+            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
+        }
+    }
+
     #[allow(non_snake_case)]
-    fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector) {
+    #[inline(always)]
+    fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
         // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
         // where delta = 0 for LP and 1 for CP
         // E = -d_t A => E = -omega d_phi (A_x, A_y, 0)
@@ -126,104 +189,9 @@ impl FastPlaneWave {
 
         let E = E.rotate_around_z(self.pol_angle);
         let B = B.rotate_around_z(self.pol_angle);
-
-        (E, B)
-    }
-
-    /// Calculates the integrated intensity, i.e. the power per unit area,
-    /// by numerically integration.
-    fn integrated_intensity(&self, points_per_wavelength: i32) -> f64 {
-        let max_phase = match self.envelope {
-            Envelope::CosSquared => consts::PI * self.n_cycles,
-            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
-            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles,
-        };
-
-        let dphi = 2.0 * consts::PI / (points_per_wavelength as f64);
-        let dz = dphi / self.wavevector[0];
-        let n_pts = (max_phase / dphi) as i64;
-        let mut energy_flux = 0.0;
-        let mut c = 0.0;
-
-        for n in -n_pts..n_pts {
-            let phi = (n as f64) * dphi;
-            let r: FourVector = [0.0, 0.0, 0.0, -phi / self.wavevector[0]].into();
-            let (e, b) = self.fields(r);
-            let u = 0.5 * VACUUM_PERMITTIVITY * (e.norm_sqr() + SPEED_OF_LIGHT_SQD * b.norm_sqr());
-
-            let weight = if n % 2 == 0 { 2.0 / 3.0 } else { 4.0 / 3.0 };
-            // let weight = 1.0;
-            let y = weight * u * dz - c;
-            let t = energy_flux + y;
-            c = (t - energy_flux) - y;
-            energy_flux = t;
-            // energy_flux += u * dz;
-        }
-
-        energy_flux
-    }
-}
-
-impl Field for FastPlaneWave {
-    fn max_timestep(&self) -> Option<f64> {
-        let chirp = if cfg!(feature = "compensating-chirp") {
-            1.0 + self.a0.powi(2)
-        } else {
-            1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
-        };
-        let dt = 1.0 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp);
-        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
-        Some(dt * multiplier)
-    }
-
-    fn contains(&self, r: FourVector) -> bool {
-        let phase = self.wavevector * r;
-        let max_phase = match self.envelope {
-            Envelope::CosSquared => consts::PI * self.n_cycles,
-            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
-            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles, // = 3 omega tau
-        };
-        phase < max_phase
-    }
-
-    #[allow(non_snake_case)]
-    fn push(&self, r: FourVector, ui: FourVector, rqm: f64, dt: f64, eqn: EquationOfMotion) -> (FourVector, FourVector, f64, f64) {
-        let r = r + 0.5 * SPEED_OF_LIGHT * ui * dt / ui[0];
-        let (E, B) = self.fields(r);
-        FastFocusedLaser::vay_push(r, ui, E, B, rqm, dt, eqn)
-    }
-
-    #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
-        let (E, B) = self.fields(r);
         let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        FastFocusedLaser::emit_photon(u, E, B, dt, rng, mode == RadiationMode::Classical)
-            .map(|(k, pol)| {
-                RadiationEvent {
-                    k,
-                    u_prime: u - k,
-                    pol,
-                    a_eff: a,
-                    absorption: 0.0
-                }
-            })
-    }
 
-    #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>) {
-        let (E, B) = self.fields(r);
-        let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-        let (prob, frac, pol_new, momenta) = FastFocusedLaser::create_pair(ell, pol, E, B, dt, rng, rate_increase);
-        (prob, frac, pol_new, momenta.map(|(p1, p2)| (p1, p2, a)))
-    }
-
-    fn ideal_initial_z(&self) -> f64 {
-        let wavelength = 2.0 * consts::PI / self.wavevector[0];
-        match self.envelope {
-            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles,
-            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
-            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
-        }
+        (E, B, a)
     }
 
     fn energy(&self) -> (f64, &'static str) {
@@ -271,6 +239,7 @@ impl Field for FastPlaneWave {
 
 #[cfg(test)]
 mod tests {
+    use crate::EquationOfMotion;
     use super::*;
 
     #[test]

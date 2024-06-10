@@ -3,7 +3,7 @@ use rand::prelude::*;
 use rand_distr::StandardNormal;
 
 use crate::field::{Field, Polarization};
-use crate::constants::*;
+use crate::{constants::*, PairCreationEvent};
 use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
@@ -272,6 +272,7 @@ impl Field for PlaneWave {
                 u_prime: u + (n as f64) * kappa - k,
                 pol,
                 a_eff: a,
+                chi: a * (u * kappa),
                 absorption: (n as f64) * kappa[0],
             };
             Some(event)
@@ -280,7 +281,7 @@ impl Field for PlaneWave {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, f64, StokesVector, Option<(FourVector, FourVector, f64)>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
         let phase: f64 = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -300,9 +301,17 @@ impl Field for PlaneWave {
         };
         if rng.gen::<f64>() < prob * rate_increase {
             let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.pol, self.pol_angle, rng);
-            (prob, 1.0 / rate_increase, pol_new, Some((ell + (n as f64) * kappa - q_p, q_p, a)))
+            let event = PairCreationEvent {
+                u_e: ell + (n as f64) * kappa - q_p,
+                u_p: q_p,
+                frac: 1.0 / rate_increase,
+                a_eff: a,
+                chi: a * (ell * kappa),
+                absorption: (n as f64) * kappa[0],
+            };
+            (prob, pol_new, Some(event))
         } else {
-            (prob, 0.0, pol_new, None)
+            (prob, pol_new, None)
         }
     }
 

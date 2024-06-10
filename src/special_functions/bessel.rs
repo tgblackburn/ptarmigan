@@ -2,11 +2,11 @@
 
 use std::f64::consts;
 use crate::quadrature::*;
-//use super::factorial::Factorial;
 use super::airy::Airy;
 
 pub trait BesselJ {
     /// Evaluates the Bessel J function for integer order
+    #[allow(unused)]
     fn j(&self, n: i32) -> Self;
 
     /// Evaluates the Bessel J function at given argument
