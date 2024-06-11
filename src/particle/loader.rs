@@ -159,7 +159,7 @@ impl BeamLoader {
         let laser_defines_z = file
             .open_dataset("config/output/laser_defines_positive_z")
             .and_then(|ds| ds.read::<bool>())
-            .unwrap_or(true);
+            .unwrap_or(false); // assume beam defines z
 
         let collision_angle = file
             .open_dataset("config/beam/collision_angle")
@@ -178,7 +178,7 @@ impl BeamLoader {
             .read::<[f64]>()?
             .take();
 
-        // println!("\tgot {} weights ({}, ...)", weight.len(), weight[0]);
+        // println!("\tgot {} weights ({}, ..., {})", weight.len(), weight[0], weight[weight.len()-1]);
 
         let dataset = file.open_dataset(&self.position_path)?;
         // let unit: Result<Unit, _> = dataset.open_attribute("unit")
@@ -200,8 +200,11 @@ impl BeamLoader {
             println!("No polarization data found, continuing with unpolarized particles...")
         }
 
-        // println!("\tgot {} momenta ([{}], ...)", momentum.len(), momentum[0].convert_from(&p_unit) / ELECTRON_MASS_MEV);
-        // println!("\tgot {} positions ([{}], ...)", position.len(), 1.0e6 * position[0].convert_from(&x_unit));
+        // println!("\tgot {} momenta ([{}], ..., [{}])", momentum.len(), momentum[0].convert_from(&p_unit) / ELECTRON_MASS_MEV, momentum[momentum.len() - 1].convert_from(&p_unit) / ELECTRON_MASS_MEV);
+        // println!("\tgot {} positions ([{}], ..., [{}])", position.len(), 1.0e6 * position[0].convert_from(&x_unit), 1.0e6 * position[position.len()-1].convert_from(&x_unit));
+        // if let Some(ref pol) = polarization {
+        //     println!("\tgot {} polarizations ([{:?}], ..., [{:?}])", pol.len(), pol[0], pol[pol.len()-1]);
+        // }
 
         let num = weight.len().min(position.len()).min(momentum.len());
         let mut particles = Vec::with_capacity(num);

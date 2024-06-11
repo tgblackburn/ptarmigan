@@ -384,7 +384,32 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
             h5t::H5Tequal(ds.type_id(), target_type_id) > 0
         };
 
-        if !types_are_equal {
+        let types_are_compatible = unsafe {
+            // check if target type is an array of base types, compatible in length
+            let target_class = h5t::H5Tget_class(target_type_id);
+
+            let target_base_type = h5t::H5Tget_super(target_type_id);
+            let base_types_match = h5t::H5Tequal(target_base_type, ds.type_id()) > 0;
+            h5t::H5Tclose(target_base_type);
+
+            if h5t::H5Tget_array_ndims(target_type_id) == 1 {
+                let mut target_len = 0;
+                h5t::H5Tget_array_dims(target_type_id, &mut target_len);
+
+                let lengths_match =  if !ds.dims().is_empty() {
+                    (target_len as usize) == *ds.dims().last().unwrap()
+                } else {
+                    // scalar dataset can't be split into an array
+                    false
+                };
+
+                target_class == h5t::H5T_ARRAY && base_types_match && lengths_match
+            } else {
+                false
+            }
+        };
+
+        if !types_are_equal && !types_are_compatible {
             let type_name = std::any::type_name::<T>().to_owned();
             return Err(OutputError::TypeMismatch(type_name));
         }
@@ -455,7 +480,15 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
                 std::ptr::null()
             ))?;
 
-            let mut buffer: Vec<T> = Vec::with_capacity(nelems as usize);
+            let buffer_len = if types_are_equal {
+                nelems
+            } else {
+                // dealing with a compatible array type
+                let len = block.last().unwrap();
+                nelems / len
+            };
+
+            let mut buffer: Vec<T> = Vec::with_capacity(buffer_len as usize);
 
             check!( h5d::H5Dread(
                 ds.id(),
@@ -466,12 +499,15 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
                 buffer.as_mut_ptr() as *mut ffi::c_void,
             ))?;
 
-            buffer.set_len(nelems as usize);
+            buffer.set_len(buffer_len as usize);
 
             check!( h5s::H5Sclose(memspace) )?;
             check!( h5s::H5Sclose(filespace) )?;
 
-            let dims: Vec<usize> = block.iter().map(|n| *n as usize).collect();
+            let mut dims: Vec<usize> = block.iter().map(|n| *n as usize).collect();
+            if types_are_compatible {
+                dims.pop();
+            }
 
             ScatteredDataset { data: buffer, dims }
         };
