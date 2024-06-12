@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::f64::consts;
+use std::process::ExitCode;
+
+use colored::Colorize;
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
@@ -83,6 +86,30 @@ struct CollideOptions {
     /// Correct classical spectrum using Gaunt factor
     gaunt_factor: bool,
 }
+
+/// Type of diagnostic message that can be issued
+pub enum Diagnostic {
+    Warning,
+    Error,
+}
+
+/// Wrapper around eprintln! that suppresses output from all but rank 0,
+/// prefixing either "Error:" or "Warning:" as appropriate.
+macro_rules! report {
+    ($report:expr, $allowed:expr, $($args: tt)*) => {
+        if $allowed {
+            use colored::Colorize;
+            use crate::Diagnostic;
+            let class = match $report {
+                Diagnostic::Warning => "Warning".bold().bright_yellow(),
+                Diagnostic::Error => "Error".bold().red(),
+            };
+            eprintln!("{}: {}", class, format_args!($($args)*))
+        };
+    }
+}
+
+pub(crate) use report;
 
 /// Propagates a single particle through a region of EM field, returning a Shower containing
 /// the primary and any secondary particles generated.
@@ -246,9 +273,7 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     photon_rate / pair_rate
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let universe = mpi::initialize().unwrap();
-    let world = universe.world();
+fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let id = world.rank();
     let ntasks = world.size();
 
@@ -280,14 +305,14 @@ fn main() -> Result<(), Box<dyn Error>> {
             "false" => Ok((false, false)),
             "gaunt_factor_corrected" => Ok((true, true)),
             _ => {
-                eprintln!("control:classical must be one of 'true', 'false' or 'gaunt_factor_corrected'.");
+                report!(Diagnostic::Error, id == 0, "control:classical must be one of 'true', 'false' or 'gaunt_factor_corrected'.");
                 Err(InputError::conversion("control:classical", "classical"))
             }
         })
         // Gaunt factor correction is available only under LCFA
         .and_then(|(classical, gaunt_factor)| {
             if gaunt_factor && !using_lcfa {
-                eprintln!("Gaunt factor correction is only available under the LCFA.");
+                report!(Diagnostic::Error, id == 0, "Gaunt factor correction is only available under the LCFA.");
                 Err(InputError::conversion("control:classical", "classical"))
             } else {
                 Ok((classical, gaunt_factor))
@@ -306,7 +331,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
     let rotate_stokes_pars = input.read("control:rotate_stokes_pars")
         .map_or(true, |val| {
-            if id == 0 { eprintln!("Warning: use of undocumented option control:rotate_stokes_pars, intended for debugging purposes only."); }
+            report!(Diagnostic::Warning, id == 0, "use of undocumented option control:rotate_stokes_pars, intended for debugging purposes only.");
             val
         });
 
@@ -328,11 +353,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(pol_angle) = input.evaluate(expr) {
                         Ok((Polarization::Linear, pol_angle))
                     } else {
-                        eprintln!("Linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                        report!(Diagnostic::Error, id == 0, "linear polarization specified, but '{}' is not a valid angle.", expr.trim());
                         Err(InputError::conversion("laser:polarization", "polarization"))
                     }
                 } else {
-                    eprintln!("Laser polarization must be 'linear [|| x or y]' or 'circular'.");
+                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear [|| x or y]' or 'circular'.");
                     Err(InputError::conversion("laser:polarization", "polarization"))
                 }
             }
@@ -350,7 +375,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "flattop" | "flat-top" => Ok(Envelope::Flattop),
             "gauss" | "gaussian" => Ok(Envelope::Gaussian),
             _ => {
-                eprintln!("Laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
+                report!(Diagnostic::Error, id == 0, "laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
                 Err(InputError::conversion("laser:envelope", "envelope"))
             }
         })
@@ -361,7 +386,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Envelope::Flattop => {
             input.read("laser:n_cycles")
                 .and_then(|n: f64| if n < 1.0 {
-                    eprintln!("'n_cycles' must be >= 1.0 for flattop lasers.");
+                    report!(Diagnostic::Error, id == 0, "'n_cycles' must be >= 1.0 for flattop lasers.");
                     Err(InputError::conversion("laser:envelope", "envelope"))
                 } else {
                     Ok(n)
@@ -379,7 +404,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         input.read("laser:chirp_coeff")
             .map(|_: f64| {
-                eprintln!("Chirp parameter ignored for focusing laser pulses.");
+                report!(Diagnostic::Warning, id == 0, "chirp parameter ignored for focusing laser pulses.");
                 0.0
             })
             .unwrap_or(0.0)
@@ -427,7 +452,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|v| match v.len() {
             3 => Ok(ThreeVector::new(v[0], v[1], v[2])),
             _ => {
-                eprintln!("A collision offset must be expressed as a three-vector [dx, dy, dz].");
+                report!(Diagnostic::Error, id == 0, "a collision offset must be expressed as a three-vector [dx, dy, dz].");
                 Err(InputError::conversion("beam:offset", "offset"))
             }
         })
@@ -508,13 +533,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if let (Some(r), Some(b)) = (radius, normally_distributed) {
                     Ok((r, b, max_radius))
                 } else {
-                    eprintln!("Beam radius must be specified with a single numerical value, e.g.,\n\
-                                \tradius: 2.0e-6\n\
-                                or as a numerical value and a distribution, e.g,\n\
-                                \tradius: [2.0e-6, uniformly_distributed]\n\
-                                \tradius: [2.0e-6, normally_distributed].");
+                    report!(
+                        Diagnostic::Error, id == 0,
+                        "beam radius must be specified with a single numerical value, e.g.,\n\
+                        \tradius: 2.0e-6\n\
+                        or as a numerical value and a distribution, e.g,\n\
+                        \tradius: [2.0e-6, uniformly_distributed]\n\
+                        \tradius: [2.0e-6, normally_distributed].",
+                    );
                     Err(InputError::conversion("beam:radius", "radius"))
-                    //Err(ConfigError::raise(ConfigErrorKind::ConversionFailure, "beam", "radius"))
                 }
             })
             .or_else(|e| {
@@ -533,10 +560,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             })
             .and_then(|rho| {
                 if use_brem_spec && rho != 0.0 {
-                    eprintln!("Energy chirp ignored for bremsstrahlung photons.");
+                    report!(Diagnostic::Warning, id == 0, "energy chirp ignored for bremsstrahlung photons.");
                     Ok(0.0)
                 } else if rho.abs() > 1.0 {
-                    eprintln!("Absolute value of energy chirp parameter {} must be <= 1.", rho);
+                    report!(Diagnostic::Error, id == 0, "absolute value of energy chirp parameter {} must be <= 1.", rho);
                     Err(InputError::conversion("beam:energy_chirp", "energy_chirp"))
                 } else {
                     Ok(rho)
@@ -558,12 +585,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if sv.dop() <= 1.0 {
                         Ok(sv)
                     } else {
-                        eprintln!("Specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
+                        report!(Diagnostic::Error, id == 0, "specified particle polarization does not satisfy S_1^2 + S_2^2 + S_3^2 <= 1.");
                         Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
                     }
                 },
                 _ => {
-                    eprintln!("Particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
+                    report!(Diagnostic::Error, id == 0, "particle polarization must be specified as three Stokes parameters [S_1, S_2, S_3].");
                     Err(InputError::conversion("beam:stokes_pars", "stokes_pars"))
                 }
             })
@@ -614,7 +641,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if let Some(stem) = stem {
                     stem.to_owned()
                 } else {
-                    eprintln!("Unexpected failure to extract stem of input file ('{}'), as required for 'ident: auto'.", path.display());
+                    report!(Diagnostic::Error, id == 0, "unexpected failure to extract stem of input file ('{}'), as required for 'ident: auto'.", path.display());
                     "".to_owned()
                 }
             } else {
@@ -629,11 +656,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             "hdf5" => Ok(OutputMode::Hdf5),
             #[cfg(not(feature = "hdf5-output"))]
             "hdf5" => {
-                eprintln!("Warning: complete data output has been requested (dump_all_particles: hdf5), but ptarmigan has not been compiled with HDF5 support. No output will be generated.");
+                report!(Diagnostic::Warning, id == 0, "complete data output has been requested (dump_all_particles: hdf5), but ptarmigan has not been compiled with HDF5 support. No output will be generated.");
                 Ok(OutputMode::None)
             },
             _ => {
-                eprintln!("Specified format for complete data output (dump_all_particles: ...) is invalid.");
+                report!(Diagnostic::Error, id == 0, "specified format for complete data output (dump_all_particles: ...) is invalid.");
                 Err(InputError::conversion("output:dump_all_particles", "dump_all_particles"))
             }
         })
@@ -700,11 +727,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| {
             // Error only if dstr output is requested
             let writing_dstrs = eospec.len() + gospec.len() + pospec.len() > 0;
-            if id == 0 && writing_dstrs {
-                println!(concat!(
-                    "Warning: file format for distribution output invalid ('plain_text' | 'fits').\n",
-                    "         Continuing with default 'plain_text'."
-                ));
+            if writing_dstrs {
+                report!(
+                    Diagnostic::Warning, id == 0,
+                    "file format for distribution output invalid ('plain_text' | 'fits').\n         Continuing with default 'plain_text'."
+                );
             }
             FileFormat::PlainText
         });
@@ -721,7 +748,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "hep" | "HEP" => Ok(UnitSystem::hep()),
             "si" | "SI" => Ok(UnitSystem::si()),
             _ => {
-                eprintln!("Unit system requested, \"{}\", is not one of \"auto\", \"hep\", or \"si\".", s);
+                report!(Diagnostic::Error, id == 0, "unit system requested, \"{}\", is not one of \"auto\", \"hep\", or \"si\".", s);
                 Err(InputError::conversion("output:units", "units"))
             }
         })
@@ -778,19 +805,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                     },
                     #[cfg(feature = "hdf5-output")]
                     BeamParameters::FromHdf5 { .. } => {
-                        eprintln!("Automatic increase in pair creation file not available when loading particles from file.");
+                        report!(Diagnostic::Error, id == 0, "automatic increase in pair creation not available when loading particles from file.");
                         Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
                     }
                 },
-                // Ok(s) if s == "auto" => if using_lcfa {
-                //     Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
-                // } else {
-                //     Ok(increase_pair_rate_by(gamma, a0, wavelength, pol))
-                // },
                 _ => Err(e),
             })
             .and_then(|r| if r < 1.0 {
-                eprintln!("Increase in pair creation rate must be >= 1.0.");
+                report!(Diagnostic::Error, id == 0, "increase in pair creation rate must be >= 1.0.");
                 Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
             } else {
                 Ok(r)
@@ -859,7 +881,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         if id == 0 {
-            println!("Running {} task{} with {} primary particles per task...", ntasks, if ntasks > 1 {"s"} else {""}, num);
+            println!("{} {} task{} with {} primary particles per task...", "Running".bold().cyan(), ntasks, if ntasks > 1 {"s"} else {""}, num);
             if a0_values.len() > 1 {
                 println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
             }
@@ -943,7 +965,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         let f_abs = total_absorption / energy;
         if f_abs > 0.1 && id == 0 {
-            println!("Warning: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", 100.0 * f_abs);
+            println!("{}: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", "Warning".bold().bright_yellow(), 100.0 * f_abs);
         }
 
         // Updating 'ident' in case of a0 looping
@@ -1408,8 +1430,41 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if id == 0 {
-            println!("Run complete after {}.", PrettyDuration::from(runtime.elapsed()));
+            println!("{} run after {}.", "Completed".bold().bright_green(), PrettyDuration::from(runtime.elapsed()));
         }
     }
     Ok(())
+}
+
+/// Wraps ptarmigan_main for error reporting.
+fn main() -> ExitCode {
+    let universe = mpi::initialize().unwrap();
+    let world = universe.world();
+    let id = world.rank();
+
+    if std::env::var("SLURM_JOB_ID").is_ok() || std::env::var("PBS_JOBID").is_ok() {
+        // Running as a batch job, disable colouring
+        colored::control::set_override(false);
+    }
+
+    let bar = "════════════════════════════════════";
+
+    if id == 0 {
+        println!("{} {}{} {}", bar.blue(), "Ptarmigan v".bold(), env!("CARGO_PKG_VERSION").bold(), bar.blue());
+    }
+
+    let exit_code = match ptarmigan_main(world) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            report!(Diagnostic::Error, id == 0, "{:?}", e);
+            ExitCode::FAILURE
+        }
+    };
+
+    if id == 0 {
+        let centre = "═".repeat(2 + "Ptarmigan v".len() + env!("CARGO_PKG_VERSION").len());
+        println!("{}{}{}", bar.blue(), centre.blue(), bar.blue());
+    }
+
+    exit_code
 }

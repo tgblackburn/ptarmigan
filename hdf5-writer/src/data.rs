@@ -756,7 +756,7 @@ impl Hdf5Data for str {
                         buffer.as_mut_ptr() as *mut ffi::c_void,
                     ))?;
 
-                    println!("\tbuffer holding {:?} => {:?}", buffer, String::from_utf8_lossy(&buffer));
+                    // println!("\tbuffer holding {:?} => {:?}", buffer, String::from_utf8_lossy(&buffer));
 
                     check!( h5s::H5Sclose(memspace) )?;
                     check!( h5s::H5Sclose(filespace) )?;

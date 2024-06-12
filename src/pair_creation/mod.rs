@@ -97,7 +97,8 @@ pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64
     let s_new = 1.0 - (k * q) / (k * ell); // flipped sign
     let error = (s - s_new).abs() / s;
     if error >= 1.0e-3 {
-        eprintln!(
+        crate::report!(
+            Diagnostic::Error, true,
             "pair_creation::generate failed sanity check by {:.3}% during construction of positron momentum \
             at eta = {:.3e}, a = {:.3e}, n = {}: sampled s = {:.3e}, reconstructed = {:.3e}, halting...",
             100.0 * error, eta, a, n, s, s_new,

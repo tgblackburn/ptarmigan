@@ -170,7 +170,7 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
     } else if tables::contains(a, eta) {
         Some(tables::interpolate(a, eta))
     } else {
-        eprintln!("NLC (CP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+        crate::report!(Diagnostic::Error, true, "NLC (CP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
         None
     }
 }

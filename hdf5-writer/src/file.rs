@@ -19,6 +19,7 @@ use hdf5_sys::{
 
 use crate::{
     to_c_string,
+    Checkable,
     GroupHolder,
 };
 
@@ -132,12 +133,16 @@ impl<'a, C> ParallelFile<'a, C> where C: Communicator {
             }
 
             // Collectively open a file in read-only mode
-            let id = check!( h5f::H5Fopen(
+            let id = h5f::H5Fopen(
                 filename.as_ptr(),
                 h5f::H5F_ACC_RDONLY,
                 // h5p::H5P_DEFAULT
                 plist
-            ))?;
+            );
+
+            if id.is_error_code() {
+                return Err(OutputError::FileOpen);
+            }
 
             // println!("\tfile open: {} got id {}", comm.rank(), id);
 

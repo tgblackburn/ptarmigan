@@ -23,9 +23,9 @@ impl fmt::Debug for InputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let help_msg = "Usage: mpirun -n np ./ptarmigan input-file";
         match self.kind {
-            InputErrorKind::File => write!(f, "Unable to open configuration file.\n{}", help_msg),
-            InputErrorKind::Location => write!(f, "Failed to follow specified path \"{}\": component \"{}\" is missing.\n{}", self.path, self.cause, help_msg),
-            InputErrorKind::Conversion => write!(f, "Could not convert field \"{}\" to target type.\n{}", self.cause, help_msg),
+            InputErrorKind::File => write!(f, "unable to open configuration file.\n{}", help_msg),
+            InputErrorKind::Location => write!(f, "failed to follow specified path \"{}\": component \"{}\" is missing.", self.path, self.cause),
+            InputErrorKind::Conversion => write!(f, "could not convert field \"{}\" to target type.", self.cause),
         }
     }
 }

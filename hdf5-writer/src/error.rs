@@ -89,6 +89,7 @@ pub enum OutputError {
     Identifier(String),
     Missing(String),
     TypeMismatch(String),
+    FileOpen,
     H5Call {
         func: String,
         file: String,
@@ -107,6 +108,9 @@ impl fmt::Debug for OutputError {
             },
             OutputError::TypeMismatch(s) => {
                 write!(f, "Target dataset is not of type '{}'.", s)
+            },
+            OutputError::FileOpen => {
+                write!(f, "Unable to open specified file.")
             },
             OutputError::H5Call {func, file, line} => {
                 write!(f, "{} (line {} in {}) failed, see diagnostic messages above.", func, line, file)

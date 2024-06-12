@@ -1,5 +1,7 @@
 //! Loading a particle beam from a binary file
 
+use colored::Colorize;
+
 use hdf5_writer;
 use hdf5_writer::{
     GroupHolder,
@@ -131,9 +133,11 @@ impl BeamLoader {
     }
 
     pub fn build<C>(&self, comm: &C) -> Result<Vec<Particle>, OutputError> where C: Communicator {
+        use crate::report;
+
         let id = comm.rank();
         if id == 0 {
-            println!("Importing incident particle beam from '{}'...", self.filename);
+            println!("{} incident particle beam from {}...", "Importing".bold().cyan(), self.filename.bold().blue());
         }
 
         let file = ParallelFile::open(comm, &self.filename)?;
@@ -159,7 +163,10 @@ impl BeamLoader {
         let laser_defines_z = file
             .open_dataset("config/output/laser_defines_positive_z")
             .and_then(|ds| ds.read::<bool>())
-            .unwrap_or(false); // assume beam defines z
+            .unwrap_or_else(|_| {
+                report!(Diagnostic::Warning, id == 0, "no coordinate system specified, assuming beam propagates towards positive z...");
+                false // assume beam defines z
+            });
 
         let collision_angle = file
             .open_dataset("config/beam/collision_angle")
@@ -196,8 +203,8 @@ impl BeamLoader {
             .map(|sd| sd.take())
             .ok();
 
-        if id == 0 && polarization.is_none() {
-            println!("No polarization data found, continuing with unpolarized particles...")
+        if polarization.is_none() {
+            report!(Diagnostic::Warning, id == 0, "no polarization data found, continuing with unpolarized particles...");
         }
 
         // println!("\tgot {} momenta ([{}], ..., [{}])", momentum.len(), momentum[0].convert_from(&p_unit) / ELECTRON_MASS_MEV, momentum[momentum.len() - 1].convert_from(&p_unit) / ELECTRON_MASS_MEV);
@@ -241,7 +248,7 @@ impl BeamLoader {
         // println!("\tgot {} positions ([{}], ...)", particles.len(), 1.0e6 * particles[0].position());
 
         if id == 0 {
-            println!("Import complete, {} {}s per task.", particles.len(), self.species);
+            println!("{} import, {} {}s per task.", "Completed".bold().bright_green(), particles.len(), self.species);
         }
 
         Ok(particles)
