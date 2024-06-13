@@ -1,6 +1,6 @@
-//! Writing to datasets
+//! Writing to and reading from datasets
 
-use std::ffi;
+use std::{ffi, mem::MaybeUninit};
 
 #[cfg(feature = "with-mpi")]
 use mpi::{traits::*, collective::*};
@@ -10,6 +10,7 @@ use no_mpi::*;
 
 use hdf5_sys::{
     h5,
+    h5a,
     h5d,
     h5i,
     h5p,
@@ -21,27 +22,41 @@ use crate::{
     check,
     to_c_string,
     Dataset,
+    DatasetReader,
     GroupHolder,
     OutputError,
     Hdf5Type,
 };
 
-/// Data that can be written to an HDF5 dataset
-pub trait Hdf5Data {
-    fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
-        where G: GroupHolder<C>, C: Communicator;
+/// Part of the dataset specific to this MPI process
+pub struct ScatteredDataset<T> {
+    /// 1D array of data elements
+    pub data: Vec<T>,
+    /// Dimensions of the process-specific dataset
+    pub dims: Vec<usize>,
 }
 
-// Writing of Vec<T> by coercing to slice
-// impl<V, T> Hdf5Data for V where V: Deref<Target=[T]>, T: Hdf5Type {
-//     fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
-//             where G: GroupHolder<C>, C: Communicator {
-//         <[T]>::write_into(&self, ds, name)
-//     }
-// }
+impl<T> ScatteredDataset<T> {
+    /// Extract the data, consuming self.
+    pub fn take(self) -> Vec<T> {
+        self.data
+    }
+}
 
-// Writing of scalar (single value) T
+/// Data that can be written to or read from an HDF5 dataset
+pub trait Hdf5Data {
+    type Output;
+
+    fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
+        where G: GroupHolder<C>, C: Communicator;
+
+    fn read_from<C>(ds: &DatasetReader<C>) -> Result<Self::Output, OutputError> where C: Communicator;
+}
+
+// Scalar (single value) T
 impl<T> Hdf5Data for T where T: Hdf5Type {
+    type Output = T;
+
     fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
         where G: GroupHolder<C>, C: Communicator
     {
@@ -167,10 +182,70 @@ impl<T> Hdf5Data for T where T: Hdf5Type {
             Ok(Some(dset_id))
         }
     }
+
+    fn read_from<C>(ds: &DatasetReader<C>) -> Result<Self::Output, OutputError> where C: Communicator {
+        // First, check that we're reading the right datatype
+        let datatype = T::new(); // deallocated at end of scope
+        let target_type_id = datatype.id();
+
+        let types_are_equal = unsafe {
+            h5t::H5Tequal(ds.type_id(), target_type_id) > 0
+        };
+
+        if !types_are_equal {
+            let type_name = std::any::type_name::<T>().to_owned();
+            return Err(OutputError::TypeMismatch(type_name));
+        }
+
+        // Then verify the dataspace is scalar!
+        if !ds.is_scalar() {
+            let type_name = format!("scalar {}", std::any::type_name::<T>());
+            return Err(OutputError::TypeMismatch(type_name));
+        }
+
+        let data = unsafe {
+            if ds.is_attribute() {
+                let mut buffer = MaybeUninit::<T>::uninit();
+
+                check!( h5a::H5Aread(
+                    ds.id(),
+                    ds.type_id(),
+                    buffer.as_mut_ptr() as *mut ffi::c_void,
+                ))?;
+
+                buffer.assume_init()
+            } else {
+                let filespace = check!( h5d::H5Dget_space(ds.id()) )?;
+                let memspace = check!( h5s::H5Screate(h5s::H5S_SCALAR))?;
+
+                let mut buffer = MaybeUninit::<T>::uninit();
+
+                check!( h5d::H5Dread(
+                    ds.id(),
+                    ds.type_id(),
+                    memspace,
+                    filespace,
+                    h5p::H5P_DEFAULT,
+                    buffer.as_mut_ptr() as *mut ffi::c_void,
+                ))?;
+
+                let data = buffer.assume_init();
+
+                check!( h5s::H5Sclose(memspace) )?;
+                check!( h5s::H5Sclose(filespace) )?;
+
+                data
+            }
+        };
+
+        Ok(data)
+    }
 }
 
-// Writing of slices &[T]
+// Slices &[T]
 impl<T> Hdf5Data for [T] where T: Hdf5Type {
+    type Output = ScatteredDataset<T>;
+
     fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
         where G: GroupHolder<C>, C: Communicator
     {
@@ -299,18 +374,166 @@ impl<T> Hdf5Data for [T] where T: Hdf5Type {
             Ok(Some(dset_id))
         }
     }
+
+    fn read_from<C>(ds: &DatasetReader<C>) -> Result<Self::Output, OutputError> where C: Communicator {
+        // First, check that we're reading the right datatype
+        let datatype = T::new(); // deallocated at end of scope
+        let target_type_id = datatype.id();
+
+        let types_are_equal = unsafe {
+            h5t::H5Tequal(ds.type_id(), target_type_id) > 0
+        };
+
+        let types_are_compatible = unsafe {
+            // check if target type is an array of base types, compatible in length
+            let target_class = h5t::H5Tget_class(target_type_id);
+
+            let target_base_type = h5t::H5Tget_super(target_type_id);
+            let base_types_match = h5t::H5Tequal(target_base_type, ds.type_id()) > 0;
+            h5t::H5Tclose(target_base_type);
+
+            if h5t::H5Tget_array_ndims(target_type_id) == 1 {
+                let mut target_len = 0;
+                h5t::H5Tget_array_dims(target_type_id, &mut target_len);
+
+                let lengths_match =  if !ds.dims().is_empty() {
+                    (target_len as usize) == *ds.dims().last().unwrap()
+                } else {
+                    // scalar dataset can't be split into an array
+                    false
+                };
+
+                target_class == h5t::H5T_ARRAY && base_types_match && lengths_match
+            } else {
+                false
+            }
+        };
+
+        if !types_are_equal && !types_are_compatible {
+            let type_name = std::any::type_name::<T>().to_owned();
+            return Err(OutputError::TypeMismatch(type_name));
+        }
+
+        // What if we have a scalar dataset?
+        if ds.dims().is_empty() {
+            let data = if ds.comm().rank() == 0 {
+                // only root gets a value
+                T::read_from(ds)
+                    .map(|v| ScatteredDataset { data: vec![v], dims: vec![1] } )
+            } else {
+                Ok(ScatteredDataset { data: vec![], dims: vec![] })
+            };
+            return data;
+        }
+
+        // The dataset is divided along the slowest varying dimension.
+        let id = ds.comm().rank();
+        let counts: Vec<usize> = {
+            let npart = ds.dims()[0];
+            let tasks = ds.comm().size() as usize;
+            (0..tasks).map(|i| (npart * (i + 1) / tasks) - (npart * i / tasks)).collect()
+        };
+        let count = counts[id as usize];
+
+        let mut offset = 0;
+        for count in counts.iter().take(id as usize) {
+            offset += count;
+        };
+        let offset = offset;
+
+        // println!("\tscatter: {} reading {} at offset {}", self.comm.rank(), count, offset);
+
+        let data = unsafe {
+            let filespace = check!( h5d::H5Dget_space(ds.id()) )?;
+
+            let ndims = ds.dims().len();
+
+            // offset of the block from the start of the dimension
+            let mut start: Vec<h5::hsize_t> = vec![0; ndims];
+            start[0] = offset as h5::hsize_t;
+
+            // how many blocks there are in each dimension = only one
+            let counts: Vec<h5::hsize_t> = vec![1; ndims];
+
+            // block[0] = count, i.e. length of dataset / MPI processes
+            // all other block[i] are the complete size of the dataset
+            let mut block: Vec<_> = ds.dims().iter().map(|i| *i as h5::hsize_t).collect();
+            block[0] = count as h5::hsize_t;
+
+            check!( h5s::H5Sselect_hyperslab(
+                filespace,
+                h5s::H5S_SELECT_SET,
+                start.as_ptr(),
+                std::ptr::null(), // take every element
+                counts.as_ptr(),
+                block.as_ptr(),
+            ))?;
+
+            let nelems: h5::hsize_t = block.iter().product();
+            // let nelems = check!( h5s::H5Sget_select_npoints(filespace) )?;
+
+            // writing to this thing
+            let dims = [nelems];
+            let memspace = check!( h5s::H5Screate_simple(
+                1,
+                dims.as_ptr(),
+                std::ptr::null()
+            ))?;
+
+            let buffer_len = if types_are_equal {
+                nelems
+            } else {
+                // dealing with a compatible array type
+                let len = block.last().unwrap();
+                nelems / len
+            };
+
+            let mut buffer: Vec<T> = Vec::with_capacity(buffer_len as usize);
+
+            check!( h5d::H5Dread(
+                ds.id(),
+                ds.type_id(),
+                memspace,
+                filespace,
+                h5p::H5P_DEFAULT,
+                buffer.as_mut_ptr() as *mut ffi::c_void,
+            ))?;
+
+            buffer.set_len(buffer_len as usize);
+
+            check!( h5s::H5Sclose(memspace) )?;
+            check!( h5s::H5Sclose(filespace) )?;
+
+            let mut dims: Vec<usize> = block.iter().map(|n| *n as usize).collect();
+            if types_are_compatible {
+                dims.pop();
+            }
+
+            ScatteredDataset { data: buffer, dims }
+        };
+
+        Ok(data)
+    }
 }
 
-// Writing of strings and string slices
+// Strings and string slices
 impl Hdf5Data for String {
+    type Output = String;
+
     fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
         where G: GroupHolder<C>, C: Communicator
     {
         self.as_str().write_into(ds, name)
     }
+
+    fn read_from<C>(ds: &DatasetReader<C>) -> Result<Self::Output, OutputError> where C: Communicator {
+        str::read_from(ds)
+    }
 }
 
 impl Hdf5Data for str {
+    type Output = String;
+
     fn write_into<G, C>(&self, ds: &Dataset<G, C>, name: &ffi::CStr) -> Result<Option<h5i::hid_t>, OutputError>
         where G: GroupHolder<C>, C: Communicator
     {
@@ -464,6 +687,83 @@ impl Hdf5Data for str {
             check!(h5p::H5Pclose(plist_id))?;
 
             Ok(Some(dset_id))
+        }
+    }
+
+    fn read_from<C>(ds: &DatasetReader<C>) -> Result<Self::Output, OutputError> where C: Communicator {
+        // What kind of string do we have?
+        let is_string = unsafe {
+            let class = h5t::H5Tget_class(ds.type_id());
+            class == h5t::H5T_STRING
+        };
+
+        if !ds.is_scalar() || !is_string {
+            let type_name = "scalar string".to_owned();
+            return Err(OutputError::TypeMismatch(type_name));
+        }
+
+        // some idiot might be using variable-length strings...
+        let is_vlen_string = unsafe {
+            h5t::H5Tis_variable_str(ds.type_id()) == 1
+        };
+
+        unsafe {
+            if is_vlen_string {
+                // interpret data as pointer to char
+                let mut ptr: *const ffi::c_char = std::ptr::null();
+
+                if ds.is_attribute() {
+                    check!( h5a::H5Aread(
+                        ds.id(),
+                        ds.type_id(),
+                        &mut ptr as *mut _ as *mut ffi::c_void,
+                    ))?;
+                } else {
+                    check!( h5d::H5Dread(
+                        ds.id(),
+                        ds.type_id(),
+                        h5s::H5S_ALL,
+                        h5s::H5S_ALL,
+                        h5p::H5P_DEFAULT,
+                        &mut ptr as *mut _ as *mut ffi::c_void,
+                    ))?;
+                }
+
+                ffi::CStr::from_ptr(ptr)
+                    .to_str()
+                    .map_err(|_| OutputError::TypeMismatch("valid UTF-8".to_owned()))
+                    .map(|s| s.to_owned())
+            } else {
+                let len = h5t::H5Tget_size(ds.type_id()); // not including null terminator
+                let mut buffer: Vec<u8> = vec![0; len];
+
+                if ds.is_attribute() {
+                    check!( h5a::H5Aread(
+                        ds.id(),
+                        ds.type_id(),
+                        buffer.as_mut_ptr() as *mut ffi::c_void,
+                    ))?;
+                } else {
+                    let filespace = check!( h5d::H5Dget_space(ds.id()) )?;
+                    let memspace = check!( h5s::H5Screate(h5s::H5S_SCALAR))?;
+
+                    check!( h5d::H5Dread(
+                        ds.id(),
+                        ds.type_id(),
+                        memspace,
+                        filespace,
+                        h5p::H5P_DEFAULT,
+                        buffer.as_mut_ptr() as *mut ffi::c_void,
+                    ))?;
+
+                    // println!("\tbuffer holding {:?} => {:?}", buffer, String::from_utf8_lossy(&buffer));
+
+                    check!( h5s::H5Sclose(memspace) )?;
+                    check!( h5s::H5Sclose(filespace) )?;
+                }
+
+                String::from_utf8(buffer).map_err(|_| OutputError::TypeMismatch("valid UTF-8".to_owned()))
+            }
         }
     }
 }

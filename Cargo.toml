@@ -17,6 +17,7 @@ evalexpr = "8.1"
 yaml-rust = "0.4.5"
 num-complex = "0.4"
 enum_dispatch = "0.3"
+colored = "2"
 hdf5-writer = {path = "./hdf5-writer", version = "0.2", optional = true}
 unzip-n = {version = "0.1.2", optional = true}
 mpi = {version = "0.6", optional = true, default-features = false}

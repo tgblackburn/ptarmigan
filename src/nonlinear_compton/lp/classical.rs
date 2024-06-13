@@ -204,7 +204,7 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
             let prefactor = 2.0 * eta / (1.0 + 0.5 * a * a);
             Some(prefactor * f.exp())
         } else {
-            eprintln!("NLC (classical LP) rate lookup out of bounds: a = {:.3e}", a);
+            crate::report!(Diagnostic::Error, true, "NLC (classical LP) rate lookup out of bounds: a = {:.3e}", a);
             None
         }
     }

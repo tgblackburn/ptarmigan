@@ -6,9 +6,7 @@ use rand::prelude::*;
 use crate::pwmci;
 use crate::special_functions::*;
 use crate::geometry::StokesVector;
-use super::{
-    spectrum_low_eta,
-};
+use super::spectrum_low_eta;
 
 mod rate_table;
 mod cdf_table;
@@ -38,7 +36,7 @@ pub fn rate(a: f64, eta: f64) -> Option<f64> {
             );
             Some(eta * f.exp())
         } else {
-            eprintln!("NLC (classical CP) rate lookup out of bounds: a = {:.3e}", a);
+            crate::report!(Diagnostic::Error, true, "NLC (classical CP) rate lookup out of bounds: a = {:.3e}", a);
             None
         }
     }

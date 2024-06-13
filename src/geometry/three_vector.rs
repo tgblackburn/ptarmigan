@@ -115,6 +115,11 @@ impl ThreeVector {
             self.z,
         )
     }
+
+    /// Converts `self` to a four-vector with given time component.
+    pub fn with_time(self, t: f64) -> FourVector {
+        FourVector::new(t, self[0], self[1], self[2])
+    }
 }
 
 impl std::ops::Index<i32> for ThreeVector {

@@ -66,6 +66,9 @@ pub fn identify(name: &str) -> Option<(ParticleOutput, ParticleOutputType)> {
         "z" => Some(
             (z as ParticleOutput, Length)
         ),
+        "radius" | "rho" => Some(
+            (radius as ParticleOutput, Length)
+        ),
         "birth_a" => Some(
             (payload as ParticleOutput, Dimensionless)
         ),
@@ -195,6 +198,11 @@ pub fn y(pt: &Particle) -> f64 {
 pub fn z(pt: &Particle) -> f64 {
     let r = pt.position();
     r[3]
+}
+
+pub fn radius(pt: &Particle) -> f64 {
+    let r = pt.position();
+    r[1].hypot(r[2])
 }
 
 pub fn payload(pt: &Particle) -> f64 {

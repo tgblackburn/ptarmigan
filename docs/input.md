@@ -48,29 +48,78 @@ Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, wher
 
 ## beam
 
+There are two ways to generate the particles of the incident beam in Ptarmigan.
+Either the spectral and spatial properties of the beam can be given in the input file, and the particles are then pseudorandomly sampled from these distributions, or the particles can be imported from an external binary file.
+
+### Generating a particle beam
+
+Basic information:
+
 * `n`: number of primary particles. `ne` is also accepted.
 * `species` (optional, default = `electron`): primary particle type, must be one of `electron`, `photon` or `positron`.
 * `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
+
+Energy spectrum:
+
 * `gamma`: the mean Lorentz factor.
 * `sigma` (optional, default = `0.0`): the standard deviation of the electron Lorentz factors, set to zero if not specified.
 * `bremsstrahlung_source` (optional, if primary particles are photons, default = `false`): switches energy spectrum from Gaussian to mimic a bremsstrahlung source.
 * `gamma_min` (required if `bremsstrahlung_source` is `true`): lower bound for the bremsstrahlung energy spectrum.
+* `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
+
+Spatial distribution:
+
 * `radius` (optional, default = `0.0`): if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
 The distribution (if normal) may be optionally truncated by specifying `[radius, normally_distributed, max_radius]`.
 * `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
 * `energy_chirp` (optional, default = `0.0`): if specified, introduces a correlation of the requested magnitude between the particle's energy and its longitudinal offset from the beam centroid. A positive chirp means that the head of the beam (which hits the laser first) has higher energy than the tail. The specified value must be between -1 and +1.
-* `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
-* `collision_plane` (optional, default = `horizontal`): by default, the collision angle in the plane spanned by the laser wavevector and the electric field (i.e. `x`-`z`).
-Switching this to `vertical` means that the collision occurs in the plane spanned by the wavevector and the magnetic field (i.e. `y`-`z`).
-* `rms_divergence` (optional, default = `0.0`): if specified, the angles between particle initial momenta and the beam propagation axis are normally distributed, with given standard deviation.
-* `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
-The offsets are defined with respect to the beam propagation axis: the first two components are perpendicular to this axis and the third is parallel to it.
-For example, if the offset is `[0.0, 0.0, delta > 0]` and the collision angle is `0.0`, the peak of the laser reaches the focal plane before the beam centroid does; the collision, while perfectly aligned in the perpendicular directions, is delayed by time `delta/(2c)`.
+
+Spin and polarization:
+
 * `stokes_pars` (optional, default = `[0.0, 0.0, 0.0]`): specifies the primary particles' polarization in terms of the three Stokes parameters `S_1`, `S_2` and `S_3` (equiv. `Q`, `U` and `V`).
 The basis is defined with respect to the `x`-`z` plane and the particle velocity:
 `S_1` is associated with linear polarization along x (`+1.0`) or y (`-1.0`); `S_2` with linear polarization at 45 degrees to these axes; and `S_3` to the degree of circular polarization.
 For example, `[1.0, 0.0, 0.0]` loads particles that are polarized parallel to the laser electric field (if `laser:polarization` is `linear`).
 The default behaviour is to assume that the particles are unpolarized.
+
+Collision parameters:
+
+* `collision_angle` (optional, default = `0.0`): angle between beam momentum and laser axis in radians, with zero being perfectly counterpropagating; the constant `degree` is provided for convenience.
+* `offset` (optional, default = `[0.0, 0.0, 0.0]`): introduces an alignment error between the particle beam and the laser pulse, as defined by the location of the beam centroid at the time when the peak of the laser pulse passes through focus.
+The offsets are defined with respect to the beam propagation axis: the first two components are perpendicular to this axis and the third is parallel to it.
+For example, if the offset is `[0.0, 0.0, delta > 0]` and the collision angle is `0.0`, the peak of the laser reaches the focal plane before the beam centroid does; the collision, while perfectly aligned in the perpendicular directions, is delayed by time `delta/(2c)`.
+
+### Loading a particle beam
+
+In this case, it is necessary to specify:
+
+* `species` (primary particle type, must be one of `electron`, `photon` or `positron`)
+
+and optionally
+
+* `collision_angle`
+* `offset`
+
+in the `beam` section of the input file.
+All other quantities will be imported from the external file.
+
+At present, Ptarmigan will accept only HDF5-formatted input.
+The HDF5 file in question must either be the output of a Ptarmigan simulation, or have compatible structure.
+
+> [!NOTE]
+> [PICA](https://github.com/hixps/pica) (Polarized ICS CAlculator) produces output that is compatible with Ptarmigan.
+
+[See here for more information](custom_particle_beams.md) on creating an HDF5 file that Ptarmigan can understand.
+
+In a subsection `from_hdf5`, provide:
+
+* `file`: path to the HDF5 file that stores the particle data, relative to the location of the input file.
+* `distance_between_ips`: the distance between the origin of the coordinate system, used by the imported particle beam, and the laser collision point, in metres.
+This is used to propagate the particles between the interaction points, assuming ballistic drift.
+A `distance_between_ips` of `0.0` is perfectly fine: it means that the particle positions are defined with respect to the laser collision point.
+* `min_energy` (optional, default = `0.0`): if specified, skip any particles that have less energy than this threshold, during import.
+* `max_angle` (optional, default = `pi`): if specified, skip particles that are moving, with respect to the particle beam axis, at angles greater than the given limit.
+
 
 ## output
 

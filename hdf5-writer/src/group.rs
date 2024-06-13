@@ -1,4 +1,4 @@
-//! Creating groups within the file structure
+//! Creating and opening groups within the file structure
 
 #[cfg(feature = "with-mpi")]
 use mpi::traits::*;
@@ -13,10 +13,7 @@ use hdf5_sys::{
 };
 
 use crate::{
-    to_c_string,
-    Dataset,
-    check,
-    OutputError,
+    check, to_c_string, Dataset, DatasetReader, OutputError
 };
 
 pub trait GroupHolder<C: Communicator>: Sized {
@@ -59,10 +56,37 @@ pub trait GroupHolder<C: Communicator>: Sized {
         })
     }
 
+    /// Opens an existing subgroup within the current group or file
+    fn open_group<'a>(&'a self, name: &str) -> Result<Group<'a, C>, OutputError> where C: Communicator {
+        let cstr = to_c_string(name)?;
+
+        let id = unsafe {
+            check!( h5g::H5Gopen(
+                self.id(),
+                cstr.as_ptr(),
+                h5p::H5P_DEFAULT,
+            ))?
+        };
+
+        Ok(Group {
+            comm: self.comm(),
+            id,
+            // inherit from parent
+            specific_rank: self.specific_rank(),
+        })
+    }
+
     /// Creates a new dataset handle within the current group or file
     fn new_dataset<'a>(&'a self, name: &str) -> Result<Dataset<'a, Self, C>, OutputError> {
         let name = to_c_string(name)?;
         Ok(Dataset::create_in(&self, name, self.specific_rank()))
+    }
+
+    /// Opens a handle to a dataset within the current group or file.
+    /// The name can be a fully qualified path, e.g. '/root/folder/subfolder/...'
+    fn open_dataset<'a>(&'a self, name: &str) -> Result<DatasetReader<'a, C>, OutputError> {
+        let name = to_c_string(name)?;
+        DatasetReader::open_in(self, name)
     }
 }
 

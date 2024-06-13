@@ -332,7 +332,7 @@ impl TotalRate {
             };
             // interpolation errors mean that even after the sum, cumsum could be < target
             if index == -1 {
-                eprintln!("pair_creation::generate failed to sample a harmonic order (a = {:.3e}, eta = {:.3e}, {} <= n < {}), falling back to {}.", a, eta, n_min, n_max, n_max - 1);
+                crate::report!(Diagnostic::Warning, true, "pair_creation::generate failed to sample a harmonic order (a = {:.3e}, eta = {:.3e}, {} <= n < {}), falling back to {}.", a, eta, n_min, n_max, n_max - 1);
                 index = n_max - 1;
             }
             assert!(index >= n_min && index <= n_max);

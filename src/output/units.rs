@@ -11,6 +11,11 @@ pub trait HasUnit {
     /// to the target unit
     fn convert(self, unit: &Unit) -> Self::Output;
 
+    /// Converts a quantity from the given unit to
+    /// the default system of units
+    #[allow(unused)]
+    fn convert_from(self, unit: &Unit) -> Self::Output;
+
     /// Converts a quantity from SI to the default system of units
     fn from_si(self, unit: &Unit) -> Self::Output;
 }
@@ -19,6 +24,10 @@ impl<T> HasUnit for T where T: Mul<f64> {
     type Output = T::Output;
     fn convert(self, unit: &Unit) -> Self::Output {
         self * unit.scale
+    }
+
+    fn convert_from(self, unit: &Unit) -> Self::Output {
+        self * unit.scale.recip()
     }
 
     fn from_si(self, unit: &Unit) -> Self::Output {

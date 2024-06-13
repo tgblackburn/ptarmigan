@@ -454,7 +454,7 @@ pub(super) fn rate(a: f64, eta: f64) -> Option<f64> {
             );
             Some(f.exp())
         } else {
-            eprintln!("NLC (LP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
+            crate::report!(Diagnostic::Error, true, "NLC (LP) rate lookup out of bounds: a = {:.3e}, eta = {:.3e}", a, eta);
             None
         }
     }
@@ -572,7 +572,7 @@ fn get_harmonic_index(a: f64, eta: f64, frac: f64) -> i32 {
 
     // interpolation errors mean that even after the sum, cumsum could be < target
     n.unwrap_or_else(|| {
-        eprintln!("lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
+        crate::report!(Diagnostic::Warning, true, "lp::sample failed to obtain a harmonic order: target = {:.3e}% of rate at a = {:.3e}, eta = {:.3e} (n < {}), falling back to {}.", frac, a, eta, nmax, nmax - 1);
         nmax - 1
     })
 }

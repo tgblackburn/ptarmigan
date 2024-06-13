@@ -125,7 +125,7 @@ impl Config {
                 let key = key.unwrap(); // if value.is_some() so is key
                 self.ctx.set_value(key.clone(), Value::from(v))
                     .map_err(|_| {
-                        eprintln!("Failed to insert {} = {} from constants block into context.", key, v);
+                        crate::report!(Diagnostic::Error, true, "failed to insert {} = {} from constants block into context.", key, v);
                         InputError::conversion(section, key)
                     })?
             } else if let Some(k) = key {

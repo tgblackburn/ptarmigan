@@ -40,6 +40,24 @@ macro_rules! check {
     }}
 }
 
+#[macro_export]
+macro_rules! check_silent {
+    ($class:ident::$func:ident($($args:expr),* $(,)?)) => {{
+        use crate::{OutputError, Checkable};
+        // invoke function
+        let val = $class::$func($($args,)*);
+        if val.is_error_code() {
+            Err(OutputError::H5Call {
+                func: stringify!($func).to_owned(),
+                file: file!().to_owned(),
+                line: line!(),
+            })
+        } else {
+            Ok(val)
+        }
+    }}
+}
+
 // Callback that prints the error stack, which can be passed to HDF5 library
 #[allow(deprecated)]
 pub unsafe extern "C" fn print_error_stack(n: libc::c_uint, error_desc: *const h5e::H5E_error_t, _: *mut libc::c_void) -> h5::herr_t {
@@ -69,6 +87,9 @@ pub unsafe extern "C" fn print_error_stack(n: libc::c_uint, error_desc: *const h
 
 pub enum OutputError {
     Identifier(String),
+    Missing(String),
+    TypeMismatch(String),
+    FileOpen,
     H5Call {
         func: String,
         file: String,
@@ -81,6 +102,15 @@ impl fmt::Debug for OutputError {
         match self {
             OutputError::Identifier(s) => {
                 write!(f, "Unable to convert requested identifier '{}' to nul-terminated string!", s)
+            },
+            OutputError::Missing(s) => {
+                write!(f, "Unable to access group/dataset at location '{}'.", s)
+            },
+            OutputError::TypeMismatch(s) => {
+                write!(f, "Target dataset is not of type '{}'.", s)
+            },
+            OutputError::FileOpen => {
+                write!(f, "Unable to open specified file.")
             },
             OutputError::H5Call {func, file, line} => {
                 write!(f, "{} (line {} in {}) failed, see diagnostic messages above.", func, line, file)
