@@ -150,14 +150,17 @@ impl BeamBuilder {
         }
     }
 
+    #[cfg(feature = "hdf5-output")]
     pub fn transverse_dstr_is_normal(&self) -> bool {
         matches!(self.radial_dstr, RadialDistribution::Normal {..} | RadialDistribution::TruncNormal {..})
     }
 
+    #[cfg(feature = "hdf5-output")]
     pub fn has_brem_spec(&self) -> bool {
         self.normal_espec.map(|b| !b).unwrap_or(false)
     }
 
+    #[cfg(feature = "hdf5-output")]
     pub fn radius(&self) -> (f64, f64) {
         match self.radial_dstr {
             RadialDistribution::Normal { sigma_x, sigma_y: _ } => (sigma_x, std::f64::INFINITY),

@@ -13,6 +13,7 @@ pub trait HasUnit {
 
     /// Converts a quantity from the given unit to
     /// the default system of units
+    #[allow(unused)]
     fn convert_from(self, unit: &Unit) -> Self::Output;
 
     /// Converts a quantity from SI to the default system of units

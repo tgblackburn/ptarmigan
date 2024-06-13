@@ -459,6 +459,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         ?;
 
     let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
+        #[cfg(not(feature = "hdf5-output"))] {
+            report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
+            return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
+        }
+
+        #[cfg(feature = "hdf5-output")] {
         let filename: String = input.read("beam:from_hdf5:file")?;
         let filename = format!("{}/{}", output_dir, filename);
 
@@ -478,6 +484,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .with_max_angle(max_angle);
 
         BeamParameters::FromHdf5 { loader }
+        }
     } else {
         // Number, species and weight
 
@@ -534,13 +541,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     Ok((r, b, max_radius))
                 } else {
                     report!(
-                        Diagnostic::Error, id == 0,
-                        "beam radius must be specified with a single numerical value, e.g.,\n\
-                        \tradius: 2.0e-6\n\
-                        or as a numerical value and a distribution, e.g,\n\
-                        \tradius: [2.0e-6, uniformly_distributed]\n\
-                        \tradius: [2.0e-6, normally_distributed].",
-                    );
+                        Diagnostic::Error, id == 0, concat!(
+                        "beam radius must be specified with a single numerical value, e.g.,\n",
+                        "         radius: 2.0e-6\n",
+                        "       or as a numerical value and a distribution, e.g.,\n",
+                        "         radius: [2.0e-6, uniformly_distributed]\n",
+                        "         radius: [2.0e-6, normally_distributed]."
+                    ));
                     Err(InputError::conversion("beam:radius", "radius"))
                 }
             })
@@ -656,7 +663,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             "hdf5" => Ok(OutputMode::Hdf5),
             #[cfg(not(feature = "hdf5-output"))]
             "hdf5" => {
-                report!(Diagnostic::Warning, id == 0, "complete data output has been requested (dump_all_particles: hdf5), but ptarmigan has not been compiled with HDF5 support. No output will be generated.");
+                report!(
+                    Diagnostic::Warning, id == 0, concat!(
+                    "complete data output has been requested (dump_all_particles: hdf5), but Ptarmigan\n",
+                    "         has not been compiled with HDF5 support. No output will be generated."
+                ));
                 Ok(OutputMode::None)
             },
             _ => {
@@ -964,8 +975,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let (energy, _) = laser.energy();
 
         let f_abs = total_absorption / energy;
-        if f_abs > 0.1 && id == 0 {
-            println!("{}: obtained laser energy depletion of {:.2}%, background field approximation likely to be invalid.", "Warning".bold().bright_yellow(), 100.0 * f_abs);
+        if f_abs > 0.1 {
+            report!(
+                Diagnostic::Warning, id == 0,
+                concat!("obtained laser energy depletion of {}.\n",
+                "         Background field approximation likely to be invalid."),
+                format!("{:.2}%", 100.0 * f_abs).bold()
+            );
         }
 
         // Updating 'ident' in case of a0 looping
@@ -975,6 +991,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         else {
             ident.to_owned()
         };
+
+        if id == 0 {
+            println!("{} distribution output...", "Generating".bold().cyan());
+        }
 
         for dstr in &eospec {
             let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
@@ -1032,6 +1052,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 let filename = format!("{}{}{}{}particles.h5", output_dir, if output_dir.is_empty() {""} else {"/"}, 
                                                                current_ident, if current_ident.is_empty() {""} else {"_"});
                 let file = hdf5_writer::ParallelFile::create(&world, &filename)?;
+
+                if id == 0 {
+                    println!("{} HDF5 output to {}...", "Writing".bold().cyan(), filename);
+                }
 
                 // Build info
                 file.new_group("build")?
@@ -1447,10 +1471,12 @@ fn main() -> ExitCode {
         colored::control::set_override(false);
     }
 
-    let bar = "════════════════════════════════════";
+    let base = if cfg!(target_os = "windows") { "*" } else { "═" };
+    let bar = base.repeat(36);
+    let title = concat!(" ", "Ptarmigan v", env!("CARGO_PKG_VERSION"), " ");
 
     if id == 0 {
-        println!("{} {}{} {}", bar.blue(), "Ptarmigan v".bold(), env!("CARGO_PKG_VERSION").bold(), bar.blue());
+        println!("{}{}{}", bar.blue(), title.bold(), bar.blue());
     }
 
     let exit_code = match ptarmigan_main(world) {
@@ -1462,7 +1488,7 @@ fn main() -> ExitCode {
     };
 
     if id == 0 {
-        let centre = "═".repeat(2 + "Ptarmigan v".len() + env!("CARGO_PKG_VERSION").len());
+        let centre = base.repeat(title.len());
         println!("{}{}{}", bar.blue(), centre.blue(), bar.blue());
     }
 
