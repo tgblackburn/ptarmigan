@@ -1,26 +1,38 @@
 ---
+# Reproduce the comparison between theory and simulation
+# for the polarization-resolved photon spectra shown in
+# Fig 2 of Blackburn, King and Tang, PoP 30, 093903 (2023),
+# arXiv:2305.13061
+
 control:
-  dt_multiplier: 0.1
+  dt_multiplier: 0.5
   radiation_reaction: false
   pair_creation: false
 
 laser:
   a0: 2.5
   omega: omega * eV
+  envelope: cos^2
   n_cycles: 16.0
-  polarization: circular
+  polarization: linear
 
 beam:
   ne: 1000000
+  charge: e
   gamma: eta * 0.510999 / (2.0 * omega * 1.0e-6)
-  radius: 2.0 * micro
 
 output:
-  ident: 2.5x16
+  ident: 2.5x0.1
   file_format: fits
-  electron: [p^-, p^-:p_perp]
-  photon: [p^-, p^-:(log;auto), p^-:r_perp:(log;auto), p^-:p_perp:(log;auto)]
+  photon:
+    # scale axes by electron p^-:
+    - p^-:(pol_x)
+    - p^-:(pol_y)
+    # scale axes by electron p^-/m:
+    - r_x:r_y:(auto; pol_x; theta in 0, max_theta)
+    - r_x:r_y:(auto; pol_y; theta in 0, max_theta)
 
 constants:
   eta: 0.1 # eta = 2 gamma omega / m
   omega: 1.5498 # in eV, equiv to 800 nm
+  max_theta: 0.4 * milli

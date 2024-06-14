@@ -99,20 +99,15 @@ impl BeamLoader {
         }
     }
 
-    fn realign_particle(&self, r: FourVector, p: FourVector, old_collision_angle: f64, laser_defines_z: bool) -> (FourVector, FourVector) {
-        // ignore collision plane angle for now
-        let p = if laser_defines_z {
-            p.rotate_around_y(self.collision_angle - old_collision_angle)
-        } else {
-            p.rotate_around_y(std::f64::consts::PI + self.collision_angle)
-        };
+    fn rotation_angle(&self, beam_axis: ThreeVector) -> f64 {
+        let new_axis = ThreeVector::new(-self.collision_angle.sin(), 0.0, -self.collision_angle.cos());
+        let theta = (new_axis * beam_axis).acos().abs().copysign(beam_axis.cross(new_axis)[1]);
+        theta
+    }
 
-        // ignore collision plane angle for now
-        let r = if laser_defines_z {
-            r.rotate_around_y(self.collision_angle - old_collision_angle)
-        } else {
-            r.rotate_around_y(std::f64::consts::PI + self.collision_angle)
-        };
+    fn realign_particle(&self, r: FourVector, p: FourVector, theta: f64) -> (FourVector, FourVector) {
+        let p = p.rotate_around_y(theta);
+        let r = r.rotate_around_y(theta);
 
         // timing/alignment errors
         let r = r + self.offset.rotate_around_y(self.collision_angle).with_time(0.0);
@@ -160,26 +155,50 @@ impl BeamLoader {
         // println!("\tgot length unit = {:?} and momentum unit = {:?}", x_unit, p_unit);
 
         // Translating the coordinate system
-        let laser_defines_z = file
-            .open_dataset("config/output/laser_defines_positive_z")
-            .and_then(|ds| ds.read::<bool>())
+        let beam_axis = file
+            .open_dataset("config/output/beam_defines_positive_z")
+            .and_then(|ds| {
+                let beam_defines_positive_z = ds.read::<bool>().unwrap_or(false);
+                if beam_defines_positive_z {
+                    Ok(ThreeVector::new(0.0, 0.0, 1.0))
+                } else {
+                    Err(OutputError::Missing("coordinate system".to_owned()))
+                }
+            })
+            .or_else(|_| {
+                let laser_defines_positive_z = file.open_dataset("config/output/laser_defines_positive_z")
+                    .and_then(|ds| ds.read::<bool>())
+                    .unwrap_or(false);
+                let collision_angle = file.open_dataset("config/beam/collision_angle")
+                    .and_then(|ds| ds.read::<f64>());
+
+                if laser_defines_positive_z && collision_angle.is_ok() {
+                    let theta = collision_angle.unwrap();
+                    Ok(ThreeVector::new(-theta.sin(), 0.0, -theta.cos()))
+                } else {
+                    Err(OutputError::Missing("coordinate_system".to_owned()))
+                }
+            })
+            .or_else(|_| {
+                file.open_dataset("beam_axis")
+                    .and_then(|ds| ds.read::<String>())
+                    .and_then(|s| match s.as_str() {
+                        "+x" => Ok(ThreeVector::new(1.0, 0.0, 0.0)),
+                        "-x" => Ok(ThreeVector::new(-1.0, 0.0, 0.0)),
+                        "+z" => Ok(ThreeVector::new(0.0, 0.0, 1.0)),
+                        "-z" => Ok(ThreeVector::new(0.0, 0.0, -1.0)),
+                        _ => {
+                            report!(Diagnostic::Error, id == 0, "beam axis \"{}\" not recognised, halting.", s);
+                            return Err(OutputError::Missing("beam_axis".to_owned()));
+                        }
+                    })
+            })
             .unwrap_or_else(|_| {
                 report!(Diagnostic::Warning, id == 0, "no coordinate system specified, assuming beam propagates towards positive z...");
-                false // assume beam defines z
+                ThreeVector::new(0.0, 0.0, 1.0) // assume beam defines z
             });
 
-        let collision_angle = file
-            .open_dataset("config/beam/collision_angle")
-            .and_then(|ds| ds.read::<f64>())
-            .unwrap_or(0.0);
-
-        // introduced in v1.3.4, optionally supported
-        let _collision_plane_angle = file
-            .open_dataset("config/beam/collision_plane_angle")
-            .and_then(|ds| ds.read::<f64>())
-            .unwrap_or(0.0);
-
-        // println!("\tlaser coordinate system? {}, collision angle = {} deg, collision plane angle = {} deg", laser_defines_z, collision_angle * (180.0 / std::f64::consts::PI), _collision_plane_angle * (180.0 / std::f64::consts::PI));
+        let theta = self.rotation_angle(beam_axis);
 
         let weight = file.open_dataset(&self.weight_path)?
             .read::<[f64]>()?
@@ -221,9 +240,7 @@ impl BeamLoader {
             let r = position[i].convert_from(&x_unit);
             let p = momentum[i].convert_from(&p_unit) / ELECTRON_MASS_MEV;
 
-            let (r, p) = self.realign_particle(
-                r, p, collision_angle, laser_defines_z
-            );
+            let (r, p) = self.realign_particle(r, p, theta);
 
             let pt = Particle::create(self.species, r)
                 .with_weight(weight[i])

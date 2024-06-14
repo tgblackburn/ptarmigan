@@ -1,0 +1,43 @@
+---
+# Examples of how to use HDF5 input and output
+# Part 1:
+# Simulate the production of a beam of high-energy gamma rays,
+# using the collision of a 10-GeV electron beam and a moderately
+# intense, frequency-tripled laser pulse.
+
+control:
+  lcfa: false
+  radiation_reaction: true
+  pair_creation: false
+
+laser:
+  a0: 1.0
+  wavelength: 0.8 * micro / 3.0
+  fwhm_duration: 30.0 * femto
+  waist: 10.0 * micro
+  polarization: linear
+
+beam:
+  n: 1000000
+  species: electron
+  charge: 100.0 * pico
+  gamma: gamma
+  sigma: 0.01 * gamma
+  radius: 5.0 * micro
+  length: 10.0 * micro
+  collision_angle: 15.0 * degree
+  rms_divergence: 20 * micro
+
+output:
+  ident: auto
+  coordinate_system: beam
+  discard_background: true
+  dump_all_particles: hdf5
+  file_format: fits
+  photon:
+    - energy
+    - energy:(auto; auto; angle in 0, 100 * micro)
+    - angle_x:angle_y:(auto; auto; angle in 0, 20 * micro)
+
+constants:
+  gamma: 10.0 * GeV / (me * c^2)

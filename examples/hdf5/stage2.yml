@@ -1,0 +1,41 @@
+---
+# Examples of how to use HDF5 input and output.
+# Part 2:
+# Simulate pair production in the collision between the
+# high-energy gamma rays produced by the first collision
+# and a second, higher intensity, laser pulse.
+
+control:
+  lcfa: true
+  radiation_reaction: true
+  pair_creation: true
+  pol_resolved: true
+  increase_pair_rate_by: 1.0e4
+
+laser:
+  a0: 30.0
+  wavelength: 0.8 * micro
+  fwhm_duration: 30.0 * femto
+  waist: 4.0 * micro
+  polarization: linear @ pitch_angle
+
+beam:
+  species: photon
+  from_hdf5:
+    file: stage1_particles.h5
+    distance_bt_ips: 0.5 # metre
+    max_angle: 0.1 * milli
+
+output:
+  ident: stage2b
+  coordinate_system: beam
+  file_format: fits
+  photon:
+    - energy
+    - angle_x:angle_y:(auto; auto; angle in 0, 100 * micro)
+  positron:
+    - energy
+    - angle_x:angle_y:(auto; auto; angle in 0, 10.0 * milli)
+
+constants:
+  pitch_angle: 0.0 * degree

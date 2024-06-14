@@ -801,11 +801,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
     // Temporary warning that stats parsing has changed
     for stat in estats.iter().chain(gstats.iter()).chain(pstats.iter()) {
-        if stat.has_version_incompatible_filter() && id == 0 {
-            println!(concat!(
-                "Warning: as of Ptarmigan v1.4.0, all bounds in summary statistics are assumed to be in SI units.\n",
-                "         Energy and momentum bounds, previously interpreted as MeV and MeV/c, must be corrected,\n",
-                "         using conversion constants if necessary. Continuing."
+        if stat.has_version_incompatible_filter() {
+            report!(
+                Diagnostic::Warning, id == 0, concat!(
+                "as of Ptarmigan v1.4.0, all bounds in summary statistics are assumed to be in\n",
+                "         SI units. Energy and momentum bounds, previously interpreted as MeV and MeV/c,\n",
+                "         must be corrected, using conversion constants if necessary. Continuing..."
             ));
             break;
         }
@@ -1072,7 +1073,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 let file = hdf5_writer::ParallelFile::create(&world, &filename)?;
 
                 if id == 0 {
-                    println!("{} HDF5 output to {}...", "Writing".bold().cyan(), filename);
+                    println!("{} HDF5 output to {}...", "Writing".bold().cyan(), filename.bold().blue());
                 }
 
                 // Build info

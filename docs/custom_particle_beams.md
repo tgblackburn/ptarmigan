@@ -5,6 +5,7 @@ Perhaps the six-dimensional phase space is highly correlated, or you have output
 
 Creating an HDF5 file of particle data that contains the following datasets:
 
+* `beam_axis`: a string that is one of `+x`, `-x`, `+z` or `-z`, indicating the beam propagation direction.
 * `config/unit/momentum`: a UTF-8 formatted string that gives the units of the four-momentum.
 Ptarmigan will recognise `kg/m/s`, as well as `MeV/c` and `GeV/c` (with or without the `/c`).
 * `config/unit/position`: a UTF-8 formatted string that gives the units of the four-position.

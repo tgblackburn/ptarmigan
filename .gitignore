@@ -10,8 +10,10 @@
 
 # Ignore output from examples
 /examples/*
-!/examples/*.yaml
 !/examples/*.yml
+!/examples/hdf5
+/examples/hdf5/*
+!/examples/hdf5/*.yml
 
 /.vscode
 /.DS_Store
