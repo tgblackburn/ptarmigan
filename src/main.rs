@@ -472,7 +472,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         #[cfg(feature = "hdf5-output")] {
         let filename: String = input.read("beam:from_hdf5:file")?;
-        let filename = format!("{}/{}", output_dir, filename);
+        let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
 
         let distance: f64 = input.read("beam:from_hdf5:distance_bt_ips")?;
 
