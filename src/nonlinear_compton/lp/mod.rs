@@ -660,7 +660,7 @@ pub(super) fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>
             - 2.0 * (1.0 + 2.0 * u * u * theta.sin().powi(2)) * (A[0] / a).powi(2)
         );
 
-        let xi_2 = (
+        let xi_2 = -1.0 * (
             2.0 * (u * A[0] / a).powi(2) * (2.0 * theta).sin()
             + 4.0 * u * A[0] * A[1] * theta.sin() / a
         );
