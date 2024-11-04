@@ -26,6 +26,7 @@ Tracking:
 
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
 * `stop_at_time` (optional): if specified, stops tracking at the given instant of time. Otherwise, the simulation tracks particles until they have travelled through the entire laser pulse. Time zero corresponds to the point at which the peak of the laser passes through the focal plane.
+Specify `auto` in order to force tracking to continue until all particles have the same time coordinate.
 
 ## laser
 

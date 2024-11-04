@@ -58,6 +58,15 @@ enum OutputMode {
     Hdf5,
 }
 
+enum StopAt {
+    /// Continue until all particles have the same time coordinate.
+    SameTime,
+    /// Continue until all particles have the specified time coordinate.
+    GivenTime(f64),
+    /// Continue until all particles have fallen out of the high-field region.
+    Automatic,
+}
+
 /// Wrapper around detailed optional arguments to [collide](collide)
 #[derive(Copy, Clone)]
 struct CollideOptions {
@@ -303,7 +312,22 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let rng_seed = input.read("control:rng_seed").unwrap_or(0usize);
     let finite_bandwidth = input.read("control:bandwidth_correction").unwrap_or(false);
     let rr = input.read("control:radiation_reaction").unwrap_or(true);
-    let t_stop = input.read("control:stop_at_time").unwrap_or(std::f64::INFINITY);
+
+    let t_stop = input.read::<String, _>("control:stop_at_time")
+        .and_then(|s| match s.as_str() {
+            "auto" => Ok(StopAt::SameTime),
+            _ => input.evaluate(s)
+                    .map(|t| StopAt::GivenTime(t))
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "control:stop_at_time must be a numerical value or 'auto'.");
+                        InputError::conversion("control:stop_at_time", "stop_at_time")
+                    })
+        })
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Conversion => Err(e), // preserve error if parsing failed
+            _ => Ok(StopAt::Automatic),
+        })
+        ?;
 
     let (classical, gaunt_factor) = input.read::<String, _>("control:classical")
         .and_then(|s| match s.as_str() {
@@ -931,7 +955,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let options = CollideOptions {
             dt_multiplier,
             rate_increase: pair_rate_increase,
-            t_stop,
+            t_stop: match t_stop {
+                StopAt::SameTime | StopAt::Automatic => std::f64::INFINITY,
+                StopAt::GivenTime(t) => t
+            },
             discard_bg_e,
             discard_bg_ph,
             rr,
@@ -976,6 +1003,40 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             pt.with_id(pt.id() + id_offsets[id as usize]);
             pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
             absorption += pt.weight() * pt.absorbed_energy();
+        }
+
+        // Fix time coordinates, if necessary
+        match t_stop {
+            StopAt::SameTime => {
+                // which particle got furthest?
+                let mut ct_local = std::f64::NEG_INFINITY;
+                for pt in electrons.iter().chain(photons.iter()).chain(positrons.iter()).chain(decayed_photons.iter()) {
+                    let ct = pt.position()[0];
+                    if ct > ct_local { ct_local = ct; }
+                }
+
+                // across all MPI tasks
+                let mut ct_global = ct_local;
+                world.all_reduce_into(&ct_local, &mut ct_global, SystemOperation::max());
+
+                // update all positions
+                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+                    let r = pt.position();
+                    let p = pt.normalized_momentum();
+                    let r = r + p * (ct_global - r[0]) / p[0];
+                    pt.with_position(r);
+                }
+            },
+            StopAt::GivenTime(t) => {
+                let ct_global = t * SPEED_OF_LIGHT;
+                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+                    let r = pt.position();
+                    let p = pt.normalized_momentum();
+                    let r = r + p * (ct_global - r[0]) / p[0];
+                    pt.with_position(r);
+                }
+            },
+            _ => {},
         }
 
         let mut total_absorption = 0.0;
