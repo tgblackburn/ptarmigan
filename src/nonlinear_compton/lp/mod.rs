@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 //! Rates and spectra for linearly polarized backgrounds
 use std::f64::consts;
 use num_complex::Complex;

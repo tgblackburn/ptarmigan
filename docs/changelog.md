@@ -2,7 +2,7 @@
 
 ## v1.4.0
 
-In progress.
+2024-11-05
 
 Added:
 
@@ -14,6 +14,8 @@ Added:
 Fixed:
 
 * Inconsistent use of units in stats block: filter bounds are now interpreted as being given in SI units.
+* Sign error in S_2 for NLC in an LP laser.
+* Unused function warnings.
 
 
 ## v1.3.5

@@ -5,8 +5,8 @@ mod bessel;
 mod airy;
 mod double_bessel;
 
-#[cfg(feature = "leading-order-only")]
-mod factorial;
+// Pending removal
+// mod factorial;
 
 pub use bessel::*;
 pub use airy::*;
