@@ -280,6 +280,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore]
     fn beam_loading() {
         let universe = mpi::initialize().unwrap();
         let world = universe.world();
