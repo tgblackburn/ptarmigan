@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.4.0
+## v1.4.1
 
 2024-11-05
 
@@ -16,6 +16,7 @@ Fixed:
 * Inconsistent use of units in stats block: filter bounds are now interpreted as being given in SI units.
 * Sign error in S_2 for NLC in an LP laser.
 * Unused function warnings.
+* Failing tests.
 
 
 ## v1.3.5
