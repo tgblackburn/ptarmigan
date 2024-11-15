@@ -488,6 +488,17 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    if let Ok(s) = input.read::<String, _>("beam:file") {
+        report!(
+            Diagnostic::Warning, id == 0,
+            concat!(
+                "Are you trying to import particle data from a file? If so, please ident\n",
+                "           file: {}\n",
+                "         so that it is part of the subsection \"{}\"."),
+            s, "from_hdf5"
+        );
+    }
+
     let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
