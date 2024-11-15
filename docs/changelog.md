@@ -1,8 +1,8 @@
 # Changelog
 
-## v1.4.1
+## v1.4.2
 
-2024-11-05
+2024-11-15
 
 Added:
 
@@ -17,6 +17,7 @@ Fixed:
 * Sign error in S_2 for NLC in an LP laser.
 * Unused function warnings.
 * Failing tests.
+* Warnings when imported HDF5 data.
 
 
 ## v1.3.5
