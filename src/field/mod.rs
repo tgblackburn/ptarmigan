@@ -4,8 +4,8 @@ use rand::prelude::*;
 use enum_dispatch::enum_dispatch;
 use crate::geometry::{FourVector, StokesVector, ThreeVector};
 
-#[cfg(feature = "hdf5-output")]
-use hdf5_writer::{Hdf5Type, Datatype};
+mod properties;
+pub use properties::*;
 
 mod focused_laser;
 mod fast_focused_laser;
@@ -18,100 +18,8 @@ pub use self::fast_focused_laser::*;
 pub use self::plane_wave::*;
 pub use self::fast_plane_wave::*;
 
-/// The polarization of an electromagnetic wave
-#[allow(unused)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Polarization {
-    Linear = 0,
-    Circular = 1,
-}
-
-#[cfg(feature = "hdf5-output")]
-impl Hdf5Type for Polarization {
-    fn new() -> Datatype {
-        unsafe { Datatype::enumeration(&[
-            ("linear", Polarization::Linear as u8),
-            ("circular", Polarization::Circular as u8),
-        ])}
-    }
-}
-
-/// Temporal profile of the laser
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-#[repr(u8)]
-pub enum Envelope {
-    CosSquared = 0,
-    Flattop = 1,
-    Gaussian = 2,
-}
-
-#[cfg(feature = "hdf5-output")]
-impl Hdf5Type for Envelope {
-    fn new() -> Datatype {
-        unsafe { Datatype::enumeration(&[
-            ("cos^2", Envelope::CosSquared as u8),
-            ("flattop", Envelope::Flattop as u8),
-            ("gaussian", Envelope::Gaussian as u8),
-        ])}
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum EquationOfMotion {
-    Lorentz,
-    LandauLifshitz,
-    ModifiedLandauLifshitz,
-}
-
-impl EquationOfMotion {
-    fn includes_rr(&self) -> bool {
-        match self {
-            EquationOfMotion::LandauLifshitz | EquationOfMotion::ModifiedLandauLifshitz => true,
-            EquationOfMotion::Lorentz => false,
-        }
-    }
-}
-
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum RadiationMode {
-    Quantum,
-    Classical,
-}
-
-#[derive(Copy, Clone)]
-pub struct RadiationEvent {
-    /// The normalized momentum of the emitted photon
-    pub k: FourVector,
-    /// The normalized momentum of the recoiling electron/positron
-    pub u_prime: FourVector,
-    /// The polarization of the emitted photon
-    pub pol: StokesVector,
-    /// The effective a0 of the interaction
-    pub a_eff: f64,
-    /// The quantum parameter of the parent particle
-    pub chi: f64,
-    /// The energy absorbed from the field during the interaction,
-    /// in units of the electron rest energy
-    pub absorption: f64,
-}
-
-#[derive(Copy, Clone)]
-pub struct PairCreationEvent {
-    /// The normalized momentum of the electron
-    pub u_e: FourVector,
-    /// The normalized momentum of the positron
-    pub u_p: FourVector,
-    /// The fraction of the photon that has decayed
-    pub frac: f64,
-    /// The effective a0 of the interaction
-    pub a_eff: f64,
-    /// The quantum parameter of the parent particle
-    pub chi: f64,
-    /// The energy absorbed from the field during the interaction,
-    /// in units of the electron rest energy
-    pub absorption: f64,
-}
+mod numerical;
+pub use self::numerical::*;
 
 /// Specific field structures, i.e. types that implement `trait Field`.
 #[enum_dispatch]
@@ -120,6 +28,7 @@ pub enum Laser {
     FastPlaneWave,
     FocusedLaser,
     FastFocusedLaser,
+    NumericalFastPW,
 }
 
 /// Represents the electromagnetic field in a spatiotemporal domain.

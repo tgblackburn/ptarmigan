@@ -396,82 +396,163 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             val
         });
 
-    let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
-    let wavelength: f64 = input
-        .read("laser:wavelength")
-        .or_else(|_e|
-            // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
-            input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
-        )?;
+    // Electromagnetic field properties
 
-    let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
-        .and_then(|s| match s.as_str() {
-            "circular" => Ok((Polarization::Circular, 0.0)),
-            "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
-            "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
-            _ => {
-                if let Some(expr) = s.strip_prefix("linear @") {
-                    if let Some(pol_angle) = input.evaluate(expr) {
-                        Ok((Polarization::Linear, pol_angle))
+    // Check if we're reading from a file first.
+
+    let fields = if input.read::<String, _>("laser:from_plain_text:file").is_ok() {
+        let filename: String = input.read("laser:from_plain_text:file")?;
+        let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
+
+        if id == 0 {
+            println!("{} incident laser from {}...", "Importing".bold().cyan(), filename.bold().blue());
+        }
+
+        let step: f64 = input.read("laser:from_plain_text:step")?;
+
+        // Check that axis is valid
+        let _axis = input.read::<String, _>("laser:from_plain_text:axis")
+            .and_then(|s| match s.as_str() {
+                "z" => Ok("space"),
+                // "phi" | "phase" => Ok("phase"),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "Invalid axis (\"{}\"). Imported field data must be a function of x, y or z.", s);
+                    Err(InputError::conversion("laser:from_plain_text:axis", "axis"))
+                }
+            })
+            ?;
+
+        // Check for optional scale factor
+        let scale: f64 = input.read("laser:from_plain_text:scale_field_by")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(1_f64),
+            })?;
+
+        // Read the contents of the file
+        let field = std::fs::read_to_string(&filename)
+            .or_else(|_| {
+                report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
+                Err(InputError::location("laser:from_plain_text:file", "file"))
+            })?
+            .lines()
+            .map(|s| {
+                s.parse::<f64>().map(|ex| scale * ex)
+            })
+            .collect::<Result<Vec<f64>,_>>()
+            .or_else(|_| {
+                report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of field values.", filename);
+                Err(InputError::conversion("laser:from_plain_text:file", "file"))
+            })?;
+
+        // At this point, we need to do a bit of work to extract the a0, wavelength etc.
+        let data = FieldData::preprocess(step, &field)
+            .map_err(|err| {
+                report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
+                InputError::conversion("laser:from_file", "from_file")
+            })?;
+
+        let params = data.params();
+
+        if id == 0 {
+            println!(
+                "{} import, detected a0 = {:.2e}, wavelength = {:.2e} m, duration = {:.2e} cycles.",
+                "Completed".bold().bright_green(), params.a0, params.wavelength, params.n_cycles,
+            );
+        }
+
+        let fs = FieldStructure::Numerical { data };
+        vec![fs]
+    } else {
+        // Field structure will be defined analytically, using values from the input file.
+
+        let a0s: Vec<f64> = input.read_loop("laser:a0")?;
+
+        let wavelength: f64 = input
+            .read("laser:wavelength")
+            .or_else(|_e|
+                // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
+                input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+            )?;
+
+        let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
+            .and_then(|s| match s.as_str() {
+                "circular" => Ok((Polarization::Circular, 0.0)),
+                "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
+                "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
+                _ => {
+                    if let Some(expr) = s.strip_prefix("linear @") {
+                        if let Some(pol_angle) = input.evaluate(expr) {
+                            Ok((Polarization::Linear, pol_angle))
+                        } else {
+                            report!(Diagnostic::Error, id == 0, "linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                            Err(InputError::conversion("laser:polarization", "polarization"))
+                        }
                     } else {
-                        report!(Diagnostic::Error, id == 0, "linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                        report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear [|| x or y]' or 'circular'.");
                         Err(InputError::conversion("laser:polarization", "polarization"))
                     }
-                } else {
-                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear [|| x or y]' or 'circular'.");
-                    Err(InputError::conversion("laser:polarization", "polarization"))
                 }
-            }
-        })
-        ?;
-
-    let (focusing, waist) = input
-        .read("laser:waist")
-        .map(|w| (true, w))
-        .or_else(|e| match e.kind() {
-            InputErrorKind::Conversion => Err(e),
-            _ => Ok((false, std::f64::INFINITY)),
-        })?;
-
-    let envelope = input.read::<String, _>("laser:envelope")
-        .and_then(|s| match s.as_str() {
-            "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
-            "flattop" | "flat-top" => Ok(Envelope::Flattop),
-            "gauss" | "gaussian" => Ok(Envelope::Gaussian),
-            _ => {
-                report!(Diagnostic::Error, id == 0, "laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
-                Err(InputError::conversion("laser:envelope", "envelope"))
-            }
-        })
-        .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
-
-    let n_cycles: f64 = match envelope {
-        Envelope::CosSquared => input.read("laser:n_cycles")?,
-        Envelope::Flattop => {
-            input.read("laser:n_cycles")
-                .and_then(|n: f64| if n < 1.0 {
-                    report!(Diagnostic::Error, id == 0, "'n_cycles' must be >= 1.0 for flattop lasers.");
-                    Err(InputError::conversion("laser:envelope", "envelope"))
-                } else {
-                    Ok(n)
-                })?
-        },
-        Envelope::Gaussian => {
-            input.read("laser:fwhm_duration")
-                .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
-                .or_else(|_e| input.read("laser:n_cycles"))?
-        }
-    };
-
-    let chirp_b = if !focusing {
-        input.read("laser:chirp_coeff").unwrap_or(0.0)
-    } else {
-        input.read("laser:chirp_coeff")
-            .map(|_: f64| {
-                report!(Diagnostic::Warning, id == 0, "chirp parameter ignored for focusing laser pulses.");
-                0.0
             })
-            .unwrap_or(0.0)
+            ?;
+
+        let (focusing, waist) = input
+            .read("laser:waist")
+            .map(|w| (true, w))
+            .unwrap_or((false, std::f64::INFINITY));
+
+        let envelope = input.read::<String, _>("laser:envelope")
+            .and_then(|s| match s.as_str() {
+                "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
+                "flattop" | "flat-top" => Ok(Envelope::Flattop),
+                "gauss" | "gaussian" => Ok(Envelope::Gaussian),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
+                    Err(InputError::conversion("laser:envelope", "envelope"))
+                }
+            })
+            .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
+
+        let n_cycles: f64 = match envelope {
+            Envelope::CosSquared => input.read("laser:n_cycles")?,
+            Envelope::Flattop => {
+                input.read("laser:n_cycles")
+                    .and_then(|n: f64| if n < 1.0 {
+                        report!(Diagnostic::Error, id == 0, "'n_cycles' must be >= 1.0 for flattop lasers.");
+                        Err(InputError::conversion("laser:envelope", "envelope"))
+                    } else {
+                        Ok(n)
+                    })?
+            },
+            Envelope::Gaussian => {
+                input.read("laser:fwhm_duration")
+                    .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
+                    .or_else(|_e| input.read("laser:n_cycles"))?
+            }
+        };
+
+        let chirp_b = if !focusing {
+            input.read("laser:chirp_coeff").unwrap_or(0.0)
+        } else {
+            input.read("laser:chirp_coeff")
+                .map(|_: f64| {
+                    report!(Diagnostic::Warning, id == 0, "chirp parameter ignored for focusing laser pulses.");
+                    0.0
+                })
+                .unwrap_or(0.0)
+        };
+
+        let fs: Vec<FieldStructure> = a0s
+            .iter()
+            .map(|a0| {
+                let params = LaserParameters {
+                    a0: *a0, wavelength, pol, pol_angle, focusing, waist, envelope, n_cycles, chirp_b
+                };
+                FieldStructure::Analytical { params }
+            })
+            .collect();
+
+        fs
     };
 
     // Particle beam properties
@@ -998,8 +1079,21 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     }
 
     // Simulation building and running starts here
-    for (run, a0_v) in a0_values.iter().enumerate() {
-        let a0: f64 = *a0_v; 
+    for (run, field) in fields.iter().enumerate() {
+    // for (run, a0_v) in a0_values.iter().enumerate() {
+        // let a0: f64 = *a0_v;
+        let LaserParameters {
+                a0,
+                wavelength,
+                pol,
+                pol_angle,
+                focusing,
+                waist,
+                envelope,
+                n_cycles,
+                chirp_b,
+            } = field.params();
+
         // Rare event sampling for pair creation
         let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
             // if increase is not specified at all, default to unity
@@ -1042,7 +1136,14 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             rng.jump();
         }
 
-        let laser: Laser = if focusing && !using_lcfa {
+        let laser: Laser = if let Some(data) = field.is_numerical() {
+            if using_lcfa {
+                NumericalFastPW::from(data).into()
+            } else {
+                report!(Diagnostic::Error, id == 0, "LMA for custom lasers has not been implemented yet.");
+                unimplemented!()
+            }
+        } else if focusing && !using_lcfa {
             FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
@@ -1080,8 +1181,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         if id == 0 {
             println!("{} {} task{} with {} primary particles per task...", "Running".bold().cyan(), ntasks, if ntasks > 1 {"s"} else {""}, num);
-            if a0_values.len() > 1 {
-                println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
+            if fields.len() > 1 {
+                println!("\t* sim {} of {} at a0 = {}", run + 1, fields.len(), a0);
             }
             #[cfg(feature = "with-mpi")] {
                 println!("\t* with MPI support enabled");
@@ -1218,7 +1319,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         }
 
         // Updating 'ident' in case of a0 looping
-        let current_ident: String = if a0_values.len() > 1 {
+        let current_ident: String = if fields.len() > 1 {
             format!("{}{}a0_{:.3}", ident, if ident.is_empty() {""} else {"_"}, a0)
         }
         else {
