@@ -1017,11 +1017,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         }
 
         // Fix time coordinates, if necessary
-        match t_stop {
+        let t_stop_global = match t_stop {
             StopAt::SameTime => {
                 // which particle got furthest?
                 let mut ct_local = std::f64::NEG_INFINITY;
-                for pt in electrons.iter().chain(photons.iter()).chain(positrons.iter()).chain(decayed_photons.iter()) {
+                for pt in electrons.iter().chain(photons.iter()).chain(positrons.iter()) {
                     let ct = pt.position()[0];
                     if ct > ct_local { ct_local = ct; }
                 }
@@ -1031,24 +1031,29 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 world.all_reduce_into(&ct_local, &mut ct_global, SystemOperation::max());
 
                 // update all positions
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
                     pt.with_position(r);
                 }
+
+                ct_global / SPEED_OF_LIGHT
             },
             StopAt::GivenTime(t) => {
                 let ct_global = t * SPEED_OF_LIGHT;
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+
+                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
                     pt.with_position(r);
                 }
+
+                ct_global / SPEED_OF_LIGHT
             },
-            _ => {},
-        }
+            _ => std::f64::INFINITY,
+        };
 
         let mut total_absorption = 0.0;
         world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
@@ -1182,6 +1187,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .new_dataset("rng_seed")?.write(&rng_seed)?
                     .new_dataset("increase_pair_rate_by")?.write(&pair_rate_increase)?
                     .new_dataset("bandwidth_correction")?.write(&finite_bandwidth)?
+                    .new_dataset("stop_at_time")?
+                        .with_unit("s")?
+                        .with_desc("tracking has continued until all particles have this time coordinate")?
+                        .with_condition(|| matches!(t_stop, StopAt::SameTime | StopAt::GivenTime(_)))
+                        .write(&t_stop_global)?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_none()).write(&false)?;
 
