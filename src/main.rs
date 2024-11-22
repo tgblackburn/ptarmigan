@@ -411,12 +411,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let step: f64 = input.read("laser:from_plain_text:step")?;
 
         // Check that axis is valid
-        let _axis = input.read::<String, _>("laser:from_plain_text:axis")
+        let coord = input.read::<String, _>("laser:from_plain_text:axis")
             .and_then(|s| match s.as_str() {
-                "z" => Ok("space"),
-                // "phi" | "phase" => Ok("phase"),
+                "z" => Ok(Coordinate::Space),
+                "t" => Ok(Coordinate::Time),
                 _ => {
-                    report!(Diagnostic::Error, id == 0, "Invalid axis (\"{}\"). Imported field data must be a function of x, y or z.", s);
+                    report!(Diagnostic::Error, id == 0, "Invalid axis (\"{}\"). Imported field data must be a function of z or t.", s);
                     Err(InputError::conversion("laser:from_plain_text:axis", "axis"))
                 }
             })
@@ -446,7 +446,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })?;
 
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
-        let data = FieldData::preprocess(step, &field)
+        let data = FieldData::preprocess(coord, step, &field)
             .map_err(|err| {
                 report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")

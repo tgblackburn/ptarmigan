@@ -25,6 +25,11 @@ pub struct FieldData {
     psi: Vec<f64>, // local frequency shift
 }
 
+pub enum Coordinate {
+    Space,
+    Time,
+}
+
 pub struct FieldDataError {
     pub cause: String
 }
@@ -44,7 +49,7 @@ impl std::fmt::Display for FieldDataError {
 impl Error for FieldDataError {}
 
 impl FieldData {
-    pub fn preprocess(dz: f64, field: &[f64]) -> Result<Self, FieldDataError> {
+    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64]) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
         let mut buffer: Vec<Complex64> = field.iter().map(|ex| Complex64::new(*ex, 0.0)).collect();
@@ -63,22 +68,33 @@ impl FieldData {
                 let tmp = buffer[i].norm_sqr();
                 if tmp > max {
                     max = tmp;
-                    kappa = (2.0 * consts::PI * (i as f64)) / ((n as f64) * dz);
+                    kappa = (2.0 * consts::PI * (i as f64)) / ((n as f64) * delta);
                 }
             }
 
-            SPEED_OF_LIGHT * kappa
+            match coord {
+                Coordinate::Space => SPEED_OF_LIGHT * kappa,
+                Coordinate::Time => kappa,
+            }
         };
 
-        let dphi = omega * dz / SPEED_OF_LIGHT; // lost minus sign
+        let dphi = match coord {
+            Coordinate::Space => omega * delta / SPEED_OF_LIGHT, // lost minus sign
+            Coordinate::Time => omega * delta,
+        };
 
         // FFT backwards
         let fft = planner.plan_fft_inverse(n);
         fft.process(&mut buffer);
-        let mut field: Vec<Complex64> = buffer.iter()
-            .rev() // phi = omega (t - z) / c
-            .map(|ex| ex / (n as f64))
-            .collect();
+        for ex in buffer.iter_mut() {
+            *ex /= n as f64;
+        }
+
+        // phi = omega (t - z/c) => reverse order if function of z
+        let mut field = match coord {
+            Coordinate::Space => buffer.into_iter().rev().collect(),
+            Coordinate::Time => buffer,
+        };
 
         let processed_field: Vec<f64> = field.iter().map(|ex| ex.re).collect();
 
@@ -162,6 +178,7 @@ impl FieldData {
         };
 
         // Get energy flux from electric field
+        let dz = SPEED_OF_LIGHT * dphi / omega;
         let energy_flux = processed_field.iter()
             .map(|ex| VACUUM_PERMITTIVITY * ex * ex * dz)
             .sum();
@@ -291,7 +308,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(dz, &field).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field).unwrap();
         let params = laser.params;
 
         let print_data = true;
@@ -353,7 +370,7 @@ mod tests {
             })
             .collect();
 
-        let laser: NumericalFastPW = FieldData::preprocess(dz, &field).unwrap().into();
+        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field).unwrap().into();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -100.0).unitize();
         let z0 = laser.ideal_initial_z();
