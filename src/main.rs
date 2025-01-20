@@ -1086,6 +1086,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             _ => std::f64::INFINITY,
         };
 
+        #[cfg(not(feature = "hdf5-output"))]
+        let _ = t_stop_global;
+
         let mut total_absorption = 0.0;
         world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
         let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
