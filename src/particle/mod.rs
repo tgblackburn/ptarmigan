@@ -16,9 +16,9 @@ pub use loader::BeamLoader;
 
 mod dstr;
 
-pub enum BeamParameters {
+pub enum BeamParameters<'a> {
     FromRng {
-        builder: BeamBuilder,
+        builder: BeamBuilder<'a>,
     },
     #[cfg(feature = "hdf5-output")]
     FromHdf5 {

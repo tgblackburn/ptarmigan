@@ -892,7 +892,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
                 Ok(s) if s == "auto" => match beam {
                     BeamParameters::FromRng { builder } => {
-                        let gamma = builder.gamma;
+                        let gamma = builder.gamma();
                         if using_lcfa {
                             Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
                         } else {
@@ -1315,10 +1315,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                                 .with_desc("total number of real particles represented by the primary macroparticles")?
                                 .write(&((npart as f64) * builder.weight))?
                             .new_dataset("charge")?.with_unit("C")?.write(&charge)?
-                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma)?
-                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma)?
+                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma())?
+                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma())?
                             .new_dataset("bremsstrahlung_source")?.write(&builder.has_brem_spec())?
-                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min)?
+                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min())?
                             .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
                             .new_dataset("radius_max")?
                                 .with_unit(units.length.name())?

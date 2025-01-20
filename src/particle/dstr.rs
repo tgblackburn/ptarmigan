@@ -47,3 +47,71 @@ impl RadialDistribution {
         }
     }
 }
+
+#[derive(Copy, Clone)]
+pub(super) enum GammaDistribution<'a> {
+    Normal {
+        mu: f64,
+        sigma: f64,
+        rho: f64,
+    },
+    Brem {
+        min: f64,
+        max: f64,
+    },
+    #[allow(unused)]
+    Analytical {
+        func: &'a dyn Fn(f64) -> f64,
+        min: f64,
+        max: f64,
+    }
+}
+
+impl<'a> GammaDistribution<'a> {
+    pub fn sample<R: Rng>(&self, sigma_z: f64, rng: &mut R) -> (f64, f64) {
+        match self {
+            Self::Normal { mu, sigma, rho } => {
+                loop {
+                    // for correlated gamma and z
+                    let n0 = rng.sample::<f64,_>(StandardNormal);
+                    let n1 = rng.sample::<f64,_>(StandardNormal);
+                    let n2 = rho * n0 + (1.0 - rho * rho).sqrt() * n1;
+
+                    let dz = sigma_z * n0;
+                    let gamma = mu + sigma * n2;
+                    if gamma > 1.0 {
+                        break (gamma, dz);
+                    }
+                }
+            },
+
+            Self::Brem { min, max } => {
+                let x_min = min / max;
+                let y_max = 4.0 / (3.0 * x_min) - 4.0 / 3.0 + x_min;
+                let x = loop {
+                    let x = x_min + (1.0 - x_min) * rng.gen::<f64>();
+                    let u = rng.gen::<f64>();
+                    let y = 4.0 / (3.0 * x) - 4.0 / 3.0 + x;
+                    if u <= y / y_max {
+                        break x;
+                    }
+                };
+                let dz = sigma_z * rng.sample::<f64,_>(StandardNormal);
+                (x * max, dz)
+            },
+
+            Self::Analytical { func, min, max } => {
+                let gamma = loop {
+                    let x = min + (max - min) * rng.gen::<f64>();
+                    let u = rng.gen::<f64>();
+                    let y = func(x);
+                    if u <= y {
+                        break x;
+                    }
+                };
+                let dz = sigma_z * rng.sample::<f64,_>(StandardNormal);
+                (gamma, dz)
+            },
+        }
+    }
+}
