@@ -58,7 +58,10 @@ Basic information:
 
 * `n`: number of primary particles. `ne` is also accepted.
 * `species` (optional, default = `electron`): primary particle type, must be one of `electron`, `photon` or `positron`.
-* `charge` (optional): if specified, weight each primary electron such that the whole ensemble represents a bunch of given charge. (Include a factor of the elementary charge `e` to get a specific number.)
+* `n_real` (optional, default = `n`): if specified, weight each primary particle such that the whole ensemble represents the given number of real particles, or
+* `charge` (optional): if specified, weight each primary electron such that the bunch has this total charge. Include a factor of the elementary charge `e` to get a specific number of electrons.
+It is not necessary to provide both `n_real` and `charge`.
+`charge` can also be used to assign a weight to primary *photons*, by assuming that each photon has a fictitious elementary charge, but prefer `n_real` for this purpose.
 
 Energy spectrum:
 

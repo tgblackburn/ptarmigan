@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.4.3
+
+In progress.
+
+Added:
+
+* New input parameter `n_real` to specify the number of real particles in the beam directly.
+
+Fixed:
+
+* Unwanted propagation of decayed photons if `stop_at_time` is specified.
+
 ## v1.4.2
 
 2024-11-15

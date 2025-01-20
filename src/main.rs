@@ -534,8 +534,39 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             ?;
 
         let weight = input.read("beam:charge")
-            .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
-            .unwrap_or(1.0);
+            .map(|q: f64| {
+                let w = q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64));
+                Some(w)
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e), // error out on conversion failure
+                _ => Ok(None), // allow missing value for now
+            })
+            ?;
+
+        let weight2 = input.read("beam:n_real")
+            .map(|n_real: f64| {
+                let w = n_real / (npart as f64);
+                Some(w)
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(None),
+            })
+            ?;
+
+        let weight = if weight.is_none() && weight2.is_none() {
+            1.0 // both missing, use default
+        } else if weight.is_some() && weight2.is_some() {
+            if weight == weight2 {
+                weight.unwrap() // for the belt and braces crew
+            } else {
+                report!(Diagnostic::Error, id == 0, "conflicting values of 'n_real' and 'charge'. Specify one or the other.");
+                return Err(InputError::conversion("beam:n_real", "n_real").into());
+            }
+        } else {
+            weight.or(weight2).unwrap()
+        };
 
         // Energy distribution
 
