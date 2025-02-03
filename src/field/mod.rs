@@ -28,6 +28,7 @@ pub enum Laser {
     FastPlaneWave,
     FocusedLaser,
     FastFocusedLaser,
+    NumericalPW,
     NumericalFastPW,
 }
 

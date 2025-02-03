@@ -1140,8 +1140,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             if using_lcfa {
                 NumericalFastPW::from(data).into()
             } else {
-                report!(Diagnostic::Error, id == 0, "LMA for custom lasers has not been implemented yet.");
-                unimplemented!()
+                NumericalPW::from(data).into()
             }
         } else if focusing && !using_lcfa {
             FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
