@@ -25,6 +25,7 @@ pub struct FieldData {
     end: f64, // phase
     omega: f64, // angular frequency
     energy_flux: f64,
+    bandwidth: f64, // rms, normalised
     field: Vec<f64>, // electric field
     a_sqd: Vec<f64>, // squared, normalised potential
     psi: Vec<f64>, // local frequency shift
@@ -86,6 +87,25 @@ impl FieldData {
         let dphi = match coord {
             Coordinate::Space => omega * delta / SPEED_OF_LIGHT, // lost minus sign
             Coordinate::Time => omega * delta,
+        };
+
+        // Determine bandwidth of the pulse
+        let bandwidth = {
+            let mut num = 0_f64;
+            let mut denom = 0_f64;
+
+            for i in 1..n/2 {
+                let kappa = (2.0 * consts::PI * (i as f64)) / ((n as f64) * delta);
+                let omega_i = match coord {
+                    Coordinate::Space => SPEED_OF_LIGHT * kappa,
+                    Coordinate::Time => kappa,
+                };
+                let weight = buffer[i].norm_sqr();
+                num = num + (omega_i - omega).powi(2) * weight;
+                denom = denom + weight;
+            }
+
+            (num / denom).sqrt() / omega
         };
 
         // FFT backwards
@@ -207,6 +227,7 @@ impl FieldData {
             end: 0.5 * (n as f64) * dphi,
             omega,
             energy_flux,
+            bandwidth,
             field: processed_field,
             a_sqd: env,
             psi: psi_cont,
@@ -232,9 +253,9 @@ mod tests {
         let e0 = 2.0 * consts::PI * ELECTRON_MASS * SPEED_OF_LIGHT_SQD / (ELEMENTARY_CHARGE * target_lambda);
         let z0 = 8.0e-6;
 
-        let field: Vec<f64> = (0..1000)
+        let field: Vec<f64> = (0..2000)
             .map(|i| {
-                let z = dz * ((i as f64) - 500.0);
+                let z = dz * ((i as f64) - 1000.0);
                 let phi = 2.0 * consts::PI * z / target_lambda;
                 let ex = e0 * phi.sin() * (-(z / z0).powi(2)).exp();
                 ex
@@ -280,6 +301,16 @@ mod tests {
         println!(
             "Got n_cycles of {:.3}, expected {:.3} => error = {:.3}%",
             params.n_cycles, n_cycles, 100.0 * error
+        );
+
+        assert!(error < 0.02);
+
+        let bandwidth =  (0.5 * consts::LN_2).sqrt() / (consts::PI * n_cycles);
+        let error = (laser.bandwidth - bandwidth).abs() / bandwidth;
+
+        println!(
+            "Got fractional bandwidth of {:.3}%, expected {:.3}% => error = {:.3}%",
+            100.0 * laser.bandwidth, 100.0 * bandwidth, 100.0 * error
         );
 
         assert!(error < 0.02);

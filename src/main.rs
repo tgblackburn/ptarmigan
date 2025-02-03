@@ -1140,7 +1140,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             if using_lcfa {
                 NumericalFastPW::from(data).into()
             } else {
-                NumericalPW::from(data).into()
+                NumericalPW::from(data)
+                    .with_finite_bandwidth(finite_bandwidth)
+                    .into()
             }
         } else if focusing && !using_lcfa {
             FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)

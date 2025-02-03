@@ -1,5 +1,6 @@
 //! A numerically defined plane-wave laser pulse, for use with the LMA
 use rand::prelude::*;
+use rand_distr::StandardNormal;
 
 use crate::constants::*;
 use crate::field::{Field, Polarization, RadiationMode, EquationOfMotion, RadiationEvent, PairCreationEvent};
@@ -28,6 +29,13 @@ impl From<&FieldData> for NumericalPW {
 }
 
 impl NumericalPW {
+    pub fn with_finite_bandwidth(mut self, on: bool) -> Self {
+        if !on {
+            self.inner.bandwidth = 0.0;
+        }
+        self
+    }
+
     /// Returns the dominant frequency component of the pulse.
     fn omega(&self) -> f64 {
         self.inner.omega
@@ -184,7 +192,8 @@ impl Field for NumericalPW {
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector();
+        let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector();
 
         let prob = nonlinear_compton::probability(kappa, u, dt, Polarization::Linear, mode).unwrap_or(0.0);
 
@@ -207,7 +216,8 @@ impl Field for NumericalPW {
 
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector();
+        let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector();
 
         let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, Polarization::Linear, 0.0);
 
