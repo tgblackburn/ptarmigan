@@ -1,6 +1,5 @@
 //! A numerically defined plane-wave laser pulse, for use with the LMA
 use rand::prelude::*;
-use rand_distr::StandardNormal;
 
 use crate::constants::*;
 use crate::field::{Field, Polarization, RadiationMode, EquationOfMotion, RadiationEvent, PairCreationEvent};
@@ -29,13 +28,6 @@ impl From<&FieldData> for NumericalPW {
 }
 
 impl NumericalPW {
-    pub fn with_finite_bandwidth(mut self, on: bool) -> Self {
-        if !on {
-            self.inner.bandwidth = 0.0;
-        }
-        self
-    }
-
     /// Returns the dominant frequency component of the pulse.
     fn omega(&self) -> f64 {
         self.inner.omega
@@ -201,8 +193,7 @@ impl Field for NumericalPW {
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
-        let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector(r);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector(r);
 
         let prob = nonlinear_compton::probability(kappa, u, dt, Polarization::Linear, mode).unwrap_or(0.0);
 
@@ -224,8 +215,7 @@ impl Field for NumericalPW {
 
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
-        let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector(r);
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector(r);
 
         let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, Polarization::Linear, 0.0);
 
@@ -248,6 +238,66 @@ impl Field for NumericalPW {
             (prob, pol_new, Some(event))
         } else {
             (prob, pol_new, None)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chirped_pulse() {
+        use std::f64::consts;
+        use crate::field::Coordinate;
+
+        let lambda = 0.8e-6;
+        let e0 = 2.0 * consts::PI * ELECTRON_MASS * SPEED_OF_LIGHT_SQD / (ELEMENTARY_CHARGE * lambda);
+        let dz = lambda / 100.0;
+        let n_cycles = 16.0;
+        // chirp parameter
+        let c = 1.0 / (2.0 * consts::PI);
+
+        let field: Vec<f64> = (0..2000)
+            .map(|i| {
+                let z = -dz * ((i as f64) - 1000.0);
+                let phi = 2.0 * consts::PI * z / lambda;
+                // total phase
+                let psi = phi * (1.0 + 0.5 * c * phi / n_cycles);
+                // derivative of cos(phi/2n)^2 cos(psi)
+                let fx = 0.5 * psi.cos() * (phi / n_cycles).sin() / n_cycles + (1.0 + c * phi / n_cycles) * (0.5 * phi / n_cycles).cos().powi(2) * psi.sin();
+                if phi.abs() < consts::PI * n_cycles { e0 * fx } else { 0.0 }
+            })
+            .collect();
+
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field).unwrap();
+        let laser: NumericalPW = laser.into();
+
+        for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {
+            let z = -lambda * phi / (2.0 * consts::PI);
+            let r: FourVector = [0.0, 0.0, 0.0, z].into();
+
+            let a_rms = laser.a_sqd(r).sqrt();
+            let target_a_rms = (0.5 * phi / n_cycles).cos().powi(2) / consts::SQRT_2;
+            let error = (target_a_rms - a_rms).abs() / target_a_rms;
+
+            println!(
+                "phi = {:.1} pi, got a_rms of {:.3}, expected {:.3} => error = {:.3}%",
+                phi / consts::PI, a_rms, target_a_rms, 100.0 * error
+            );
+
+            assert!(error < 0.01);
+
+            let wavelength = 2.0 * consts::PI / laser.wavevector(r)[0];
+            let target_wavelength = lambda / (1.0 + c * phi / n_cycles);
+            let error = (target_wavelength - wavelength).abs() / wavelength;
+
+            println!(
+                "phi = {:.1} pi, got wavelength of {:.3} um, expected {:.3} um => error = {:.3}%",
+                phi / consts::PI, 1.0e6 * wavelength, 1.0e6 * target_wavelength, 100.0 * error
+            );
+
+            assert!(error < 0.01);
         }
     }
 }
