@@ -41,9 +41,20 @@ impl NumericalPW {
         self.inner.omega
     }
 
-    fn wavevector(&self) -> FourVector {
+    /// Returns the instantaneous wavevector of the pulse at the
+    /// given position, taking into account any nonlinear chirp.
+    fn wavevector(&self, r: FourVector) -> FourVector {
         let k = self.inner.omega / SPEED_OF_LIGHT;
-        [k, 0.0, 0.0, k].into()
+
+        let phase = self.omega() * (r[0] - r[3]) / SPEED_OF_LIGHT;
+
+        let scale = self.get_index(phase)
+            .map(|(i, di)| {
+                (1.0 - di) * self.inner.dpsi_dphi[i] + di * self.inner.dpsi_dphi[i+1]
+            })
+            .unwrap_or(1.0);
+
+        [scale * k, 0.0, 0.0, scale * k].into()
     }
 
     fn get_index(&self, phase: f64) -> Option<(usize, f64)> {
@@ -99,7 +110,7 @@ impl NumericalPW {
     /// Returns the cycle-averaged radiation reaction force, du/dτ
     fn landau_lifshitz_force(&self, r: FourVector, u: FourVector) -> FourVector {
         // du/tau = -(2 ɑ / 3 tau_C) a_rms^2 (k.u/m)^2 u
-        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector() * u);
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector(r) * u);
         -2.0 * ALPHA_FINE * self.a_sqd(r) * eta.powi(2) * u / (3.0 * COMPTON_TIME)
     }
 
@@ -107,8 +118,8 @@ impl NumericalPW {
     /// external field in association with radiation losses, per unit proper time.
     /// The work is cycle-averaged and normalized to the electron mass.
     fn landau_lifshitz_work(&self, r: FourVector, u: FourVector) -> f64 {
-        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector() * u);
-        let omega = SPEED_OF_LIGHT * self.wavevector()[0];
+        let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector(r) * u);
+        let omega = self.omega();
         let delta = 0.75; // assumed to be LP
         2.0 * ALPHA_FINE * omega * eta * delta * self.a_sqd(r).powi(2) / 3.0
     }
@@ -185,21 +196,18 @@ impl Field for NumericalPW {
         // enforce correct mass
         let u = u.with_sqr(1.0 + self.a_sqd(r));
 
-        //let dt_actual = (r[0] - ct) / SPEED_OF_LIGHT;
-        //println!("requested dt = {:.3e}, got {:.3e}, % diff = {:.3e}", dt, dt_actual, (dt - dt_actual).abs() / dt);
         (r, u, dt_actual, dwork)
     }
 
     fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector();
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector(r);
 
         let prob = nonlinear_compton::probability(kappa, u, dt, Polarization::Linear, mode).unwrap_or(0.0);
 
         if rng.gen::<f64>() < prob {
             let (n, k, pol) = nonlinear_compton::generate(kappa, u, Polarization::Linear, 0.0, mode, rng);
-            // u' is ignored if recoil is disabled, so we may as well calculate it
             let event = RadiationEvent {
                 k,
                 u_prime: u + (n as f64) * kappa - k,
@@ -217,7 +225,7 @@ impl Field for NumericalPW {
     fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.inner.bandwidth * rng.sample::<f64,_>(StandardNormal);
-        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector();
+        let kappa = SPEED_OF_LIGHT * COMPTON_TIME * width * self.wavevector(r);
 
         let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, Polarization::Linear, 0.0);
 

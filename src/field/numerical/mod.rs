@@ -28,7 +28,7 @@ pub struct FieldData {
     bandwidth: f64, // rms, normalised
     field: Vec<f64>, // electric field
     a_sqd: Vec<f64>, // squared, normalised potential
-    psi: Vec<f64>, // local frequency shift
+    dpsi_dphi: Vec<f64>, // local frequency normalised to omega
 }
 
 pub enum Coordinate {
@@ -54,7 +54,51 @@ impl std::fmt::Display for FieldDataError {
 
 impl Error for FieldDataError {}
 
+impl FieldDataError {
+    pub fn raise(cause: &str) -> Self {
+        FieldDataError { cause: cause.to_owned() }
+    }
+}
+
 impl FieldData {
+    /// Applies a Gaussian filter with standard deviation equal to `r` pixels to the input
+    /// array, writing the filtered data to `output`.
+    fn gaussian_filter(input: &[f64], output: &mut [f64], r: i32) -> Result<(), FieldDataError> {
+        let err = || FieldDataError::raise("gaussian filter");
+
+        let n = input.len();
+        if n == 0 || r == 0 || n != output.len() {
+            return Err(err());
+        }
+
+        let filter: Vec<f64> = (0..4*r)
+            .map(|i| {
+                let x = (i as f64) / (r as f64);
+                (-0.5 * x * x).exp()
+            })
+            .collect();
+
+        let total: f64 = filter.iter().skip(1).sum();
+        let total = 2.0 * total + filter[0];
+        let left_pad = input.first().ok_or_else(err)?;
+        let right_pad = input.last().ok_or_else(err)?;
+
+        for i in 0..n {
+            let mut tmp = 0_f64;
+            // go forwards from input[i]
+            for j in 0..filter.len() {
+                tmp = tmp + filter[j] * input.get(i + j).unwrap_or(right_pad).abs();
+            }
+            // and then backwards
+            for j in 1..filter.len() {
+                tmp = tmp + filter[j] * input.get(i - j).unwrap_or(left_pad).abs();
+            }
+            output[i] = tmp / total;
+        }
+
+        Ok(())
+    }
+
     pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64]) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
@@ -175,10 +219,16 @@ impl FieldData {
             psi_cont[i] = psi_cont[i-1] + diff;
         }
 
-        let diff = 0.5 * (psi_cont[n-1] - psi_cont[0]);
-        for phi in psi_cont.iter_mut() {
-            *phi -= diff;
+        // Get local frequency (as fraction of central) by
+        // differentiating the instantaneous phase and smoothing
+        for i in 1..n {
+            psi[i] = (psi_cont[i] - psi_cont[i-1]) / dphi;
         }
+        psi[0] = psi[1];
+
+        let r = (2.0 * consts::PI / dphi) as i32;
+        let mut dpsi_dphi = psi_cont; // reuse
+        Self::gaussian_filter(&psi, &mut dpsi_dphi, r)?;
 
         // Find FWHM in terms of phase
         let n_cycles = {
@@ -230,7 +280,7 @@ impl FieldData {
             bandwidth,
             field: processed_field,
             a_sqd: env,
-            psi: psi_cont,
+            dpsi_dphi,
         })
     }
 
@@ -265,14 +315,14 @@ mod tests {
         let laser = FieldData::preprocess(Coordinate::Space,dz, &field).unwrap();
         let params = laser.params;
 
-        let print_data = true;
+        let print_data = false;
         if print_data {
             let mut file = File::create("output/custom_laser_preprocessing.dat").unwrap();
-            for i in 0..1000 {
+            for i in 0..2000 {
                 writeln!(
                     file,
                     "{:.6e} {:.6e} {:.6e} {:.6e}",
-                    laser.start + (i as f64) * laser.step, laser.field[i], laser.a_sqd[i], laser.psi[i]
+                    laser.start + (i as f64) * laser.step, laser.field[i], laser.a_sqd[i], laser.dpsi_dphi[i]
                 ).unwrap();
             }
         }
@@ -311,6 +361,20 @@ mod tests {
         println!(
             "Got fractional bandwidth of {:.3}%, expected {:.3}% => error = {:.3}%",
             100.0 * laser.bandwidth, 100.0 * bandwidth, 100.0 * error
+        );
+
+        assert!(error < 0.02);
+
+        let total: f64 = laser.dpsi_dphi.iter()
+            .zip(laser.a_sqd.iter())
+            .map(|(f, a)| f * a)
+            .sum();
+        let mean_freq = total / laser.a_sqd.iter().sum::<f64>();
+        let error = (mean_freq - 1.0).abs();
+
+        println!(
+            "Got avg. instantaneous frequency of {:.3}% of central => error = {:.3}%",
+            100.0 * mean_freq, 100.0 * error
         );
 
         assert!(error < 0.02);
