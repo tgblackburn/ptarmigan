@@ -4,12 +4,12 @@ use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use super::{Species, Particle};
 use super::dstr::{RadialDistribution, GammaDistribution};
 
-#[derive(Copy,Clone)]
-pub struct BeamBuilder<'a> {
+#[derive(Clone)]
+pub struct BeamBuilder {
     species: Species,
     num: usize,
     pub weight: f64,
-    gamma_dstr: GammaDistribution<'a>,
+    gamma_dstr: GammaDistribution,
     radial_dstr: RadialDistribution,
     pub sigma_z: f64,
     angle: f64,
@@ -20,13 +20,14 @@ pub struct BeamBuilder<'a> {
     pub pol: StokesVector,
 }
 
-impl<'a> BeamBuilder<'a> {
-    pub fn new(species: Species, num: usize) -> Self {
+impl BeamBuilder {
+    pub fn new(species: Species, num: usize, gamma_dstr: GammaDistribution) -> Self {
         BeamBuilder {
             species,
             num,
             weight: 1.0,
-            gamma_dstr: GammaDistribution::Normal { mu: 1.0, sigma: 0.0, rho: 0.0 },
+            // gamma_dstr: GammaDistribution::Normal { mu: 1.0, sigma: 0.0, rho: 0.0 },
+            gamma_dstr,
             radial_dstr: RadialDistribution::Uniform {r_max: 0.0},
             sigma_z: 0.0,
             angle: 0.0,
@@ -38,117 +39,98 @@ impl<'a> BeamBuilder<'a> {
         }
     }
 
-    pub fn with_initial_z(&self, initial_z: f64) -> Self {
+    pub fn with_initial_z(self, initial_z: f64) -> Self {
         BeamBuilder {
             initial_z,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_weight(&self, weight: f64) -> Self {
+    pub fn with_weight(self, weight: f64) -> Self {
         BeamBuilder {
             weight,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_normal_energy_spectrum(&self, gamma: f64, sigma: f64) -> Self {
-        let gamma_dstr = match self.gamma_dstr {
-            GammaDistribution::Normal { mu: _, sigma: _, rho } => {
-                // preserve rho
-                GammaDistribution::Normal { mu: gamma, sigma, rho}
-            },
-            _ => self.gamma_dstr,
-        };
-
-        BeamBuilder {
-            gamma_dstr,
-            ..*self
-        }
-    }
-
-    pub fn with_bremsstrahlung_spectrum(&self, gamma_min: f64, gamma_max: f64) -> Self {
-        BeamBuilder {
-            gamma_dstr: GammaDistribution::Brem { min: gamma_min, max: gamma_max },
-            ..*self
-        }
-    }
-
-    pub fn with_divergence(&self, rms_div: f64) -> Self {
+    pub fn with_divergence(self, rms_div: f64) -> Self {
         BeamBuilder {
             rms_div,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_collision_angle(&self, angle: f64) -> Self {
+    pub fn with_collision_angle(self, angle: f64) -> Self {
         BeamBuilder {
             angle,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_collision_plane_at(&self, angle: f64) -> Self {
+    pub fn with_collision_plane_at(self, angle: f64) -> Self {
         BeamBuilder {
             collision_plane_angle: angle,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_normally_distributed_xy(&self, sigma_x: f64, sigma_y: f64) -> Self {
+    pub fn with_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::Normal { sigma_x, sigma_y },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_trunc_normally_distributed_xy(&self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
+    pub fn with_trunc_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::TruncNormal { sigma_x, sigma_y, x_max, y_max },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_uniformly_distributed_xy(&self, r_max: f64) -> Self {
+    pub fn with_uniformly_distributed_xy(self, r_max: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::Uniform { r_max },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_length(&self, sigma_z: f64) -> Self {
+    pub fn with_length(self, sigma_z: f64) -> Self {
         BeamBuilder {
             sigma_z,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_offset(&self, offset: ThreeVector) -> Self {
+    pub fn with_offset(self, offset: ThreeVector) -> Self {
         BeamBuilder {
             offset,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_energy_chirp(&self, energy_chirp: f64) -> Self {
+    pub fn with_energy_chirp(self, energy_chirp: f64) -> Self {
         let gamma_dstr = match self.gamma_dstr {
             GammaDistribution::Normal { mu, sigma, rho: _ } => {
                 // note sign change!
                 GammaDistribution::Normal { mu, sigma, rho: -energy_chirp}
             },
+            GammaDistribution::Custom { vals, min, max, step, rho: _ } => {
+                GammaDistribution::Custom { vals, min, max, step, rho: -energy_chirp }
+            }
             _ => self.gamma_dstr,
         };
 
         BeamBuilder {
             gamma_dstr,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_polarization(&self, sv: StokesVector) -> Self {
+    pub fn with_polarization(self, sv: StokesVector) -> Self {
         BeamBuilder {
             pol: sv,
-            ..*self
+            ..self
         }
     }
 
@@ -175,56 +157,17 @@ impl<'a> BeamBuilder<'a> {
     }
 
     pub fn gamma(&self) -> f64 {
-        match self.gamma_dstr {
-            GammaDistribution::Normal { mu, sigma: _, rho: _ } => mu,
-            GammaDistribution::Brem { min: _, max } => max,
-            GammaDistribution::Analytical { func, min, max } => {
-                let moments = (0..100)
-                    .map(|i| {
-                        let g = min + (i as f64) * (max - min) / 100.0;
-                        let f = func(g);
-                        ThreeVector::new(f, g * f, g * g * f)
-                    })
-                    .fold(
-                        ThreeVector::new(0.0, 0.0, 0.0),
-                        |acc, x| acc + x
-                    );
-
-                moments[1] / moments[0]
-            },
-        }
+        self.gamma_dstr.gamma()
     }
 
     #[cfg(feature = "hdf5-output")]
     pub fn sigma(&self) -> f64 {
-        match self.gamma_dstr {
-            GammaDistribution::Normal { mu: _, sigma, rho: _ } => sigma,
-            // approximation that works for min / max > 0.2
-            GammaDistribution::Brem { min, max } => 0.5 * (max - min) / 3_f64.sqrt(),
-            GammaDistribution::Analytical { func, min, max } => {
-                let moments = (0..100)
-                    .map(|i| {
-                        let g = min + (i as f64) * (max - min) / 100.0;
-                        let f = func(g);
-                        ThreeVector::new(f, g * f, g * g * f)
-                    })
-                    .fold(
-                        ThreeVector::new(0.0, 0.0, 0.0),
-                        |acc, x| acc + x
-                    );
-
-                (moments[2] / moments[0] - (moments[1] / moments[0]).powi(2)).sqrt()
-            },
-        }
+        self.gamma_dstr.std_dev()
     }
 
     #[cfg(feature = "hdf5-output")]
     pub fn gamma_min(&self) -> f64 {
-        match self.gamma_dstr {
-            GammaDistribution::Normal { mu, sigma, rho: _ } => mu - 3.0 * sigma,
-            GammaDistribution::Brem { min, max: _ } => min,
-            GammaDistribution::Analytical { func: _, min, max: _ } => min,
-        }
+        self.gamma_dstr.min_gamma()
     }
 
     pub fn build<R: Rng>(&self, rng: &mut R) -> Vec<Particle> {

@@ -570,19 +570,44 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         // Energy distribution
 
-        let gamma: f64 = input.read("beam:gamma")?;
-        let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+        let use_brem_spec = species == Species::Photon &&
+            input.read("beam:bremsstrahlung_source").unwrap_or(false);
 
-        let use_brem_spec = if species == Species::Photon {
-            input.read("beam:bremsstrahlung_source").unwrap_or(false)
-        } else {
-            false
-        };
+        let spectrum: GammaDistribution = if input.read::<String, _>("beam:spectrum:min").is_ok() {
+            // Reading in an analytically or numerically defined function
 
-        let gamma_min = if use_brem_spec {
-            input.read("beam:gamma_min")?
+            let func = input.func("beam:spectrum:func", "gamma")?;
+            let min: f64 = input.read("beam:spectrum:min").unwrap_or(2.0);
+            let max: f64 = input.read("beam:spectrum:max")?;
+
+            let n = input.read::<usize, _>("beam:spectrum:resolution")
+                .unwrap_or_else(|_| (10.0 + 2.0 * (npart as f64).cbrt()) as usize);
+            let step = (max - min) / (n as f64);
+
+            let vals: Vec<f64> = (0..n)
+                .map(|i| func(min + (i as f64) * step))
+                .collect();
+
+            GammaDistribution::custom(vals, min, max, step)
+                .ok_or_else(|| {
+                    report!(Diagnostic::Error, id == 0, "beam:spectrum:func evaluated to non-numerical values in the specified domain.");
+                    InputError::conversion("beam_func", "func")
+                })
+                ?
+        } else if use_brem_spec {
+            // Photon bremsstrahlung source
+
+            let min_gamma: f64 = input.read("beam:gamma_min")?;
+            let max_gamma: f64 = input.read("beam:gamma")?;
+
+            GammaDistribution::from_brem_source(min_gamma, max_gamma)
         } else {
-            1.0
+            // Default to standard Gaussian distribution
+
+            let mean_gamma: f64 = input.read("beam:gamma")?;
+            let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+
+            GammaDistribution::normal(mean_gamma, sigma)
         };
 
         // Spatial structure
@@ -683,7 +708,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         assert_eq!(nums.iter().sum::<usize>(), npart);
         let num = nums[id as usize];
 
-        let builder = BeamBuilder::new(species, num)
+        let builder = BeamBuilder::new(species, num, spectrum)
             .with_weight(weight)
             .with_divergence(rms_div)
             .with_collision_angle(angle)
@@ -701,12 +726,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             }
         } else {
             builder.with_uniformly_distributed_xy(radius)
-        };
-
-        let builder = if use_brem_spec {
-            builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
-        } else {
-            builder.with_normal_energy_spectrum(gamma, sigma)
         };
 
         BeamParameters::FromRng { builder }
@@ -890,7 +909,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })
             // failing that, check for automatic increase
             .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
-                Ok(s) if s == "auto" => match beam {
+                Ok(s) if s == "auto" => match &beam {
                     BeamParameters::FromRng { builder } => {
                         let gamma = builder.gamma();
                         if using_lcfa {
@@ -941,9 +960,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         };
 
         let primaries = match beam {
-            BeamParameters::FromRng { builder } => {
+            BeamParameters::FromRng { ref builder } => {
                 let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
-                builder.with_initial_z(initial_z).build(&mut rng)
+                builder.clone().with_initial_z(initial_z).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
             BeamParameters::FromHdf5 { ref loader } => {

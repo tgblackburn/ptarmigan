@@ -15,10 +15,11 @@ mod loader;
 pub use loader::BeamLoader;
 
 mod dstr;
+pub use dstr::GammaDistribution;
 
-pub enum BeamParameters<'a> {
+pub enum BeamParameters {
     FromRng {
-        builder: BeamBuilder<'a>,
+        builder: BeamBuilder,
     },
     #[cfg(feature = "hdf5-output")]
     FromHdf5 {
