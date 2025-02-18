@@ -159,6 +159,22 @@ impl Config {
         value.and_then(|arg| T::from_yaml(arg.clone(), &self.ctx).map_err(|_| InputError::conversion(path.as_ref(), address.last().unwrap())))
     }
 
+    /// Tests if the given key is present in the configuration file.
+    pub fn contains<S>(&self, path: S) -> bool where S: AsRef<str> {
+        let address: Vec<&str> = path.as_ref().split(':').collect();
+
+        let value = address.iter()
+            .try_fold(&self.input, |y, s| {
+                if y[*s].is_badvalue() {
+                    None
+                } else {
+                    Some(&y[*s])
+                }
+            });
+
+        value.is_some()
+    }
+
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of a single variable `arg`.
     pub fn func<'a, S: AsRef<str> + 'a>(&'a self, path: S, arg: S) -> Result<impl Fn(f64) -> f64 + 'a, InputError> {
@@ -360,6 +376,10 @@ mod tests {
         // evaluate arb string
         let val = config.evaluate("1.0 / (1.0 + y)").unwrap();
         assert_eq!(val, 1.0 / 2.0);
+
+        assert!(config.contains("extra"));
+        assert!(config.contains("deep:nested"));
+        assert!(!config.contains("control:absent"));
     }
 
     #[test]

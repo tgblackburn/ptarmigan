@@ -499,7 +499,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
+    let beam = if input.contains("beam:from_hdf5") {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
             return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
@@ -573,27 +573,73 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let use_brem_spec = species == Species::Photon &&
             input.read("beam:bremsstrahlung_source").unwrap_or(false);
 
-        let spectrum: GammaDistribution = if input.read::<String, _>("beam:spectrum:min").is_ok() {
+        let spectrum: GammaDistribution = if input.contains("beam:spectrum") {
             // Reading in an analytically or numerically defined function
 
-            let func = input.func("beam:spectrum:func", "gamma")?;
-            let min: f64 = input.read("beam:spectrum:min").unwrap_or(2.0);
-            let max: f64 = input.read("beam:spectrum:max")?;
+            let analytical = input.contains("beam:spectrum:function");
+            let numerical = input.contains("beam:spectrum:file");
 
-            let n = input.read::<usize, _>("beam:spectrum:resolution")
-                .unwrap_or_else(|_| (10.0 + 2.0 * (npart as f64).cbrt()) as usize);
-            let step = (max - min) / (n as f64);
+            if analytical && numerical {
+                report!(Diagnostic::Error, id == 0, "specify a function or a file in beam:spectrum, not both.");
+                Err(InputError::conversion("beam:spectrum", "spectrum"))?
+            } else if analytical {
+                let func = input.func("beam:spectrum:function", "gamma")?;
+                let min: f64 = input.read("beam:spectrum:min")?;
+                let max: f64 = input.read("beam:spectrum:max")?;
 
-            let vals: Vec<f64> = (0..n)
-                .map(|i| func(min + (i as f64) * step))
-                .collect();
+                let n = input.read("beam:spectrum:resolution")
+                    .unwrap_or((10.0 + 2.0 * (npart as f64).cbrt()) as usize);
+                let step = (max - min) / (n as f64);
 
-            GammaDistribution::custom(vals, min, max, step)
-                .ok_or_else(|| {
-                    report!(Diagnostic::Error, id == 0, "beam:spectrum:func evaluated to non-numerical values in the specified domain.");
-                    InputError::conversion("beam_func", "func")
-                })
-                ?
+                let vals: Vec<f64> = (0..n)
+                    .map(|i| func(min + (i as f64) * step))
+                    .collect();
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:function evaluated to non-numerical values in the specified domain.");
+                        InputError::conversion("beam:spectrum:function", "function")
+                    })?
+            } else {
+                // Default to numerical
+
+                let filename: String = input.read("beam:spectrum:file")?;
+                let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
+
+                if id == 0 {
+                    println!("{} spectrum for particle beam from {}...", "Importing".bold().cyan(), filename.bold().blue());
+                }
+
+                // Read the contents of the file
+                let vals = std::fs::read_to_string(&filename)
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
+                        Err(InputError::location("beam:spectrum:file", "file"))
+                    })?
+                    .lines()
+                    .map(|s| s.parse::<f64>())
+                    .collect::<Result<Vec<f64>,_>>()
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of spectral values.", filename);
+                        Err(InputError::conversion("beam:spectrum:file", "file"))
+                    })?;
+
+                let n = vals.len() - 1; // number of steps, not entries
+                let min: f64 = input.read("beam:spectrum:min")?;
+
+                let (max, step) = input.read::<f64, _>("beam:spectrum:max")
+                    .map(|max| (max, (max - min) / (n as f64)))
+                    .or_else(|_| {
+                        input.read::<f64, _>("beam:spectrum:step").map(|step| (min + (n as f64) * step, step))
+                    })
+                    ?;
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:file contains non-numerical values.");
+                        InputError::conversion("beam:spectrum:file", "file")
+                    })?
+            }
         } else if use_brem_spec {
             // Photon bremsstrahlung source
 
