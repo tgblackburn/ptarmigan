@@ -4,6 +4,7 @@ use std::f64::consts;
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 use crate::geometry::ThreeVector;
+use crate::pwmci::Interpolant;
 
 #[derive(Copy, Clone)]
 pub(super) enum RadialDistribution {
@@ -67,6 +68,7 @@ pub enum GammaDistribution {
     /// Arbitrary function
     Custom {
         vals: Vec<f64>,
+        cdf: Vec<[f64; 2]>,
         min: f64,
         max: f64,
         step: f64,
@@ -84,17 +86,22 @@ impl GammaDistribution {
     }
 
     pub fn custom(vals: Vec<f64>, min: f64, max: f64, step: f64) -> Option<Self> {
-        let mut vals = vals;
-
         if vals.iter().any(|v| !v.is_finite()) {
             None
         } else {
-            // all finite values
-            let vals_max = vals.iter().fold(0_f64, |a, b| a.max(*b));
-            for v in vals.iter_mut() {
-                *v /= vals_max;
+            let total: f64 = vals.iter().sum();
+
+            let mut cdf: Vec<[f64; 2]> = vec![];
+            cdf.push([min, 0.0]);
+            let mut gamma = min;
+            let mut rt = 0.0;
+            for v in vals.iter() {
+                gamma += step;
+                rt += v;
+                cdf.push([gamma, rt / total]);
             }
-            Some(Self::Custom { vals, min, max, step, rho: 0.0 })
+
+            Some(Self::Custom { vals, cdf, min, max, step, rho: 0.0 })
         }
     }
 
@@ -102,7 +109,7 @@ impl GammaDistribution {
         match self {
             Self::Normal { mu, sigma: _, rho: _ } => *mu,
             Self::Brem { min: _, max } => *max,
-            Self::Custom { vals, min, max: _, step, rho: _ } => {
+            Self::Custom { vals, cdf: _, min, max: _, step, rho: _ } => {
                 let moments = vals.iter()
                     .enumerate()
                     .map(|(i, f)| {
@@ -125,7 +132,7 @@ impl GammaDistribution {
             Self::Normal { mu: _, sigma, rho: _ } => *sigma,
             // approximation that works for min / max > 0.2
             Self::Brem { min, max } => 0.5 * (max - min) / 3_f64.sqrt(),
-            Self::Custom { vals, min, max: _, step, rho: _ } => {
+            Self::Custom { vals, cdf: _, min, max: _, step, rho: _ } => {
                 let moments = vals.iter()
                     .enumerate()
                     .map(|(i, f)| {
@@ -147,32 +154,7 @@ impl GammaDistribution {
         match self {
             Self::Normal { mu, sigma, rho: _ } => mu - 3.0 * sigma,
             Self::Brem { min, max: _ } => *min,
-            Self::Custom { vals: _, min, max: _, step: _, rho: _ } => *min,
-        }
-    }
-
-    fn evaluate(&self, gamma: f64) -> f64 {
-        match self {
-            Self::Normal { mu, sigma, rho: _} => {
-                (-0.5 * ((gamma - mu) / sigma).powi(2)).exp()
-            },
-            Self::Brem { min, max } => {
-                let x_min = min / max;
-                let y_max = 4.0 / (3.0 * x_min) - 4.0 / 3.0 + x_min;
-                let x = gamma / max;
-                let y= 4.0 / (3.0 * x) - 4.0 / 3.0 + x;
-                y / y_max
-            },
-            Self::Custom { vals, min, max: _, step, rho: _ } => {
-                let x = (gamma - min) / step;
-                let i = x.trunc() as usize;
-                let y = x.fract();
-                if i < vals.len() - 1 {
-                    (1.0 - y) * vals[i] + y * vals[i+1]
-                } else {
-                    0.0
-                }
-            }
+            Self::Custom { vals: _, cdf: _, min, max: _, step: _, rho: _ } => *min,
         }
     }
 
@@ -208,32 +190,25 @@ impl GammaDistribution {
                 (x * max, dz)
             },
 
-            Self::Custom { vals: _, min, max, step: _, rho} => {
-                loop {
-                    // Correlated variables
-                    let n0 = rng.sample::<f64,_>(StandardNormal);
-                    let n1 = {
-                        let n1 = rng.sample::<f64,_>(StandardNormal);
-                        rho * n0 + (1.0 - rho * rho).sqrt() * n1
-                    };
+            Self::Custom { vals: _, cdf, min: _, max: _, step: _, rho} => {
+                // Correlated variables
+                let n0 = rng.sample::<f64,_>(StandardNormal);
+                let n1 = {
+                    let n1 = rng.sample::<f64,_>(StandardNormal);
+                    rho * n0 + (1.0 - rho * rho).sqrt() * n1
+                };
 
-                    // NORTA method: transform from N(0,1) to U(0,1)
-                    let u1 = {
-                        let x = n1 / consts::SQRT_2;
-                        let erf_x = (167.0 * x / 148.0 + 11.0 * x.powi(3) / 109.0).tanh();
-                        0.5 * (1.0 + erf_x)
-                    };
+                // NORTA method: transform from N(0,1) to U(0,1)
+                let u1 = {
+                    let x = n1 / consts::SQRT_2;
+                    let erf_x = (167.0 * x / 148.0 + 11.0 * x.powi(3) / 109.0).tanh();
+                    0.5 * (1.0 + erf_x)
+                };
 
-                    let dz = sigma_z * n0;
-                    let gamma = min + (max - min) * u1;
+                let dz = sigma_z * n0;
+                let gamma = Interpolant::new(cdf).invert(u1).unwrap();
 
-                    let u = rng.gen::<f64>();
-                    let y = self.evaluate(gamma);
-
-                    if u <= y {
-                        break (gamma, dz);
-                    }
-                }
+                (gamma, dz)
             },
         }
     }

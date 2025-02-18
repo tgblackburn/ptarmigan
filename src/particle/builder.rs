@@ -115,8 +115,8 @@ impl BeamBuilder {
                 // note sign change!
                 GammaDistribution::Normal { mu, sigma, rho: -energy_chirp}
             },
-            GammaDistribution::Custom { vals, min, max, step, rho: _ } => {
-                GammaDistribution::Custom { vals, min, max, step, rho: -energy_chirp }
+            GammaDistribution::Custom { vals, cdf, min, max, step, rho: _ } => {
+                GammaDistribution::Custom { vals, cdf, min, max, step, rho: -energy_chirp }
             }
             _ => self.gamma_dstr,
         };
