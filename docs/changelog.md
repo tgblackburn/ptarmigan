@@ -1,12 +1,14 @@
 # Changelog
 
-## v1.4.3
+## v1.5.0
 
 In progress.
 
 Added:
 
 * New input parameter `n_real` to specify the number of real particles in the beam directly.
+* Support for user-defined energy spectra.
+Specify a custom energy spectrum for the incident particle beam using a function, or read one in from an external file.
 
 Fixed:
 
