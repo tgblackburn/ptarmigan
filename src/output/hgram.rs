@@ -567,26 +567,20 @@ impl Histogram {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Once;
-    static INIT: Once = Once::new();
+    use std::sync::OnceLock;
 
     #[cfg(feature = "with-mpi")]
     use mpi::environment::Universe;
     #[cfg(not(feature = "with-mpi"))]
     extern crate no_mpi as mpi;
 
-    static mut UNIVERSE: Option<Universe> = None;
+    static UNIVERSE: OnceLock<Universe> = OnceLock::new();
 
     #[test]
     #[ignore]
     fn single_2d() {
         // Safely init (or reinit) MPI
-        let universe = unsafe {
-            INIT.call_once(|| {
-                UNIVERSE = mpi::initialize();
-            });
-            UNIVERSE.as_ref().unwrap()
-        };
+        let universe = UNIVERSE.get_or_init(|| mpi::initialize().unwrap());
         let world = universe.world();
 
         let data = vec![[1.0, 2.0, 0.5]; 1];
@@ -608,12 +602,7 @@ mod tests {
     #[ignore]
     fn single_log_2d() {
         // Safely init (or reinit) MPI
-        let universe = unsafe {
-            INIT.call_once(|| {
-                UNIVERSE = mpi::initialize();
-            });
-            UNIVERSE.as_ref().unwrap()
-        };
+        let universe = UNIVERSE.get_or_init(|| mpi::initialize().unwrap());
         let world = universe.world();
 
         let data = vec![[1.0, 2.0, 0.5]; 1];
@@ -635,12 +624,7 @@ mod tests {
     #[ignore]
     fn empty_2d() {
         // Safely init (or reinit) MPI
-        let universe = unsafe {
-            INIT.call_once(|| {
-                UNIVERSE = mpi::initialize();
-            });
-            UNIVERSE.as_ref().unwrap()
-        };
+        let universe = UNIVERSE.get_or_init(|| mpi::initialize().unwrap());
         let world = universe.world();
 
         let data: Vec<[f64; 3]> = Vec::new();
