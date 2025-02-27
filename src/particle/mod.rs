@@ -15,6 +15,7 @@ mod loader;
 pub use loader::BeamLoader;
 
 mod dstr;
+pub use dstr::GammaDistribution;
 
 pub enum BeamParameters {
     FromRng {

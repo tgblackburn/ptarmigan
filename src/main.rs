@@ -499,7 +499,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
+    let beam = if input.contains("beam:from_hdf5") {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
             return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
@@ -570,19 +570,90 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         // Energy distribution
 
-        let gamma: f64 = input.read("beam:gamma")?;
-        let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+        let use_brem_spec = species == Species::Photon &&
+            input.read("beam:bremsstrahlung_source").unwrap_or(false);
 
-        let use_brem_spec = if species == Species::Photon {
-            input.read("beam:bremsstrahlung_source").unwrap_or(false)
-        } else {
-            false
-        };
+        let spectrum: GammaDistribution = if input.contains("beam:spectrum") {
+            // Reading in an analytically or numerically defined function
 
-        let gamma_min = if use_brem_spec {
-            input.read("beam:gamma_min")?
+            let analytical = input.contains("beam:spectrum:function");
+            let numerical = input.contains("beam:spectrum:file");
+
+            if analytical && numerical {
+                report!(Diagnostic::Error, id == 0, "specify a function or a file in beam:spectrum, not both.");
+                Err(InputError::conversion("beam:spectrum", "spectrum"))?
+            } else if analytical {
+                let func = input.func("beam:spectrum:function", "gamma")?;
+                let min: f64 = input.read("beam:spectrum:min")?;
+                let max: f64 = input.read("beam:spectrum:max")?;
+
+                let n = input.read("beam:spectrum:resolution")
+                    .unwrap_or((10.0 + 2.0 * (npart as f64).cbrt()) as usize);
+                let step = (max - min) / (n as f64);
+
+                let vals: Vec<f64> = (0..n)
+                    .map(|i| func(min + (i as f64) * step))
+                    .collect();
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:function evaluated to non-numerical values in the specified domain.");
+                        InputError::conversion("beam:spectrum:function", "function")
+                    })?
+            } else {
+                // Default to numerical
+
+                let filename: String = input.read("beam:spectrum:file")?;
+                let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
+
+                if id == 0 {
+                    println!("{} spectrum for particle beam from {}...", "Importing".bold().cyan(), filename.bold().blue());
+                }
+
+                // Read the contents of the file
+                let vals = std::fs::read_to_string(&filename)
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
+                        Err(InputError::location("beam:spectrum:file", "file"))
+                    })?
+                    .lines()
+                    .map(|s| s.parse::<f64>())
+                    .collect::<Result<Vec<f64>,_>>()
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of spectral values.", filename);
+                        Err(InputError::conversion("beam:spectrum:file", "file"))
+                    })?;
+
+                let n = vals.len() - 1; // number of steps, not entries
+                let min: f64 = input.read("beam:spectrum:min")?;
+
+                let (max, step) = input.read::<f64, _>("beam:spectrum:max")
+                    .map(|max| (max, (max - min) / (n as f64)))
+                    .or_else(|_| {
+                        input.read::<f64, _>("beam:spectrum:step").map(|step| (min + (n as f64) * step, step))
+                    })
+                    ?;
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:file contains non-numerical values.");
+                        InputError::conversion("beam:spectrum:file", "file")
+                    })?
+            }
+        } else if use_brem_spec {
+            // Photon bremsstrahlung source
+
+            let min_gamma: f64 = input.read("beam:gamma_min")?;
+            let max_gamma: f64 = input.read("beam:gamma")?;
+
+            GammaDistribution::from_brem_source(min_gamma, max_gamma)
         } else {
-            1.0
+            // Default to standard Gaussian distribution
+
+            let mean_gamma: f64 = input.read("beam:gamma")?;
+            let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+
+            GammaDistribution::normal(mean_gamma, sigma)
         };
 
         // Spatial structure
@@ -683,7 +754,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         assert_eq!(nums.iter().sum::<usize>(), npart);
         let num = nums[id as usize];
 
-        let builder = BeamBuilder::new(species, num)
+        let builder = BeamBuilder::new(species, num, spectrum)
             .with_weight(weight)
             .with_divergence(rms_div)
             .with_collision_angle(angle)
@@ -701,12 +772,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             }
         } else {
             builder.with_uniformly_distributed_xy(radius)
-        };
-
-        let builder = if use_brem_spec {
-            builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
-        } else {
-            builder.with_normal_energy_spectrum(gamma, sigma)
         };
 
         BeamParameters::FromRng { builder }
@@ -890,9 +955,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })
             // failing that, check for automatic increase
             .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
-                Ok(s) if s == "auto" => match beam {
+                Ok(s) if s == "auto" => match &beam {
                     BeamParameters::FromRng { builder } => {
-                        let gamma = builder.gamma;
+                        let gamma = builder.gamma();
                         if using_lcfa {
                             Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
                         } else {
@@ -941,9 +1006,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         };
 
         let primaries = match beam {
-            BeamParameters::FromRng { builder } => {
+            BeamParameters::FromRng { ref builder } => {
                 let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
-                builder.with_initial_z(initial_z).build(&mut rng)
+                builder.clone().with_initial_z(initial_z).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
             BeamParameters::FromHdf5 { ref loader } => {
@@ -1315,10 +1380,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                                 .with_desc("total number of real particles represented by the primary macroparticles")?
                                 .write(&((npart as f64) * builder.weight))?
                             .new_dataset("charge")?.with_unit("C")?.write(&charge)?
-                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma)?
-                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma)?
+                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma())?
+                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma())?
                             .new_dataset("bremsstrahlung_source")?.write(&builder.has_brem_spec())?
-                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min)?
+                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min())?
                             .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
                             .new_dataset("radius_max")?
                                 .with_unit(units.length.name())?

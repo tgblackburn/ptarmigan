@@ -1,0 +1,39 @@
+---
+# Simulate the effect of radiation reaction on an electron beam with a non-Gaussian energy spectrum
+
+control:
+  # Enable/disable RR to see how the spectrum changes shape:
+  radiation_reaction: false
+
+laser:
+  a0: 10.0
+  wavelength: 0.8 * micro
+  waist: 3.0 * micro
+  envelope: gaussian
+  fwhm_duration: 30.0 * femto
+  polarization: linear
+
+beam:
+  ne: 20000
+  charge: e
+  radius: 2.0 * micro
+  length: 5.0 * micro
+  # Skewed normal distrbution, with peak at ~10 GeV:
+  spectrum:
+    function: gauss(gamma, mu, sigma) * (1.0 + erf(alpha * (gamma - mu) / sigma))
+    min: 1.0 * GeV / (m * c^2)
+    max: 14.0 * GeV / (m * c^2)
+
+output:
+  ident: nrr # nrr | rr
+  units: hep
+  file_format: fits
+  electron:
+    - energy:(100; auto)
+  photon:
+    - energy
+
+constants:
+  mu: 11.2 * GeV / (m * c^2)
+  sigma: 3.0 * GeV / (m * c^2)
+  alpha: -3.0

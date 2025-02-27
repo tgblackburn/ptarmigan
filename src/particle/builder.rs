@@ -2,21 +2,16 @@ use rand::prelude::*;
 use rand_distr::StandardNormal;
 use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use super::{Species, Particle};
-use super::dstr::RadialDistribution;
+use super::dstr::{RadialDistribution, GammaDistribution};
 
-#[derive(Copy,Clone)]
+#[derive(Clone)]
 pub struct BeamBuilder {
     species: Species,
     num: usize,
     pub weight: f64,
-    normal_espec: Option<bool>,
-    pub gamma: f64,
-    pub sigma: f64,
-    pub gamma_min: f64,
-    gamma_max: f64,
+    gamma_dstr: GammaDistribution,
     radial_dstr: RadialDistribution,
     pub sigma_z: f64,
-    energy_chirp: f64,
     angle: f64,
     collision_plane_angle: f64,
     pub rms_div: f64,
@@ -26,19 +21,15 @@ pub struct BeamBuilder {
 }
 
 impl BeamBuilder {
-    pub fn new(species: Species, num: usize) -> Self {
+    pub fn new(species: Species, num: usize, gamma_dstr: GammaDistribution) -> Self {
         BeamBuilder {
             species,
             num,
             weight: 1.0,
-            normal_espec: None,
-            gamma: 0.0,
-            sigma: 0.0,
-            gamma_min: 0.0,
-            gamma_max: 0.0,
+            // gamma_dstr: GammaDistribution::Normal { mu: 1.0, sigma: 0.0, rho: 0.0 },
+            gamma_dstr,
             radial_dstr: RadialDistribution::Uniform {r_max: 0.0},
             sigma_z: 0.0,
-            energy_chirp: 0.0,
             angle: 0.0,
             collision_plane_angle: 0.0,
             rms_div: 0.0,
@@ -48,105 +39,98 @@ impl BeamBuilder {
         }
     }
 
-    pub fn with_initial_z(&self, initial_z: f64) -> Self {
+    pub fn with_initial_z(self, initial_z: f64) -> Self {
         BeamBuilder {
             initial_z,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_weight(&self, weight: f64) -> Self {
+    pub fn with_weight(self, weight: f64) -> Self {
         BeamBuilder {
             weight,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_normal_energy_spectrum(&self, gamma: f64, sigma: f64) -> Self {
-        BeamBuilder {
-            normal_espec: Some(true),
-            gamma,
-            sigma,
-            ..*self
-        }
-    }
-
-    pub fn with_bremsstrahlung_spectrum(&self, gamma_min: f64, gamma_max: f64) -> Self {
-        BeamBuilder {
-            normal_espec: Some(false),
-            gamma_min,
-            gamma_max,
-            ..*self
-        }
-    }
-
-    pub fn with_divergence(&self, rms_div: f64) -> Self {
+    pub fn with_divergence(self, rms_div: f64) -> Self {
         BeamBuilder {
             rms_div,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_collision_angle(&self, angle: f64) -> Self {
+    pub fn with_collision_angle(self, angle: f64) -> Self {
         BeamBuilder {
             angle,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_collision_plane_at(&self, angle: f64) -> Self {
+    pub fn with_collision_plane_at(self, angle: f64) -> Self {
         BeamBuilder {
             collision_plane_angle: angle,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_normally_distributed_xy(&self, sigma_x: f64, sigma_y: f64) -> Self {
+    pub fn with_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::Normal { sigma_x, sigma_y },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_trunc_normally_distributed_xy(&self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
+    pub fn with_trunc_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::TruncNormal { sigma_x, sigma_y, x_max, y_max },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_uniformly_distributed_xy(&self, r_max: f64) -> Self {
+    pub fn with_uniformly_distributed_xy(self, r_max: f64) -> Self {
         BeamBuilder {
             radial_dstr: RadialDistribution::Uniform { r_max },
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_length(&self, sigma_z: f64) -> Self {
+    pub fn with_length(self, sigma_z: f64) -> Self {
         BeamBuilder {
             sigma_z,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_offset(&self, offset: ThreeVector) -> Self {
+    pub fn with_offset(self, offset: ThreeVector) -> Self {
         BeamBuilder {
             offset,
-            ..*self
+            ..self
         }
     }
 
-    pub fn with_energy_chirp(&self, rho: f64) -> Self {
+    pub fn with_energy_chirp(self, energy_chirp: f64) -> Self {
+        let gamma_dstr = match self.gamma_dstr {
+            GammaDistribution::Normal { mu, sigma, rho: _ } => {
+                // note sign change!
+                GammaDistribution::Normal { mu, sigma, rho: -energy_chirp}
+            },
+            GammaDistribution::Custom { vals, cdf, min, max, step, rho: _ } => {
+                GammaDistribution::Custom { vals, cdf, min, max, step, rho: -energy_chirp }
+            }
+            _ => self.gamma_dstr,
+        };
+
         BeamBuilder {
-            energy_chirp: rho,
-            ..*self
+            gamma_dstr,
+            ..self
         }
     }
 
-    pub fn with_polarization(&self, sv: StokesVector) -> Self {
+    pub fn with_polarization(self, sv: StokesVector) -> Self {
         BeamBuilder {
             pol: sv,
-            ..*self
+            ..self
         }
     }
 
@@ -157,7 +141,10 @@ impl BeamBuilder {
 
     #[cfg(feature = "hdf5-output")]
     pub fn has_brem_spec(&self) -> bool {
-        self.normal_espec.map(|b| !b).unwrap_or(false)
+        match self.gamma_dstr {
+            GammaDistribution::Brem { .. } => true,
+            _ => false
+        }
     }
 
     #[cfg(feature = "hdf5-output")]
@@ -169,40 +156,26 @@ impl BeamBuilder {
         }
     }
 
+    pub fn gamma(&self) -> f64 {
+        self.gamma_dstr.gamma()
+    }
+
+    #[cfg(feature = "hdf5-output")]
+    pub fn sigma(&self) -> f64 {
+        self.gamma_dstr.std_dev()
+    }
+
+    #[cfg(feature = "hdf5-output")]
+    pub fn gamma_min(&self) -> f64 {
+        self.gamma_dstr.min_gamma()
+    }
+
     pub fn build<R: Rng>(&self, rng: &mut R) -> Vec<Particle> {
-        let normal_espec = self.normal_espec.expect("primary energy spectrum not specified");
+        // let normal_espec = self.normal_espec.expect("primary energy spectrum not specified");
         (0..self.num).into_iter()
             .map(|i| {
                 // Sample gamma from relevant distribution
-                let (gamma, dz) = if normal_espec {
-                    loop {
-                        // for correlated gamma and z
-                        let rho = -self.energy_chirp;
-                        let n0 = rng.sample::<f64,_>(StandardNormal);
-                        let n1 = rng.sample::<f64,_>(StandardNormal);
-                        let n2 = rho * n0 + (1.0 - rho * rho).sqrt() * n1;
-
-                        let dz = self.sigma_z * n0;
-                        let gamma = self.gamma + self.sigma * n2;
-                        if gamma > 1.0 {
-                            break (gamma, dz);
-                        }
-                    }
-                } else { // brem spec
-                    let x_min = self.gamma_min / self.gamma_max;
-                    let y_max = 4.0 / (3.0 * x_min) - 4.0 / 3.0 + x_min;
-                    let x = loop {
-                        let x = x_min + (1.0 - x_min) * rng.gen::<f64>();
-                        let u = rng.gen::<f64>();
-                        let y = 4.0 / (3.0 * x) - 4.0 / 3.0 + x;
-                        if u <= y / y_max {
-                            break x;
-                        }
-                    };
-
-                    let dz = self.sigma_z * rng.sample::<f64,_>(StandardNormal);
-                    (x * self.gamma_max, dz)
-                };
+                let (gamma, dz) = self.gamma_dstr.sample(self.sigma_z, rng);
 
                 let u = match self.species {
                     Species::Electron | Species::Positron => -(gamma * gamma - 1.0).sqrt(),
