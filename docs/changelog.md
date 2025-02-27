@@ -13,6 +13,7 @@ Specify a custom energy spectrum for the incident particle beam using a function
 Fixed:
 
 * Unwanted propagation of decayed photons if `stop_at_time` is specified.
+* Incorrect MSRV.
 
 ## v1.4.2
 
