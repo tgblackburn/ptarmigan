@@ -295,14 +295,14 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let path = args
         .get(1)
-        .ok_or(InputError::file())?;
+        .ok_or(InputError::file("Missing argument"))?;
     let path = PathBuf::from(path);
     let output_dir = path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("");
 
     // Read input configuration with default context
 
     let raw_input = std::fs::read_to_string(&path)
-        .map_err(|_| InputError::file())?;
+        .map_err(|e| InputError::file(&e.to_string()))?;
     let mut input = Config::from_string(&raw_input)?;
     input.with_context("constants")?;
 

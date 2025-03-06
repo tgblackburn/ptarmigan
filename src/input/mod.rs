@@ -30,7 +30,7 @@ impl Config {
     #[allow(unused)]
     pub fn from_file(path: &Path) -> Result<Self, InputError> {
         let contents = std::fs::read_to_string(path)
-            .map_err(|_| InputError::file())?;
+            .map_err(|e| InputError::file(&e.to_string()))?;
         Self::from_string(&contents)
     }
 
@@ -39,9 +39,9 @@ impl Config {
     #[allow(unused)]
     pub fn from_string(s: &str) -> Result<Self, InputError> {
         let input = YamlLoader::load_from_str(s)
-            .map_err(|_| InputError::file())?;
+            .map_err(|e| InputError::file(&e.to_string()))?;
         let input = input.first()
-            .ok_or(InputError::file())?;
+            .ok_or(InputError::file("YAML file is empty"))?;
 
         Ok(Config {
             input: input.clone(),

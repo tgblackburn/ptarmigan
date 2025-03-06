@@ -7,14 +7,14 @@ publish = false
 readme = "README.md"
 license = "Apache-2.0"
 build = "build.rs"
-rust-version = "1.70"
+rust-version = "1.77"
 
 [dependencies]
 rand = "0.7"
 rand_xoshiro = "0.4"
 rand_distr = "0.2"
 evalexpr = "8.1"
-yaml-rust = "0.4.5"
+yaml-rust = {package = "yaml-rust2", version = "0.10", default-features = false}
 num-complex = "0.4"
 enum_dispatch = "0.3"
 colored = "2"
@@ -33,12 +33,9 @@ with-mpi = ["mpi", "hdf5-writer?/with-mpi"]
 compensating-chirp = []
 
 [build-dependencies]
-vergen = "4.0.3"
+vergen = {version = "4", default-features = false, features = ["git"]}
 
 [dev-dependencies]
 rayon = "1.5.1"
 indicatif = {version = "0.17", features = ["rayon"]}
 rustfft = "6.1"
-
-[patch.crates-io]
-hdf5-sys = {git = "https://github.com/aldanor/hdf5-rust"}

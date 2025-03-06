@@ -23,7 +23,7 @@ impl fmt::Debug for InputError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let help_msg = "Usage: mpirun -n np ./ptarmigan input-file";
         match self.kind {
-            InputErrorKind::File => write!(f, "unable to open configuration file.\n{}", help_msg),
+            InputErrorKind::File => write!(f, "unable to open configuration file.\n       {}.\n{}", self.cause, help_msg),
             InputErrorKind::Location => write!(f, "failed to follow specified path \"{}\": component \"{}\" is missing.", self.path, self.cause),
             InputErrorKind::Conversion => write!(f, "could not convert field \"{}\" to target type.", self.cause),
         }
@@ -39,11 +39,11 @@ impl fmt::Display for InputError {
 impl Error for InputError {}
 
 impl InputError {
-    pub fn file() -> Self {
+    pub fn file(cause: &str) -> Self {
         Self {
             kind: InputErrorKind::File,
             path: String::new(),
-            cause: String::new(),
+            cause: cause.to_owned(),
         }
     }
 
