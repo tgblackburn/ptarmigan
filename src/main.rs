@@ -80,10 +80,18 @@ struct CollideOptions {
     discard_bg_e: bool,
     /// Discard photons that have not pair-created from output
     discard_bg_ph: bool,
+    /// Discard particles that have insufficient energy
+    min_energy: f64,
+    /// Discard particles moving at larger angles to the primary
+    max_angle: f64,
+    /// Keep this shower only if it has the right multiplicity
+    multiplicity: Option<usize>,
     /// Enable/disable recoil on photon emission
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Track/do not track any secondary particles that are generated
+    tracking_secondaries: bool,
     /// Preserve data about decayed photons for later output
     keep_decayed_photons: bool,
     /// Use polarization-resolved pair creation rates
@@ -151,6 +159,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
     let electron_recoils = !options.classical && options.rr;
 
     while let Some(mut pt) = primaries.pop() {
+        if !options.tracking_secondaries && pt.id() != primary_id {
+            secondaries.push(pt);
+            continue;
+        }
+
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
@@ -248,6 +261,22 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     intermediates.push(pt);
                 }
             }
+        }
+    }
+
+    let n0 = incident.momentum();
+    let n0 = ThreeVector::from(n0).normalize();
+
+    secondaries.retain(|&pt| {
+        let p = pt.momentum();
+        let n = ThreeVector::from(p).normalize();
+        p[0] > options.min_energy && n0 * n > options.max_angle.cos()
+    });
+
+    if let Some(multiplicity) = options.multiplicity {
+        // assumes that event biasing is disabled
+        if secondaries.len() != multiplicity + 1 {
+            secondaries.clear();
         }
     }
 
@@ -358,6 +387,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
+    let tracking_secondaries = input.read("control:track_secondaries").unwrap_or(true);
     let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
     let rotate_stokes_pars = input.read("control:rotate_stokes_pars")
         .map_or(true, |val| {
@@ -511,6 +541,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let distance: f64 = input.read("beam:from_hdf5:distance_bt_ips")?;
 
+        let auto_timing = input.read("beam:from_hdf5:auto_timing").unwrap_or(true);
+
         let min_energy: f64 = input.read("beam:from_hdf5:min_energy")
             .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE)
             .unwrap_or(0.0);
@@ -521,6 +553,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let loader = BeamLoader::from_file(&filename, species.to_string().as_str(), distance)
             .with_collision_angle(angle)
             .with_offset(offset)
+            .with_auto_timing(auto_timing)
             .with_min_energy(min_energy)
             .with_max_angle(max_angle);
 
@@ -975,6 +1008,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .and_then(|r| if r < 1.0 {
                 report!(Diagnostic::Error, id == 0, "increase in pair creation rate must be >= 1.0.");
                 Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
+            } else if r > 1.0 && multiplicity.is_some() {
+                report!(Diagnostic::Error, id == 0, "event biasing (pair rate increase > 1) is incompatible with multiplicity selection.");
+                Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
             } else {
                 Ok(r)
             })?;
@@ -1021,26 +1057,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let mut current_id = num as u64;
 
-        let merge = |(mut e, mut g, mut p, mut d): (Vec<Particle>, Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-            let n0 = ThreeVector::from(sh.primary.momentum()).normalize();
-            sh.secondaries.retain(|&pt| {
-                let p = pt.momentum();
-                let n = ThreeVector::from(p).normalize();
-                p[0] > min_energy && n0 * n > max_angle.cos()
-            });
-            if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
-                while let Some(pt) = sh.secondaries.pop() {
-                    match pt.species() {
-                        Species::Electron => e.push(pt),
-                        Species::Photon => g.push(pt),
-                        Species::Positron => p.push(pt),
-                    }
-                }
-            }
-            d.append(&mut sh.intermediates);
-            (e, g, p, d)
-        };
-
         if id == 0 {
             println!("{} {} task{} with {} primary particles per task...", "Running".bold().cyan(), ntasks, if ntasks > 1 {"s"} else {""}, num);
             if a0_values.len() > 1 {
@@ -1068,8 +1084,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             },
             discard_bg_e,
             discard_bg_ph,
+            min_energy,
+            max_angle,
+            multiplicity,
             rr,
             tracking_photons,
+            tracking_secondaries,
             keep_decayed_photons,
             pol_resolved,
             rotate_stokes_pars,
@@ -1077,13 +1097,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             gaunt_factor,
         };
 
-        let (mut electrons, mut photons, mut positrons, mut decayed_photons) = primaries
+        let mut bunch: ParticleBunch = primaries
             .chunks((num / 20).max(1))
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
                     .map(|pt| collide(&laser, *pt, &mut rng, &mut current_id, options))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .fold(ParticleBunch::empty(), |pb, s| pb.append(s));
                 if id == 0 {
                     println!(
                         "Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -1094,10 +1114,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 }
                 tmp
             })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat(), [a.3,b.3].concat())
-            );
+            .sum();
 
         // Particle/parent ids are only unique within a single parallel process
         let mut absorption = 0.0;
@@ -1106,7 +1123,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         world.all_gather_into(&current_id, &mut id_offsets[..]);
         id_offsets.iter_mut().fold(0, |mut total, n| {total += *n; *n = total - *n; total});
         // task n adds id_offsets[n] to each particle/parent id
-        for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+        for pt in bunch.iter_all_mut() {
             pt.with_id(pt.id() + id_offsets[id as usize]);
             pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
             absorption += pt.weight() * pt.absorbed_energy();
@@ -1117,7 +1134,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             StopAt::SameTime => {
                 // which particle got furthest?
                 let mut ct_local = std::f64::NEG_INFINITY;
-                for pt in electrons.iter().chain(photons.iter()).chain(positrons.iter()) {
+                for pt in bunch.iter() {
                     let ct = pt.position()[0];
                     if ct > ct_local { ct_local = ct; }
                 }
@@ -1127,7 +1144,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 world.all_reduce_into(&ct_local, &mut ct_global, SystemOperation::max());
 
                 // update all positions
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+                for pt in bunch.iter_mut() {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
@@ -1139,7 +1156,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             StopAt::GivenTime(t) => {
                 let ct_global = t * SPEED_OF_LIGHT;
 
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()) {
+                for pt in bunch.iter_mut() {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
@@ -1154,15 +1171,15 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         #[cfg(not(feature = "hdf5-output"))]
         let _ = t_stop_global;
 
-        let mut total_absorption = 0.0;
-        world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
-        let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
-
         if !laser_defines_z {
-            for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+            for pt in bunch.iter_all_mut() {
                 *pt = pt.to_beam_coordinate_basis(angle, angle2);
             }
         }
+
+        let mut total_absorption = 0.0;
+        world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
+        let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
 
         #[cfg(feature = "hdf5-output")]
         let (energy, energy_unit) = laser.energy();
@@ -1190,6 +1207,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         if id == 0 {
             println!("{} distribution output...", "Generating".bold().cyan());
         }
+
+        let ParticleBunch { electrons, photons, positrons, intermediates: decayed_photons } = bunch;
 
         for dstr in &eospec {
             let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});

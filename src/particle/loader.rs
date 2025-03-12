@@ -32,6 +32,7 @@ pub struct BeamLoader {
     momentum_path: String,
     polarization_path: String,
     pub distance_bt_ips: f64,
+    auto_timing: bool,
     initial_z: f64,
     collision_angle: f64,
     offset: ThreeVector,
@@ -54,11 +55,19 @@ impl BeamLoader {
             momentum_path,
             polarization_path,
             distance_bt_ips,
+            auto_timing: true,
             initial_z: 0.0,
             collision_angle: 0.0,
             offset: [0.0, 0.0, 0.0].into(),
             min_energy: 0.0,
             max_angle: std::f64::consts::PI,
+        }
+    }
+
+    pub fn with_auto_timing(self, auto_timing: bool) -> Self {
+        BeamLoader {
+            auto_timing,
+            ..self
         }
     }
 
@@ -112,19 +121,22 @@ impl BeamLoader {
         // timing/alignment errors
         let r = r + self.offset.rotate_around_y(self.collision_angle).with_time(0.0);
 
-        // The particle worldline as a function of lab time is given by
-        //   r = r' + L (-1, sin theta, 0, cos theta) + (t + L) beta
-        // where r' is the position relative to the old origin and
-        // beta = p / p0 is the velocity.
-        // It needs to be initialised suitably far from the laser pulse, i.e.
-        // for some negative t^- = t - z = -2 z0.
-        let beta = p / p[0];
-        let offset: FourVector = [-1.0, self.collision_angle.sin(), 0.0, self.collision_angle.cos()].into();
-        let offset = self.distance_bt_ips * (offset + (1.0 + self.collision_angle.cos()) * beta / (beta[0] - beta[3]));
-        let offset = offset - (2.0 * self.initial_z + r[0] - r[3]) * beta / (beta[0] - beta[3]);
-        let r = r + offset;
-
-        (r, p)
+        if self.auto_timing {
+            // The particle worldline as a function of lab time is given by
+            //   r = r' + L (-1, sin theta, 0, cos theta) + (t + L) beta
+            // where r' is the position relative to the old origin and
+            // beta = p / p0 is the velocity.
+            // It needs to be initialised suitably far from the laser pulse, i.e.
+            // for some negative t^- = t - z = -2 z0.
+            let beta = p / p[0];
+            let offset: FourVector = [-1.0, self.collision_angle.sin(), 0.0, self.collision_angle.cos()].into();
+            let offset = self.distance_bt_ips * (offset + (1.0 + self.collision_angle.cos()) * beta / (beta[0] - beta[3]));
+            let offset = offset - (2.0 * self.initial_z + r[0] - r[3]) * beta / (beta[0] - beta[3]);
+            let r = r + offset;
+            (r, p)
+        } else {
+            (r, p)
+        }
     }
 
     pub fn build<C>(&self, comm: &C) -> Result<Vec<Particle>, OutputError> where C: Communicator {

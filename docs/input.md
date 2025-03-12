@@ -24,7 +24,9 @@ Numerics:
 
 Tracking:
 
+* `track_secondaries` (optional, default = `true`): set to `false` to disable tracking of any secondary particles that are created.
 * `select_multiplicity` (optional): to facilitate comparisons with theory, select only those showers with the desired number of daughter particles when creating output.
+This option is not compatible with an increase in the pair creation rate.
 * `stop_at_time` (optional): if specified, stops tracking at the given instant of time. Otherwise, the simulation tracks particles until they have travelled through the entire laser pulse. Time zero corresponds to the point at which the peak of the laser passes through the focal plane.
 Specify `auto` in order to force tracking to continue until all particles have the same time coordinate.
 
@@ -186,15 +188,17 @@ The HDF5 file in question must either be the output of a Ptarmigan simulation, o
 
 [See here for more information](custom_particle_beams.md) on creating an HDF5 file that Ptarmigan can understand.
 
-In a subsection `from_hdf5`, provide:
+In a sub-section of `beam` named `from_hdf5`, provide:
 
-* `file`: path to the HDF5 file that stores the particle data, relative to the location of the input file.
-* `distance_between_ips`: the distance between the origin of the coordinate system, used by the imported particle beam, and the laser collision point, in metres.
-This is used to propagate the particles between the interaction points, assuming ballistic drift.
-A `distance_between_ips` of `0.0` is perfectly fine: it means that the particle positions are defined with respect to the laser collision point.
-* `min_energy` (optional, default = `0.0`): if specified, skip any particles that have less energy than this threshold, during import.
-* `max_angle` (optional, default = `pi`): if specified, skip particles that are moving, with respect to the particle beam axis, at angles greater than the given limit.
-
+* `from_hdf5`:
+  * `file`: path to the HDF5 file that stores the particle data, relative to the location of the input file.
+  * `distance_between_ips`: the distance between the origin of the coordinate system, used by the imported particle beam, and the laser collision point, in metres.
+  This is used to propagate the particles between the interaction points, assuming ballistic drift.
+  A `distance_between_ips` of `0.0` is perfectly fine: it means that the particle positions are defined with respect to the laser collision point.
+  * `auto_timing` (optional, default = `true`): disable this to prevent Ptarmigan propagating the particles between the interaction points.
+  Positions specified in the external file will be respected: for example, if a particle has a position `[0.0, 0.0, 0.0, 0.0]`, it will be initialised inside the laser pulse at time zero.
+  * `min_energy` (optional, default = `0.0`): if specified, skip any particles that have less energy than this threshold, during import.
+  * `max_angle` (optional, default = `pi`): if specified, skip particles that are moving, with respect to the particle beam axis, at angles greater than the given limit.
 
 ## output
 
