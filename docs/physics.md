@@ -39,11 +39,9 @@ Ptarmigan models particle dynamics and strong-field QED events using one of two 
 * the locally monochromatic approximation (LMA)
 * the locally constant crossed field approximation (LCFA).
 
-> [!IMPORTANT]
-> The LMA is available for *a*<sub>0</sub> ≤ 20 and *η* = *χ* / *a*<sub>0</sub> ≤ 2.
+!> The LMA is available for *a*<sub>0</sub> ≤ 20 and *η* = *χ* / *a*<sub>0</sub> ≤ 2.
 
-> [!NOTE]
-> The LCFA is available for arbitrary values of *a*<sub>0</sub> and *η*.
+?> The LCFA is available for arbitrary values of *a*<sub>0</sub> and *η*.
 
 In the LMA, the laser pulse is treated as slices of monochromatic plane wave with defined amplitude and frequency.
 Particle trajectories are only defined at the cycle-averaged level, using the quasimomentum $q^\mu$, and not at scales smaller than the laser wavelength.
@@ -54,7 +52,7 @@ Particle trajectories are defined at all timescales, using the kinetic momentum 
 Strong-field QED events are assumed to occur instantaneously, which is reasonable if the formation length is much smaller than the laser wavelength.
 
 <p align="center">
-  <img src="lma_lcfa.png" alt="The electron trajectory and a photon emission event, as viewed in the LMA (left) and LCFA (right).">
+  <img src="img/lma_lcfa.png" alt="The electron trajectory and a photon emission event, as viewed in the LMA (left) and LCFA (right).">
   <figcaption align="left"><b>The electron trajectory and a photon emission event, as viewed in the LMA (left) and LCFA (right). Adapted from <a href="https://doi.org/10.1088/1367-2630/ac1bf6">this paper</a>.</b></figcaption>
 </p>
 
@@ -93,7 +91,7 @@ control:
 
 If `classical` is absent (or set to `false`), Ptarmigan uses the full QED model.
 
-### A quantum-corrected classical model
+#### A quantum-corrected classical model
 
 Classical electrodynamics overpredicts the amount of radiated energy, because the spectrum does not contain a cutoff at the electron energy, $\omega' < E / \hbar$.
 Correcting the spectrum for this cutoff, and reducing the radiated power and radiation-reaction force accordingly, results in a "modified classical" model:

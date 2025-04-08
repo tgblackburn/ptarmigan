@@ -14,6 +14,7 @@
 !/examples/hdf5
 /examples/hdf5/*
 !/examples/hdf5/*.yml
+!/examples/hdf5/*.ipynb
 
 /.vscode
 /.DS_Store

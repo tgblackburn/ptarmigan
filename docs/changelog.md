@@ -1,4 +1,4 @@
-# Changelog
+# Changelog <!-- {docsify-ignore-all} -->
 
 ## v1.5.0
 

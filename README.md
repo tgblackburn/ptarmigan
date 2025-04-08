@@ -5,7 +5,7 @@
 Simulate the interaction between a high-energy particle beam and an intense laser pulse, including the classical dynamics and strong-field QED processes.
 
 <p align="center">
-  <img src="docs/collision.png" alt="A laser pulse (left) collides with a beam of electrons (right), lauching an electromagnetic shower">
+  <img src="docs/img/collision.png" alt="A laser pulse (left) collides with a beam of electrons (right), lauching an electromagnetic shower">
 </p>
 
 ## What's included
@@ -14,45 +14,26 @@ A summary of Ptarmigan's physics coverage can be found [here](docs/physics.md).
 
 ## Build
 
-All of Ptarmigan's default dependencies are Rust crates, which are downloaded automatically by Cargo. Building the code in this case is as simple as running:
+Ptarmigan's default dependencies are Rust crates, so the code can be built simply by running the following command:
 
 ```bash
-cargo build --release [-j NUM_THREADS]
+cargo build --release [--features with-mpi,hdf5-output]
 ```
 
-where `NUM_THREADS` is the number of separate threads that Cargo is allowed to spawn.
+There are two optional features, which require additional dependencies to be installed:
 
-The following optional features are available:
+* `with-mpi`, which enables parallel processing via MPI. 
+* `hdf5-output`, which enables output of complete particle data as an HDF5 file.
 
-* `with-mpi`, which enables parallel processing via MPI. Requires an MPI library (Ptarmigan is tested against OpenMPI and MPICH) and the Clang compiler.
-* `hdf5-output`, which enables output of complete particle data as an HDF5 file. Requires [libhdf5](https://www.hdfgroup.org/solutions/hdf5/).
-If `with-mpi` and `hdf5-output` are both specified, the HDF5 library must have been compiled with MPI support.
-
-To build with a combination of these features, run:
-
-```bash
-cargo build --release --features with-mpi,hdf5-output [-j NUM_THREADS]
-```
-
+Complete build instructions can be found [here](docs/build.md).
 The Ptarmigan changelog can be found [here](docs/changelog.md).
-
-Instructions for building the code on Windows can be found [here](docs/win10_build_guide.md).
 
 ## Specify problem
 
-Ptarmigan takes as its single argument the path to a YAML file describing the input configuration. Output is automatically written to the same directory as this file. The inputs for some test problems can be found in [examples](examples). Starting from scratch, the input needs to contain the following sections:
-
-* laser
-* beam
-
-and optionally
-
-* control
-* constants
-* output
-* stats
-
-The structure of the input file is described in detail [here](docs/input.md).
+Ptarmigan takes as its single argument the path to a YAML file describing the input configuration.
+Output is automatically written to the same directory as this file.
+The structure of the input file is described in detail [here](docs/input_guide/README.md).
+The inputs for some test problems can be found in [examples](examples).
 
 ## Run
 
