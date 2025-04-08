@@ -16,7 +16,7 @@ Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, wher
 * `waist` (optional): if specified, the laser pulse will be focused to a spot size of `waist`, which defines the radius
 at which the intensity falls to $1/e^2$ of its maximum value. Otherwise the laser is modelled as a plane wave.
     <p align="center">
-    <img src="../img/transverse_profile.png" alt="Laser transverse profile", width="600">
+    <img src="/img/transverse_profile.png" alt="Laser transverse profile", width="600">
     </p>
     The transverse size of the focusing pulse is controlled by the waist $w_0$ and Rayleigh range $z_R = \pi w_0^2 / \lambda$:
     the intensity distribution (left) as the pulse passes through focus and (right) in the focal plane.
@@ -29,7 +29,7 @@ at which the intensity falls to $1/e^2$ of its maximum value. Otherwise the lase
     * `flattop` (constant intensity over the specified number of cycles, with a one-wavelength long, smooth ramp-up and ramp-down)
     * `gaussian`
     <p align="center">
-    <img src="../img/temporal_envelopes.png" alt="Laser temporal envelopes", width="600">
+    <img src="/img/temporal_envelopes.png" alt="Laser temporal envelopes", width="600">
     </p>
 * `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
 * `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.

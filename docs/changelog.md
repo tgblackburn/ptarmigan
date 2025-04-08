@@ -10,6 +10,7 @@ Added:
 * New input parameter `track_secondaries`.
 * Support for user-defined energy spectra.
 Specify a custom energy spectrum for the incident particle beam using a function, or read one in from an external file.
+* Online docs, hosted by Github Pages.
 
 Fixed:
 
