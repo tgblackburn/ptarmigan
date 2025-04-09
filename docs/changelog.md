@@ -11,12 +11,14 @@ Added:
 * Support for user-defined energy spectra.
 Specify a custom energy spectrum for the incident particle beam using a function, or read one in from an external file.
 * Online docs, hosted by Github Pages.
+* Distribution and stats output for decayed photons.
 
 Fixed:
 
 * Unwanted propagation of decayed photons if `stop_at_time` is specified.
 * Incorrect MSRV.
 * Lack of error message when both event biasing and multiplicity selection are requested.
+* Zero-weighting of deleted photons.
 
 ## v1.4.2
 

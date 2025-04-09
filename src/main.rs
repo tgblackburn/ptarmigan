@@ -239,9 +239,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_normalized_momentum(event.u_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - event.frac));
-                        if pt.weight() <= 0.0 {
+                        if event.frac == 1.0 {
                             has_decayed = true;
+                        } else {
+                            pt.with_weight(pt.weight() * (1.0 - event.frac));
                         }
                     }
 
@@ -851,7 +852,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    let keep_decayed_photons = input.read::<bool, _>("output:dump_decayed_photons")
+    let dump_decayed_photons = input.read::<bool, _>("output:dump_decayed_photons")
         .unwrap_or(false);
 
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
@@ -895,6 +896,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let pospec: Vec<String> = input.read("output:positron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
+        .iter()
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .collect::<Result<Vec<_>,_>>()?;
+
+    let iospec: Vec<String> = input.read("output:intermediate")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
+    let iospec: Vec<DistributionFunction> = iospec
         .iter()
         .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
@@ -962,6 +970,16 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
                 .collect::<Result<Vec<_>,_>>()
         })?;
+
+    let mut istats = input.read("stats:intermediate")
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
+
+    // Only one needs to be true for us to hang on to decayed intermediates
+    let keep_decayed_photons = !iospec.is_empty() || !istats.is_empty() || dump_decayed_photons;
 
     // Temporary warning that stats parsing has changed
     for stat in estats.iter().chain(gstats.iter()).chain(pstats.iter()) {
@@ -1225,6 +1243,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             dstr.write(&world, &positrons, &units, &prefix, file_format)?;
         }
 
+        for dstr in &iospec {
+            let prefix = format!("{}{}{}{}intermediate", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
+            dstr.write(&world, &decayed_photons, &units, &prefix, file_format)?;
+        }
+
         for stat in estats.iter_mut() {
             stat.evaluate(&world, &electrons, "electron");
         }
@@ -1235,6 +1258,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         for stat in pstats.iter_mut() {
             stat.evaluate(&world, &positrons, "positron");
+        }
+
+        for stat in istats.iter_mut() {
+            stat.evaluate(&world, &decayed_photons, "intermediate");
         }
 
         if id == 0 {
@@ -1603,7 +1630,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the positron")?
                         .write(&p[..])?;
 
-                if keep_decayed_photons {
+                if dump_decayed_photons {
                     let is = file.new_group("intermediate-state")?;
 
                     let (x, p, pol, w, a, chi, n, id, pid) = decayed_photons

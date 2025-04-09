@@ -34,6 +34,7 @@ The desired distribution outputs are specified per species:
 * `electron` (optional): list of specifiers of the form `dstr1[:dstr2][:(log|auto;weight)]`, each of which should correspond to a distribution function. For example, `x:px` requests the distribution of the x coordinate and the corresponding momentum component. Each separate output is written to a separate file.
 * `photon` (optional): as above.
 * `positron` (optional): as above.
+* `intermediate` (optional): as above. Provides information about photons that do not escape the laser pulse (i.e. that have pair-created).
 
 The possible distributions `dstr` are:
 
@@ -81,6 +82,7 @@ If it contains a list of specifiers, given on a per-species basis,
 * `electron` (optional): list of specifiers
 * `photon` (optional): list of specifiers
 * `positron` (optional): list of specifiers
+* `intermediate` (optional): list of specifiers
 
 Ptarmigan will write aggregated statistical information about the particle final state distributions to a file called 'stats.txt' (with the appropriate identifier prefix, if specified in [output](#output)) in the same directory as the input file.
 
