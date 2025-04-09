@@ -287,6 +287,27 @@ impl FieldData {
     pub fn params(&self) -> LaserParameters {
         self.params
     }
+
+    /// Returns a slice of all the electric field values
+    pub fn ex(&self) -> &[f64] {
+        &self.field
+    }
+
+    /// Returns a slice of all the squared potential values
+    pub fn a_sqd(&self) -> &[f64] {
+        &self.a_sqd
+    }
+
+    /// Returns a slice of the instantaneous frequency shift
+    pub fn inst_norm_freq(&self) -> &[f64] {
+        &self.dpsi_dphi
+    }
+
+    /// Returns the phase difference between adjacent values
+    /// of the field, rms potential etc
+    pub fn phase_step(&self) -> f64 {
+        self.step
+    }
 }
 
 #[cfg(test)]

@@ -1443,8 +1443,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_none()).write(&false)?;
 
-                conf.new_group("laser")?
-                    .new_dataset("a0")?
+                let lsrg = conf.new_group("laser")?;
+
+                lsrg.new_dataset("a0")?
                         .with_unit("1")?
                         .with_desc("peak value of the laser normalized amplitude")?
                         .write(&a0)?
@@ -1485,6 +1486,35 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_desc("number of wavelengths corresponding to the total pulse duration")?
                         .with_condition(|| matches!(envelope, Envelope::CosSquared | Envelope::Flattop))
                         .write(&n_cycles)?;
+
+                if let Some(data) = field.is_numerical() {
+                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| a2.sqrt()).collect();
+                    let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
+
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&true)?
+                        .new_dataset("electric_field")?
+                            .with_alias("ex")?
+                            .with_unit("V/m")?
+                            .with_desc("transverse electric field")?
+                            .write(data.ex())?
+                        .new_dataset("a_rms")?
+                            .with_unit("1")?
+                            .with_desc("envelope of the RMS normalised potential")?
+                            .write(&a_rms[..])?
+                        .new_dataset("local_wavelength")?
+                            .with_unit("m")?
+                            .with_desc("wavelength equivalent to the instantaneous angular frequency")?
+                            .write(&local_lambda[..])?
+                        .new_dataset("phase_step")?
+                            .with_alias("dphi")?
+                            .with_unit("1")?
+                            .with_desc("phase difference between adjacent values of ex, a_rms etc")?
+                            .write(&data.phase_step())?;
+                } else {
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&false)?;
+                }
 
                 let npart = {
                     let mut npart: usize = 0;
