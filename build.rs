@@ -1,11 +1,10 @@
-use vergen::*;
+use vergen::{ vergen, Config };
 
 fn main() {
-    let flags = ConstantsFlags::all();
-    gen(flags).unwrap_or_else(|_e| {
+    let config = Config::default();
+    vergen(config).unwrap_or_else(|_| {
         println!("cargo:rustc-env=VERGEN_GIT_BRANCH=unknown");
         println!("cargo:rustc-env=VERGEN_GIT_SHA=unknown");
-        println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT=unknown");
     });
 
     let mut features = vec![];

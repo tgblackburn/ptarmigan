@@ -30,7 +30,7 @@ impl Config {
     #[allow(unused)]
     pub fn from_file(path: &Path) -> Result<Self, InputError> {
         let contents = std::fs::read_to_string(path)
-            .map_err(|_| InputError::file())?;
+            .map_err(|e| InputError::file(&e.to_string()))?;
         Self::from_string(&contents)
     }
 
@@ -39,9 +39,9 @@ impl Config {
     #[allow(unused)]
     pub fn from_string(s: &str) -> Result<Self, InputError> {
         let input = YamlLoader::load_from_str(s)
-            .map_err(|_| InputError::file())?;
+            .map_err(|e| InputError::file(&e.to_string()))?;
         let input = input.first()
-            .ok_or(InputError::file())?;
+            .ok_or(InputError::file("YAML file is empty"))?;
 
         Ok(Config {
             input: input.clone(),
@@ -100,6 +100,7 @@ impl Config {
         context_function!(ctx, "round",  f64::round);
         context_function!(ctx, "signum", f64::signum);
 
+        context_function!(ctx, "erf",      |x: f64| (167.0 * x / 148.0 + 11.0 * x.powi(3) / 109.0).tanh());
         context_function!(ctx, "step",     |x: f64, min: f64, max: f64| {if x >= min && x < max {1.0} else {0.0}}, 3);
         context_function!(ctx, "gauss",    |x: f64, mu: f64, sigma: f64| (-(x - mu).powi(2) / (2.0 * sigma.powi(2))).exp(), 3);
         context_function!(ctx, "critical", |omega: f64| VACUUM_PERMITTIVITY * ELECTRON_MASS * omega.powi(2) / ELEMENTARY_CHARGE.powi(2));
@@ -158,9 +159,24 @@ impl Config {
         value.and_then(|arg| T::from_yaml(arg.clone(), &self.ctx).map_err(|_| InputError::conversion(path.as_ref(), address.last().unwrap())))
     }
 
+    /// Tests if the given key is present in the configuration file.
+    pub fn contains<S>(&self, path: S) -> bool where S: AsRef<str> {
+        let address: Vec<&str> = path.as_ref().split(':').collect();
+
+        let value = address.iter()
+            .try_fold(&self.input, |y, s| {
+                if y[*s].is_badvalue() {
+                    None
+                } else {
+                    Some(&y[*s])
+                }
+            });
+
+        value.is_some()
+    }
+
     /// Like `Config::read`, but parses the value of a key-value pair
     /// as a function of a single variable `arg`.
-    #[allow(unused)]
     pub fn func<'a, S: AsRef<str> + 'a>(&'a self, path: S, arg: S) -> Result<impl Fn(f64) -> f64 + 'a, InputError> {
         // get the field, if it exists
         let s: String = self.read(&path)?;
@@ -360,6 +376,10 @@ mod tests {
         // evaluate arb string
         let val = config.evaluate("1.0 / (1.0 + y)").unwrap();
         assert_eq!(val, 1.0 / 2.0);
+
+        assert!(config.contains("extra"));
+        assert!(config.contains("deep:nested"));
+        assert!(!config.contains("control:absent"));
     }
 
     #[test]

@@ -80,10 +80,18 @@ struct CollideOptions {
     discard_bg_e: bool,
     /// Discard photons that have not pair-created from output
     discard_bg_ph: bool,
+    /// Discard particles that have insufficient energy
+    min_energy: f64,
+    /// Discard particles moving at larger angles to the primary
+    max_angle: f64,
+    /// Keep this shower only if it has the right multiplicity
+    multiplicity: Option<usize>,
     /// Enable/disable recoil on photon emission
     rr: bool,
     /// Track/do not track photons through the EM field.
     tracking_photons: bool,
+    /// Track/do not track any secondary particles that are generated
+    tracking_secondaries: bool,
     /// Preserve data about decayed photons for later output
     keep_decayed_photons: bool,
     /// Use polarization-resolved pair creation rates
@@ -151,6 +159,11 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
     let electron_recoils = !options.classical && options.rr;
 
     while let Some(mut pt) = primaries.pop() {
+        if !options.tracking_secondaries && pt.id() != primary_id {
+            secondaries.push(pt);
+            continue;
+        }
+
         match pt.species() {
             Species::Electron | Species::Positron => {
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
@@ -226,9 +239,10 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_normalized_momentum(event.u_p);
                         primaries.push(electron);
                         primaries.push(positron);
-                        pt.with_weight(pt.weight() * (1.0 - event.frac));
-                        if pt.weight() <= 0.0 {
+                        if event.frac == 1.0 {
                             has_decayed = true;
+                        } else {
+                            pt.with_weight(pt.weight() * (1.0 - event.frac));
                         }
                     }
 
@@ -248,6 +262,22 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     intermediates.push(pt);
                 }
             }
+        }
+    }
+
+    let n0 = incident.momentum();
+    let n0 = ThreeVector::from(n0).normalize();
+
+    secondaries.retain(|&pt| {
+        let p = pt.momentum();
+        let n = ThreeVector::from(p).normalize();
+        p[0] > options.min_energy && n0 * n > options.max_angle.cos()
+    });
+
+    if let Some(multiplicity) = options.multiplicity {
+        // assumes that event biasing is disabled
+        if secondaries.len() != multiplicity + 1 {
+            secondaries.clear();
         }
     }
 
@@ -295,14 +325,14 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().collect();
     let path = args
         .get(1)
-        .ok_or(InputError::file())?;
+        .ok_or(InputError::file("Missing argument"))?;
     let path = PathBuf::from(path);
     let output_dir = path.parent().unwrap_or(Path::new("")).to_str().unwrap_or("");
 
     // Read input configuration with default context
 
     let raw_input = std::fs::read_to_string(&path)
-        .map_err(|_| InputError::file())?;
+        .map_err(|e| InputError::file(&e.to_string()))?;
     let mut input = Config::from_string(&raw_input)?;
     input.with_context("constants")?;
 
@@ -358,6 +388,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
+    let tracking_secondaries = input.read("control:track_secondaries").unwrap_or(true);
     let pol_resolved = input.read("control:pol_resolved").unwrap_or(false);
     let rotate_stokes_pars = input.read("control:rotate_stokes_pars")
         .map_or(true, |val| {
@@ -499,7 +530,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         );
     }
 
-    let beam = if input.read::<String, _>("beam:from_hdf5:file").is_ok() {
+    let beam = if input.contains("beam:from_hdf5") {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
             return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
@@ -511,6 +542,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let distance: f64 = input.read("beam:from_hdf5:distance_bt_ips")?;
 
+        let auto_timing = input.read("beam:from_hdf5:auto_timing").unwrap_or(true);
+
         let min_energy: f64 = input.read("beam:from_hdf5:min_energy")
             .map(|e: f64| 1.0e-6 * e / -ELECTRON_CHARGE)
             .unwrap_or(0.0);
@@ -521,6 +554,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let loader = BeamLoader::from_file(&filename, species.to_string().as_str(), distance)
             .with_collision_angle(angle)
             .with_offset(offset)
+            .with_auto_timing(auto_timing)
             .with_min_energy(min_energy)
             .with_max_angle(max_angle);
 
@@ -534,24 +568,126 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             ?;
 
         let weight = input.read("beam:charge")
-            .map(|q: f64| q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64)))
-            .unwrap_or(1.0);
+            .map(|q: f64| {
+                let w = q.abs() / (constants::ELEMENTARY_CHARGE * (npart as f64));
+                Some(w)
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e), // error out on conversion failure
+                _ => Ok(None), // allow missing value for now
+            })
+            ?;
+
+        let weight2 = input.read("beam:n_real")
+            .map(|n_real: f64| {
+                let w = n_real / (npart as f64);
+                Some(w)
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(None),
+            })
+            ?;
+
+        let weight = if weight.is_none() && weight2.is_none() {
+            1.0 // both missing, use default
+        } else if weight.is_some() && weight2.is_some() {
+            if weight == weight2 {
+                weight.unwrap() // for the belt and braces crew
+            } else {
+                report!(Diagnostic::Error, id == 0, "conflicting values of 'n_real' and 'charge'. Specify one or the other.");
+                return Err(InputError::conversion("beam:n_real", "n_real").into());
+            }
+        } else {
+            weight.or(weight2).unwrap()
+        };
 
         // Energy distribution
 
-        let gamma: f64 = input.read("beam:gamma")?;
-        let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+        let use_brem_spec = species == Species::Photon &&
+            input.read("beam:bremsstrahlung_source").unwrap_or(false);
 
-        let use_brem_spec = if species == Species::Photon {
-            input.read("beam:bremsstrahlung_source").unwrap_or(false)
-        } else {
-            false
-        };
+        let spectrum: GammaDistribution = if input.contains("beam:spectrum") {
+            // Reading in an analytically or numerically defined function
 
-        let gamma_min = if use_brem_spec {
-            input.read("beam:gamma_min")?
+            let analytical = input.contains("beam:spectrum:function");
+            let numerical = input.contains("beam:spectrum:file");
+
+            if analytical && numerical {
+                report!(Diagnostic::Error, id == 0, "specify a function or a file in beam:spectrum, not both.");
+                Err(InputError::conversion("beam:spectrum", "spectrum"))?
+            } else if analytical {
+                let func = input.func("beam:spectrum:function", "gamma")?;
+                let min: f64 = input.read("beam:spectrum:min")?;
+                let max: f64 = input.read("beam:spectrum:max")?;
+
+                let n = input.read("beam:spectrum:resolution")
+                    .unwrap_or((10.0 + 2.0 * (npart as f64).cbrt()) as usize);
+                let step = (max - min) / (n as f64);
+
+                let vals: Vec<f64> = (0..n)
+                    .map(|i| func(min + (i as f64) * step))
+                    .collect();
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:function evaluated to non-numerical values in the specified domain.");
+                        InputError::conversion("beam:spectrum:function", "function")
+                    })?
+            } else {
+                // Default to numerical
+
+                let filename: String = input.read("beam:spectrum:file")?;
+                let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
+
+                if id == 0 {
+                    println!("{} spectrum for particle beam from {}...", "Importing".bold().cyan(), filename.bold().blue());
+                }
+
+                // Read the contents of the file
+                let vals = std::fs::read_to_string(&filename)
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
+                        Err(InputError::location("beam:spectrum:file", "file"))
+                    })?
+                    .lines()
+                    .map(|s| s.parse::<f64>())
+                    .collect::<Result<Vec<f64>,_>>()
+                    .or_else(|_| {
+                        report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of spectral values.", filename);
+                        Err(InputError::conversion("beam:spectrum:file", "file"))
+                    })?;
+
+                let n = vals.len() - 1; // number of steps, not entries
+                let min: f64 = input.read("beam:spectrum:min")?;
+
+                let (max, step) = input.read::<f64, _>("beam:spectrum:max")
+                    .map(|max| (max, (max - min) / (n as f64)))
+                    .or_else(|_| {
+                        input.read::<f64, _>("beam:spectrum:step").map(|step| (min + (n as f64) * step, step))
+                    })
+                    ?;
+
+                GammaDistribution::custom(vals, min, max, step)
+                    .ok_or_else(|| {
+                        report!(Diagnostic::Error, id == 0, "beam:spectrum:file contains non-numerical values.");
+                        InputError::conversion("beam:spectrum:file", "file")
+                    })?
+            }
+        } else if use_brem_spec {
+            // Photon bremsstrahlung source
+
+            let min_gamma: f64 = input.read("beam:gamma_min")?;
+            let max_gamma: f64 = input.read("beam:gamma")?;
+
+            GammaDistribution::from_brem_source(min_gamma, max_gamma)
         } else {
-            1.0
+            // Default to standard Gaussian distribution
+
+            let mean_gamma: f64 = input.read("beam:gamma")?;
+            let sigma: f64 = input.read("beam:sigma").unwrap_or(0.0);
+
+            GammaDistribution::normal(mean_gamma, sigma)
         };
 
         // Spatial structure
@@ -652,7 +788,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         assert_eq!(nums.iter().sum::<usize>(), npart);
         let num = nums[id as usize];
 
-        let builder = BeamBuilder::new(species, num)
+        let builder = BeamBuilder::new(species, num, spectrum)
             .with_weight(weight)
             .with_divergence(rms_div)
             .with_collision_angle(angle)
@@ -670,12 +806,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             }
         } else {
             builder.with_uniformly_distributed_xy(radius)
-        };
-
-        let builder = if use_brem_spec {
-            builder.with_bremsstrahlung_spectrum(gamma_min, gamma)
-        } else {
-            builder.with_normal_energy_spectrum(gamma, sigma)
         };
 
         BeamParameters::FromRng { builder }
@@ -722,7 +852,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         })
         ?;
 
-    let keep_decayed_photons = input.read::<bool, _>("output:dump_decayed_photons")
+    let dump_decayed_photons = input.read::<bool, _>("output:dump_decayed_photons")
         .unwrap_or(false);
 
     let laser_defines_z = match input.read::<String,_>("output:coordinate_system") {
@@ -766,6 +896,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let pospec: Vec<String> = input.read("output:positron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
+        .iter()
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .collect::<Result<Vec<_>,_>>()?;
+
+    let iospec: Vec<String> = input.read("output:intermediate")
+        .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
+    let iospec: Vec<DistributionFunction> = iospec
         .iter()
         .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
         .collect::<Result<Vec<_>,_>>()?;
@@ -834,6 +971,16 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 .collect::<Result<Vec<_>,_>>()
         })?;
 
+    let mut istats = input.read("stats:intermediate")
+        .map_or_else(|_| Ok(vec![]), |strs: Vec<String>| {
+            strs.iter()
+                .map(|spec| SummaryStatistic::load(spec, |s| input.evaluate(s)))
+                .collect::<Result<Vec<_>,_>>()
+        })?;
+
+    // Only one needs to be true for us to hang on to decayed intermediates
+    let keep_decayed_photons = !iospec.is_empty() || !istats.is_empty() || dump_decayed_photons;
+
     // Temporary warning that stats parsing has changed
     for stat in estats.iter().chain(gstats.iter()).chain(pstats.iter()) {
         if stat.has_version_incompatible_filter() {
@@ -859,9 +1006,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })
             // failing that, check for automatic increase
             .or_else(|e| match input.read::<String,_>("control:increase_pair_rate_by") {
-                Ok(s) if s == "auto" => match beam {
+                Ok(s) if s == "auto" => match &beam {
                     BeamParameters::FromRng { builder } => {
-                        let gamma = builder.gamma;
+                        let gamma = builder.gamma();
                         if using_lcfa {
                             Ok(increase_lcfa_pair_rate_by(gamma, a0, wavelength))
                         } else {
@@ -878,6 +1025,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })
             .and_then(|r| if r < 1.0 {
                 report!(Diagnostic::Error, id == 0, "increase in pair creation rate must be >= 1.0.");
+                Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
+            } else if r > 1.0 && multiplicity.is_some() {
+                report!(Diagnostic::Error, id == 0, "event biasing (pair rate increase > 1) is incompatible with multiplicity selection.");
                 Err(InputError::conversion("control:increase_pair_rate_by", "increase_pair_rate_by"))
             } else {
                 Ok(r)
@@ -910,9 +1060,9 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         };
 
         let primaries = match beam {
-            BeamParameters::FromRng { builder } => {
+            BeamParameters::FromRng { ref builder } => {
                 let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
-                builder.with_initial_z(initial_z).build(&mut rng)
+                builder.clone().with_initial_z(initial_z).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
             BeamParameters::FromHdf5 { ref loader } => {
@@ -924,26 +1074,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let num = primaries.len();
 
         let mut current_id = num as u64;
-
-        let merge = |(mut e, mut g, mut p, mut d): (Vec<Particle>, Vec<Particle>, Vec<Particle>, Vec<Particle>), mut sh: Shower| {
-            let n0 = ThreeVector::from(sh.primary.momentum()).normalize();
-            sh.secondaries.retain(|&pt| {
-                let p = pt.momentum();
-                let n = ThreeVector::from(p).normalize();
-                p[0] > min_energy && n0 * n > max_angle.cos()
-            });
-            if multiplicity.is_none() || (multiplicity.is_some() && multiplicity.unwrap() == sh.multiplicity()) {
-                while let Some(pt) = sh.secondaries.pop() {
-                    match pt.species() {
-                        Species::Electron => e.push(pt),
-                        Species::Photon => g.push(pt),
-                        Species::Positron => p.push(pt),
-                    }
-                }
-            }
-            d.append(&mut sh.intermediates);
-            (e, g, p, d)
-        };
 
         if id == 0 {
             println!("{} {} task{} with {} primary particles per task...", "Running".bold().cyan(), ntasks, if ntasks > 1 {"s"} else {""}, num);
@@ -972,8 +1102,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             },
             discard_bg_e,
             discard_bg_ph,
+            min_energy,
+            max_angle,
+            multiplicity,
             rr,
             tracking_photons,
+            tracking_secondaries,
             keep_decayed_photons,
             pol_resolved,
             rotate_stokes_pars,
@@ -981,13 +1115,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             gaunt_factor,
         };
 
-        let (mut electrons, mut photons, mut positrons, mut decayed_photons) = primaries
+        let mut bunch: ParticleBunch = primaries
             .chunks((num / 20).max(1))
             .enumerate()
             .map(|(i, chk)| {
                 let tmp = chk.iter()
                     .map(|pt| collide(&laser, *pt, &mut rng, &mut current_id, options))
-                    .fold((Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()), merge);
+                    .fold(ParticleBunch::empty(), |pb, s| pb.append(s));
                 if id == 0 {
                     println!(
                         "Done {: >12} of {: >12} primaries, RT = {}, ETTC = {}...",
@@ -998,10 +1132,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 }
                 tmp
             })
-            .fold(
-                (Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new(), Vec::<Particle>::new()),
-                |a, b| ([a.0,b.0].concat(), [a.1,b.1].concat(), [a.2,b.2].concat(), [a.3,b.3].concat())
-            );
+            .sum();
 
         // Particle/parent ids are only unique within a single parallel process
         let mut absorption = 0.0;
@@ -1010,18 +1141,18 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         world.all_gather_into(&current_id, &mut id_offsets[..]);
         id_offsets.iter_mut().fold(0, |mut total, n| {total += *n; *n = total - *n; total});
         // task n adds id_offsets[n] to each particle/parent id
-        for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+        for pt in bunch.iter_all_mut() {
             pt.with_id(pt.id() + id_offsets[id as usize]);
             pt.with_parent_id(pt.parent_id() + id_offsets[id as usize]);
             absorption += pt.weight() * pt.absorbed_energy();
         }
 
         // Fix time coordinates, if necessary
-        match t_stop {
+        let t_stop_global = match t_stop {
             StopAt::SameTime => {
                 // which particle got furthest?
                 let mut ct_local = std::f64::NEG_INFINITY;
-                for pt in electrons.iter().chain(photons.iter()).chain(positrons.iter()).chain(decayed_photons.iter()) {
+                for pt in bunch.iter() {
                     let ct = pt.position()[0];
                     if ct > ct_local { ct_local = ct; }
                 }
@@ -1031,34 +1162,42 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 world.all_reduce_into(&ct_local, &mut ct_global, SystemOperation::max());
 
                 // update all positions
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+                for pt in bunch.iter_mut() {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
                     pt.with_position(r);
                 }
+
+                ct_global / SPEED_OF_LIGHT
             },
             StopAt::GivenTime(t) => {
                 let ct_global = t * SPEED_OF_LIGHT;
-                for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
+
+                for pt in bunch.iter_mut() {
                     let r = pt.position();
                     let p = pt.normalized_momentum();
                     let r = r + p * (ct_global - r[0]) / p[0];
                     pt.with_position(r);
                 }
+
+                ct_global / SPEED_OF_LIGHT
             },
-            _ => {},
+            _ => std::f64::INFINITY,
+        };
+
+        #[cfg(not(feature = "hdf5-output"))]
+        let _ = t_stop_global;
+
+        if !laser_defines_z {
+            for pt in bunch.iter_all_mut() {
+                *pt = pt.to_beam_coordinate_basis(angle, angle2);
+            }
         }
 
         let mut total_absorption = 0.0;
         world.all_reduce_into(&absorption, &mut total_absorption, SystemOperation::sum());
         let total_absorption = total_absorption * 1.0e6 * ELEMENTARY_CHARGE; // in J
-
-        if !laser_defines_z {
-            for pt in electrons.iter_mut().chain(photons.iter_mut()).chain(positrons.iter_mut()).chain(decayed_photons.iter_mut()) {
-                *pt = pt.to_beam_coordinate_basis(angle, angle2);
-            }
-        }
 
         #[cfg(feature = "hdf5-output")]
         let (energy, energy_unit) = laser.energy();
@@ -1087,6 +1226,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             println!("{} distribution output...", "Generating".bold().cyan());
         }
 
+        let ParticleBunch { electrons, photons, positrons, intermediates: decayed_photons } = bunch;
+
         for dstr in &eospec {
             let prefix = format!("{}{}{}{}electron", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
             dstr.write(&world, &electrons, &units, &prefix, file_format)?;
@@ -1102,6 +1243,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             dstr.write(&world, &positrons, &units, &prefix, file_format)?;
         }
 
+        for dstr in &iospec {
+            let prefix = format!("{}{}{}{}intermediate", output_dir, if output_dir.is_empty() {""} else {"/"}, current_ident, if current_ident.is_empty() {""} else {"_"});
+            dstr.write(&world, &decayed_photons, &units, &prefix, file_format)?;
+        }
+
         for stat in estats.iter_mut() {
             stat.evaluate(&world, &electrons, "electron");
         }
@@ -1112,6 +1258,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         for stat in pstats.iter_mut() {
             stat.evaluate(&world, &positrons, "positron");
+        }
+
+        for stat in istats.iter_mut() {
+            stat.evaluate(&world, &decayed_photons, "intermediate");
         }
 
         if id == 0 {
@@ -1182,6 +1332,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .new_dataset("rng_seed")?.write(&rng_seed)?
                     .new_dataset("increase_pair_rate_by")?.write(&pair_rate_increase)?
                     .new_dataset("bandwidth_correction")?.write(&finite_bandwidth)?
+                    .new_dataset("stop_at_time")?
+                        .with_unit("s")?
+                        .with_desc("tracking has continued until all particles have this time coordinate")?
+                        .with_condition(|| matches!(t_stop, StopAt::SameTime | StopAt::GivenTime(_)))
+                        .write(&t_stop_global)?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_none()).write(&false)?;
 
@@ -1271,10 +1426,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                                 .with_desc("total number of real particles represented by the primary macroparticles")?
                                 .write(&((npart as f64) * builder.weight))?
                             .new_dataset("charge")?.with_unit("C")?.write(&charge)?
-                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma)?
-                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma)?
+                            .new_dataset("gamma")?.with_unit("1")?.write(&builder.gamma())?
+                            .new_dataset("sigma")?.with_unit("1")?.write(&builder.sigma())?
                             .new_dataset("bremsstrahlung_source")?.write(&builder.has_brem_spec())?
-                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min)?
+                            .new_dataset("gamma_min")?.with_unit("1")?.with_condition(|| builder.has_brem_spec()).write(&builder.gamma_min())?
                             .new_dataset("radius")?.with_unit(units.length.name())?.write(&radius.convert(&units.length))?
                             .new_dataset("radius_max")?
                                 .with_unit(units.length.name())?
@@ -1475,7 +1630,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_desc("four-momentum of the positron")?
                         .write(&p[..])?;
 
-                if keep_decayed_photons {
+                if dump_decayed_photons {
                     let is = file.new_group("intermediate-state")?;
 
                     let (x, p, pol, w, a, chi, n, id, pid) = decayed_photons

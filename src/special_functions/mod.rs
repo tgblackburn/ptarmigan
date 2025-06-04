@@ -5,9 +5,6 @@ mod bessel;
 mod airy;
 mod double_bessel;
 
-// Pending removal
-// mod factorial;
-
 pub use bessel::*;
 pub use airy::*;
 pub use double_bessel::*;

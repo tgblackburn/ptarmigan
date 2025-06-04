@@ -15,6 +15,10 @@ mod loader;
 pub use loader::BeamLoader;
 
 mod dstr;
+pub use dstr::GammaDistribution;
+
+mod shower;
+pub use shower::*;
 
 pub enum BeamParameters {
     FromRng {
@@ -96,15 +100,6 @@ impl fmt::Display for Particle {
             self.payload, // a at creation
         )
     }
-}
-
-/// A shower, or cascade, consists of the primary
-/// particle and all the secondaries it produces by
-/// various QED processes
-pub struct Shower {
-    pub primary: Particle,
-    pub secondaries: Vec<Particle>,
-    pub intermediates: Vec<Particle>,
 }
 
 impl Particle {
@@ -360,12 +355,6 @@ impl Particle {
     /// Projects the particle polarization onto the y axis.
     pub fn polarization_along_y(&self) -> f64 {
         self.polarization_along([0.0, 1.0, 0.0])
-    }
-}
-
-impl Shower {
-    pub fn multiplicity(&self) -> usize {
-        self.secondaries.len() - 1
     }
 }
 

@@ -1,4 +1,24 @@
-# Changelog
+# Changelog <!-- {docsify-ignore-all} -->
+
+## v1.5.0
+
+2025-06-04
+
+Added:
+
+* New input parameter `n_real` to specify the number of real particles in the beam directly.
+* New input parameter `track_secondaries`.
+* Support for user-defined energy spectra.
+Specify a custom energy spectrum for the incident particle beam using a function, or read one in from an external file.
+* Online docs, hosted by Github Pages.
+* Distribution and stats output for decayed photons.
+
+Fixed:
+
+* Unwanted propagation of decayed photons if `stop_at_time` is specified.
+* Incorrect MSRV.
+* Lack of error message when both event biasing and multiplicity selection are requested.
+* Zero-weighting of deleted photons.
 
 ## v1.4.2
 
