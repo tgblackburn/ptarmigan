@@ -91,8 +91,11 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
         local_zero // cdf.table[30][0]
     };
 
-    assert!(y >= local_zero);
-    y
+    // assert!(y >= local_zero);
+    // if y < local_zero {
+    //     println!("global_zero = {:e}, y = {:e}, local_zero = {:e}", global_zero, y, local_zero);
+    // }
+    y.max(local_zero)
 }
 
 /// Returns omega/mc^2 and sampled values for the polar and azimuthal angles

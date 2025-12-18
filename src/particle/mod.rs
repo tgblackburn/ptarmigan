@@ -67,6 +67,8 @@ pub struct Particle {
     species: Species,
     r: [FourVector; 2],
     u: [FourVector; 2],
+    /// Derivative of four-velocity w.r.t. lab time
+    u_dot: [FourVector; 2],
     pol: StokesVector,
     payload: f64,
     parent_chi: f64,
@@ -116,6 +118,7 @@ impl Particle {
             species,
             r: [r; 2],
             u: [u; 2],
+            u_dot: [[0.0; 4].into(), [0.0; 4].into()],
             pol: StokesVector::unpolarized(),
             payload: 0.0,
             parent_chi: 0.0,
@@ -201,6 +204,22 @@ impl Particle {
     /// Returns the lab time of the particle, in seconds
     pub fn time(&self) -> f64 {
         self.r[1][0] / SPEED_OF_LIGHT
+    }
+
+    /// Returns du/dt, d2u/d2t and d3u/dt3
+    pub fn u_dots(&self, u_new: FourVector, dt: f64) -> (FourVector, FourVector, FourVector) {
+        let u_dot = (u_new - self.u[1]) / dt;
+        // time-ordered: u_dot[1]  u_dot[0]  u_dot
+        let u_dot2 = (u_dot - self.u_dot[0]) / dt;
+        let u_dot3 = (u_dot - 2.0 * self.u_dot[0] + self.u_dot[1]) / (dt * dt);
+        (u_dot, u_dot2, u_dot3)
+    }
+
+    /// Updates the value of du/dt
+    pub fn with_u_dot(&mut self, u_dot: FourVector) -> Self {
+        self.u_dot[1] = self.u_dot[0];
+        self.u_dot[0] = u_dot;
+        *self
     }
 
     /// Loads something that will be tracked with the particle
@@ -290,6 +309,7 @@ impl Particle {
             species: self.species,
             r: [r0, r],
             u: [u0, u],
+            u_dot: self.u_dot,
             pol: self.pol,
             payload: self.payload,
             parent_chi: self.parent_chi,

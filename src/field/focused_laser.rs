@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
+use super::{Envelope, EquationOfMotion, RadiationEvent, RadiationMode, RateCorrection};
 
 /// Represents the envelope of a focusing laser pulse, i.e.
 /// the field after cycle averaging
@@ -257,7 +257,7 @@ impl Field for FocusedLaser {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: f64) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: RateCorrection) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);

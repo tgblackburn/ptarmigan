@@ -182,7 +182,15 @@ fn collide<F: Field, R: Rng>(field: &F, mut incident: Particle, rng: &mut R, cur
                         eqn,
                     );
 
-                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode, pt.uncertainty()) {
+                    let (u_dot, u_dot2, u_dot3) = pt.u_dots(u, dt);
+
+                    let rate_corr = {
+                        let dv1 = -(u_dot2 * u_dot2 + 3.0 * u_dot * u_dot3) / (45.0 * (u_dot * u_dot).powi(2));
+                        let dv2 = (4.0 * u_dot2 * u_dot2 - 3.0 * u_dot * u_dot3) / (45.0 * (u_dot * u_dot).powi(2));
+                        RateCorrection { modifier: pt.uncertainty(), dv1, dv2 }
+                    };
+
+                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode, rate_corr) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -209,6 +217,7 @@ fn collide<F: Field, R: Rng>(field: &F, mut incident: Particle, rng: &mut R, cur
 
                     pt.with_position(r);
                     pt.with_normalized_momentum(u);
+                    pt.with_u_dot(u_dot);
                     pt.update_absorbed_energy(work_done);
                 }
 

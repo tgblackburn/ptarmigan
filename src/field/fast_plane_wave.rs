@@ -83,118 +83,8 @@ impl FastPlaneWave {
 
         energy_flux
     }
-}
 
-impl Field for FastPlaneWave {
-    fn max_timestep(&self) -> Option<f64> {
-        let chirp = if cfg!(feature = "compensating-chirp") {
-            1.0 + self.a0.powi(2)
-        } else {
-            1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
-        };
-        let dt = 1.0 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp);
-        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
-        Some(dt * multiplier)
-    }
-
-    fn contains(&self, r: FourVector) -> bool {
-        let phase = self.wavevector * r;
-        let max_phase = match self.envelope {
-            Envelope::CosSquared => consts::PI * self.n_cycles,
-            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
-            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles, // = 3 omega tau
-        };
-        phase < max_phase
-    }
-
-    fn ideal_initial_z(&self) -> f64 {
-        let wavelength = 2.0 * consts::PI / self.wavevector[0];
-        match self.envelope {
-            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles,
-            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
-            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
-        }
-    }
-
-    #[allow(non_snake_case)]
-    #[inline(always)]
-    fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
-        // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
-        // where delta = 0 for LP and 1 for CP
-        // E = -d_t A => E = -omega d_phi (A_x, A_y, 0)
-        // B = curl A = (-d_z A_y, d_z A_x, 0) => (omega/c) d_phi (A_y, -A_x, 0)
-
-        let delta = match self.pol {
-            Polarization::Linear => 0.0f64,
-            Polarization::Circular => 1.0f64,
-        };
-
-        let phi: f64 = self.wavevector * r;
-
-        // psi is the (potentially time-dependent) carrier phase
-        let (psi, dpsi_dphi) = if cfg!(feature = "compensating-chirp") && self.envelope == Envelope::CosSquared {
-            let beta = self.chirp_b * 0.5 * (1.0 + delta.powi(2)) * self.a0.powi(2);
-            let f = (phi / (2.0 * self.n_cycles)).cos().powi(2);
-            (
-                phi + (beta / 16.0) * (6.0 * phi + 8.0 * self.n_cycles * (phi / self.n_cycles).sin() + self.n_cycles * (2.0 * phi / self.n_cycles).sin()),
-                1.0 + beta * f * f,
-            )
-        } else {
-            (
-                phi * (1.0 + self.chirp_b * phi),
-                1.0 + 2.0 * self.chirp_b * phi,
-            )
-        };
-
-        // envelope and gradient
-        let (f, df_dphi) = match self.envelope {
-            Envelope::CosSquared => {
-                if phi.abs() < self.n_cycles * consts::PI {
-                    (
-                        (phi / (2.0 * self.n_cycles)).cos().powi(2),
-                        -(phi / self.n_cycles).sin() / (2.0 * self.n_cycles)
-                    )
-                } else {
-                    (0.0, 0.0)
-                }
-            }
-
-            Envelope::Flattop => {
-                if phi.abs() > consts::PI * (self.n_cycles + 1.0) {
-                    (0.0, 0.0)
-                } else if phi.abs() > consts::PI * (self.n_cycles - 1.0) {
-                    let arg = 0.25 * (phi.abs() - (self.n_cycles - 1.0) * consts::PI);
-                    (arg.cos().powi(2), -phi.signum() * 0.25 * (2.0 * arg).sin())
-                } else {
-                    (1.0, 0.0)
-                }
-            },
-
-            Envelope::Gaussian => {
-                let arg = -0.5 * (phi / (consts::PI * self.n_cycles)).powi(2);
-                (
-                    arg.exp2(),
-                    -consts::LN_2 * phi * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
-                )
-            }
-        };
-
-        // a = A / (m c a0 / e):
-        let dax_dphi = psi.sin() * df_dphi + psi.cos() * dpsi_dphi * f;
-        let day_dphi = delta * (psi.cos() * df_dphi - psi.sin() * dpsi_dphi * f);
-
-        let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT_SQD * self.wavevector[0] * self.a0) / ELEMENTARY_CHARGE;
-        let E = -amplitude * ThreeVector::new(dax_dphi, day_dphi, 0.0);
-        let B = (amplitude / SPEED_OF_LIGHT) * ThreeVector::new(day_dphi, -dax_dphi, 0.0);
-
-        let E = E.rotate_around_z(self.pol_angle);
-        let B = B.rotate_around_z(self.pol_angle);
-        let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
-
-        (E, B, a)
-    }
-
-    #[inline(always)]
+    #[cfg(test)]
     fn field_derivatives(&self, r: FourVector) -> (f64, f64) {
         let phi: f64 = self.wavevector * r;
         // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
@@ -345,6 +235,116 @@ impl Field for FastPlaneWave {
                 }
             },
         }
+    }
+}
+
+impl Field for FastPlaneWave {
+    fn max_timestep(&self) -> Option<f64> {
+        let chirp = if cfg!(feature = "compensating-chirp") {
+            1.0 + self.a0.powi(2)
+        } else {
+            1.0 + 2.0 * self.chirp_b * consts::PI * self.n_cycles
+        };
+        let dt = 1.0 / (SPEED_OF_LIGHT * self.wavevector[0] * chirp);
+        let multiplier = (3_f64.sqrt() / (5.0 * ALPHA_FINE * self.a0)).min(0.1);
+        Some(dt * multiplier)
+    }
+
+    fn contains(&self, r: FourVector) -> bool {
+        let phase = self.wavevector * r;
+        let max_phase = match self.envelope {
+            Envelope::CosSquared => consts::PI * self.n_cycles,
+            Envelope::Flattop => consts::PI * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 6.0 * consts::PI * self.n_cycles, // = 3 omega tau
+        };
+        phase < max_phase
+    }
+
+    fn ideal_initial_z(&self) -> f64 {
+        let wavelength = 2.0 * consts::PI / self.wavevector[0];
+        match self.envelope {
+            Envelope::CosSquared => 0.5 * wavelength * self.n_cycles,
+            Envelope::Flattop => 0.5 * wavelength * (self.n_cycles + 1.0),
+            Envelope::Gaussian => 2.0 * wavelength * self.n_cycles,
+        }
+    }
+
+    #[allow(non_snake_case)]
+    #[inline(always)]
+    fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
+        // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
+        // where delta = 0 for LP and 1 for CP
+        // E = -d_t A => E = -omega d_phi (A_x, A_y, 0)
+        // B = curl A = (-d_z A_y, d_z A_x, 0) => (omega/c) d_phi (A_y, -A_x, 0)
+
+        let delta = match self.pol {
+            Polarization::Linear => 0.0f64,
+            Polarization::Circular => 1.0f64,
+        };
+
+        let phi: f64 = self.wavevector * r;
+
+        // psi is the (potentially time-dependent) carrier phase
+        let (psi, dpsi_dphi) = if cfg!(feature = "compensating-chirp") && self.envelope == Envelope::CosSquared {
+            let beta = self.chirp_b * 0.5 * (1.0 + delta.powi(2)) * self.a0.powi(2);
+            let f = (phi / (2.0 * self.n_cycles)).cos().powi(2);
+            (
+                phi + (beta / 16.0) * (6.0 * phi + 8.0 * self.n_cycles * (phi / self.n_cycles).sin() + self.n_cycles * (2.0 * phi / self.n_cycles).sin()),
+                1.0 + beta * f * f,
+            )
+        } else {
+            (
+                phi * (1.0 + self.chirp_b * phi),
+                1.0 + 2.0 * self.chirp_b * phi,
+            )
+        };
+
+        // envelope and gradient
+        let (f, df_dphi) = match self.envelope {
+            Envelope::CosSquared => {
+                if phi.abs() < self.n_cycles * consts::PI {
+                    (
+                        (phi / (2.0 * self.n_cycles)).cos().powi(2),
+                        -(phi / self.n_cycles).sin() / (2.0 * self.n_cycles)
+                    )
+                } else {
+                    (0.0, 0.0)
+                }
+            }
+
+            Envelope::Flattop => {
+                if phi.abs() > consts::PI * (self.n_cycles + 1.0) {
+                    (0.0, 0.0)
+                } else if phi.abs() > consts::PI * (self.n_cycles - 1.0) {
+                    let arg = 0.25 * (phi.abs() - (self.n_cycles - 1.0) * consts::PI);
+                    (arg.cos().powi(2), -phi.signum() * 0.25 * (2.0 * arg).sin())
+                } else {
+                    (1.0, 0.0)
+                }
+            },
+
+            Envelope::Gaussian => {
+                let arg = -0.5 * (phi / (consts::PI * self.n_cycles)).powi(2);
+                (
+                    arg.exp2(),
+                    -consts::LN_2 * phi * arg.exp2() / (consts::PI * self.n_cycles).powi(2)
+                )
+            }
+        };
+
+        // a = A / (m c a0 / e):
+        let dax_dphi = psi.sin() * df_dphi + psi.cos() * dpsi_dphi * f;
+        let day_dphi = delta * (psi.cos() * df_dphi - psi.sin() * dpsi_dphi * f);
+
+        let amplitude = (ELECTRON_MASS * SPEED_OF_LIGHT_SQD * self.wavevector[0] * self.a0) / ELEMENTARY_CHARGE;
+        let E = -amplitude * ThreeVector::new(dax_dphi, day_dphi, 0.0);
+        let B = (amplitude / SPEED_OF_LIGHT) * ThreeVector::new(day_dphi, -dax_dphi, 0.0);
+
+        let E = E.rotate_around_z(self.pol_angle);
+        let B = B.rotate_around_z(self.pol_angle);
+        let a = ELEMENTARY_CHARGE * E.norm_sqr().sqrt() / (ELECTRON_MASS * SPEED_OF_LIGHT * self.omega());
+
+        (E, B, a)
     }
 
     fn energy(&self) -> (f64, &'static str) {
@@ -500,5 +500,63 @@ mod tests {
         println!("LL + LCFA: work/mc^2 = {:.6e} [numerical], {:.6e} [analytical] => error = {:.3e}", work, expected_work, error);
 
         assert!(error < 1.0e-3);
+    }
+
+    #[test]
+    #[ignore]
+    fn frenet_serret_field_dvs() {
+        use std::fs::File;
+        use std::io::Write;
+
+        let n_cycles = 8.0;
+        let wavelength = 0.8e-6;
+        let a0 = 5.0;
+        let pol = Polarization::Linear;
+
+        let laser = FastPlaneWave::new(a0, wavelength, n_cycles, pol, 0.0, 0.0)
+            .with_envelope(Envelope::CosSquared);
+
+        let z0 = laser.ideal_initial_z();
+        let dt = laser.max_timestep().unwrap();
+
+        let mut r = FourVector::new(-z0, 0.0, 0.0, z0);
+        let mut u = FourVector::new(0.0, 0.0, 0.0, -1000.0).unitize();
+        let mut u_dot_store: [FourVector; 2] = [[0.0; 4].into(); 2];
+
+        let mut file = File::create("output/field_dvs.dat").unwrap();
+
+        while laser.contains(r) {
+            let (r_new, u_new, _, _) = laser.push(r, u, ELECTRON_CHARGE / ELECTRON_MASS, dt, EquationOfMotion::Lorentz);
+
+            // evaluated directly
+            let (target_dv1, target_dv2) = laser.field_derivatives(r_new);
+            // at this point, would test for radiation emission
+
+            // using Frenet-Serret formalism
+            let (dv1, dv2) = {
+                let u_dot = (u_new - u) / dt;
+                let u_dot2 = (u_dot - u_dot_store[0]) / dt;
+                let u_dot3 = (u_dot - 2.0 * u_dot_store[0] + u_dot_store[1]) / (dt * dt);
+
+                let dv1 = -(u_dot2 * u_dot2 + 3.0 * u_dot * u_dot3) / (45.0 * (u_dot * u_dot).powi(2));
+                let dv2 = (4.0 * u_dot2 * u_dot2 - 3.0 * u_dot * u_dot3) / (45.0 * (u_dot * u_dot).powi(2));
+
+                u_dot_store[1] = u_dot_store[0];
+                u_dot_store[0] = u_dot;
+
+                (dv1, dv2)
+            };
+
+            let phi = laser.wavevector * r_new;
+
+            writeln!(
+                file,
+                "{:.6e} {:.6e} {:.6e} {:.6e} {:.6e}",
+                phi, dv1, target_dv1, dv2, target_dv2,
+            ).unwrap();
+
+            r = r_new;
+            u = u_new;
+        }
     }
 }

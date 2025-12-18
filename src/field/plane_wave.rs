@@ -8,7 +8,7 @@ use crate::geometry::{FourVector, StokesVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
-use super::{RadiationMode, EquationOfMotion, RadiationEvent, Envelope};
+use super::{Envelope, EquationOfMotion, RadiationEvent, RadiationMode, RateCorrection};
 
 /// Represents the envelope of a plane-wave laser pulse, i.e.
 /// the field after cycle averaging
@@ -248,7 +248,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: f64) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: RateCorrection) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
