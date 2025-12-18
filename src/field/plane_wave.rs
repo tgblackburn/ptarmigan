@@ -248,7 +248,7 @@ impl Field for PlaneWave {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: f64) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let phase = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {
@@ -281,7 +281,7 @@ impl Field for PlaneWave {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64, _uncertainty: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
         let phase: f64 = self.wavevector * r;
         let chirp = if cfg!(feature = "compensating-chirp") {

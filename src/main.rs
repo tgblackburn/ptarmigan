@@ -41,6 +41,7 @@ mod output;
 mod input;
 mod pwmci;
 mod quadrature;
+mod uncertainty;
 
 use constants::*;
 use field::*;
@@ -48,6 +49,7 @@ use geometry::*;
 use particle::*;
 use output::*;
 use input::*;
+use uncertainty::*;
 
 /// Specifies how to print information for all particles,
 /// as requested by 'dump_all_particles' in the input file.
@@ -102,6 +104,8 @@ struct CollideOptions {
     classical: bool,
     /// Correct classical spectrum using Gaunt factor
     gaunt_factor: bool,
+    /// Uncertainty in photon emission rate
+    uncertainty: Uncertainty,
 }
 
 /// Type of diagnostic message that can be issued
@@ -131,7 +135,10 @@ pub(crate) use report;
 /// Propagates a single particle through a region of EM field, returning a Shower containing
 /// the primary and any secondary particles generated.
 /// `current_id` is incremented every time a new particle is generated.
-fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current_id: &mut u64, options: CollideOptions) -> Shower {
+fn collide<F: Field, R: Rng>(field: &F, mut incident: Particle, rng: &mut R, current_id: &mut u64, options: CollideOptions) -> Shower {
+    let uncertainty = options.uncertainty.sample(rng);
+    let incident = incident.with_uncertainty(uncertainty);
+
     let mut primaries = vec![incident];
     let mut secondaries: Vec<Particle> = Vec::new();
     let mut intermediates: Vec<Particle> = Vec::new();
@@ -175,12 +182,13 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                         eqn,
                     );
 
-                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode, pt.uncertainty()) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
                             .with_payload(event.a_eff)
                             .with_parent_chi(event.chi)
+                            .with_uncertainty(pt.uncertainty())
                             .with_weight(pt.weight())
                             .with_id(id)
                             .with_parent_id(pt.id())
@@ -216,7 +224,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                     let r: FourVector = pt.position() + SPEED_OF_LIGHT * ell * dt / ell[0];
                     let pol = if options.pol_resolved { pt.polarization() } else { StokesVector::unpolarized() };
 
-                    let (prob, pol_new, event) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase);
+                    let (prob, pol_new, event) = field.pair_create(r, ell, pol, dt, rng, options.rate_increase, pt.uncertainty());
 
                     if let Some(event) = event {
                         let id = *current_id;
@@ -227,6 +235,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_payload(event.a_eff)
                             .with_parent_chi(event.chi)
                             .with_parent_id(pt.id())
+                            .with_uncertainty(pt.uncertainty())
                             .update_absorbed_energy(0.5 * event.absorption)
                             .with_normalized_momentum(event.u_e);
                         let positron = Particle::create(Species::Positron, r)
@@ -235,6 +244,7 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
                             .with_payload(event.a_eff)
                             .with_parent_chi(event.chi)
                             .with_parent_id(pt.id())
+                            .with_uncertainty(pt.uncertainty())
                             .update_absorbed_energy(0.5 * event.absorption)
                             .with_normalized_momentum(event.u_p);
                         primaries.push(electron);
@@ -313,7 +323,10 @@ fn increase_lcfa_pair_rate_by(gamma: f64, a0: f64, wavelength: f64) -> f64 {
     let omega_mc2 = 1.26e-6 / (ELECTRON_MASS_MEV * 1.0e6 * wavelength);
     let chi = 2.0 * gamma * a0 * omega_mc2;
     let ell: FourVector = FourVector::lightlike(0.0, 0.0, -gamma);
-    let pair_rate = lcfa::pair_creation::probability(ell, StokesVector::unpolarized(), chi, [1.0, 0.0, 0.0].into(), 1.0).0;
+    let (pair_rate, _) = {
+        let event = lcfa::pair_creation::PairCreation::new(ell, StokesVector::unpolarized(), chi, [1.0, 0.0, 0.0].into());
+        event.probability(1.0)
+    };
     let photon_rate = lcfa::photon_emission::rate(chi, gamma);
     photon_rate / pair_rate
 }
@@ -386,6 +399,43 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         })
         ?;
 
+    let uncertainty = input.read::<f64, _>("uncertainty:lcfa")
+        .map(|f| {
+            let f = f.abs();
+            if f > 0.0 {
+                Uncertainty::Between { min: -f, max: f }
+            } else {
+                Uncertainty::None
+            }
+        })
+        .or_else(|e| match e.kind() {
+            InputErrorKind::Location => Ok(Uncertainty::None),
+            _ => Err(e),
+        })
+        ?;
+
+    let max_uncertainty = uncertainty.range();
+
+    if uncertainty.is_some() {
+        if !cfg!(feature = "uncertainty-tracking") {
+            report!(
+                Diagnostic::Warning, id == 0,
+                concat!(
+                    "Ptarmigan has not been compiled with feature 'uncertainty-tracking'.\n",
+                    "         Requested fraction will be ignored."
+                )
+            );
+        } else if !using_lcfa {
+            report!(
+                Diagnostic::Warning, id == 0,
+                concat!(
+                    "uncertainty in the QED rates is not yet available under the LMA.\n",
+                    "         Requested fraction will be ignored."
+                )
+            );
+        }
+    }
+
     // pair creation is enabled by default, unless classical = true
     let tracking_photons = input.read("control:pair_creation").unwrap_or(!classical);
     let tracking_secondaries = input.read("control:track_secondaries").unwrap_or(true);
@@ -428,10 +478,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let (focusing, waist) = input
         .read("laser:waist")
         .map(|w| (true, w))
-        .or_else(|e| match e.kind() {
-            InputErrorKind::Conversion => Err(e),
-            _ => Ok((false, std::f64::INFINITY)),
-        })?;
+        .unwrap_or((false, std::f64::INFINITY));
 
     let envelope = input.read::<String, _>("laser:envelope")
         .and_then(|s| match s.as_str() {
@@ -886,28 +933,28 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let eospec: Vec<DistributionFunction> = eospec
         .iter()
-        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s), uncertainty))
         .collect::<Result<Vec<_>,_>>()?;
     
     let gospec: Vec<String> = input.read("output:photon")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let gospec: Vec<DistributionFunction> = gospec
         .iter()
-        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s), uncertainty))
         .collect::<Result<Vec<_>,_>>()?;
 
     let pospec: Vec<String> = input.read("output:positron")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let pospec: Vec<DistributionFunction> = pospec
         .iter()
-        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s), uncertainty))
         .collect::<Result<Vec<_>,_>>()?;
 
     let iospec: Vec<String> = input.read("output:intermediate")
         .or_else(|e| match e.kind() {InputErrorKind::Location => Ok(vec![]), _ => Err(e)})?;
     let iospec: Vec<DistributionFunction> = iospec
         .iter()
-        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s)))
+        .map(|spec| DistributionFunction::load(spec, |s| input.evaluate(s), uncertainty))
         .collect::<Result<Vec<_>,_>>()?;
 
     let file_format = input.read::<String,_>("output:file_format")
@@ -1092,6 +1139,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             if pair_rate_increase > 1.0 {
                 println!("\t* with pair creation rate increased by {:.3e}", pair_rate_increase);
             }
+            #[cfg(feature = "modified-event-generator")] {
+                println!("\t* using the modified event generator for photon emission");
+            }
+            if cfg!(feature = "uncertainty-tracking") && max_uncertainty.is_some() {
+                println!("\t* tracking uncertainty in the QED rates");
+            }
         }
 
         let runtime = std::time::Instant::now();
@@ -1116,6 +1169,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             rotate_stokes_pars,
             classical,
             gaunt_factor,
+            uncertainty,
         };
 
         let mut bunch: ParticleBunch = primaries

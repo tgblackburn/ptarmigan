@@ -155,9 +155,10 @@ pub trait Field {
     /// position `r` with momentum `u` emits a photon, and if so,
     /// returns information about the event (see [RadiationEvent]).
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, uncertainty: f64) -> Option<RadiationEvent> {
         let (E, B, a) = self.fields(r);
-        lcf::radiate(u, E, B, a, dt, rng, mode)
+        let (dv1, dv2) = if uncertainty != 0.0 { self.field_derivatives(r) } else { (0.0, 0.0) };
+        lcf::radiate(u, E, B, dv1, dv2, a, dt, rng, mode, uncertainty)
     }
 
     /// Checks to see if an electron-positron pair is produced by
@@ -171,9 +172,10 @@ pub trait Field {
     /// otherwise be a rare event. The probability returned is *not*
     /// affected by this increase.
     #[allow(non_snake_case)]
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64, uncertainty: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let (E, B, a) = self.fields(r);
-        lcf::pair_create(ell, pol, E, B, a, dt, rng, rate_increase)
+        let (dv1, _) = if uncertainty != 0.0 { self.field_derivatives(r) } else { (0.0, 0.0) };
+        lcf::pair_create(ell, pol, E, B, dv1, a, dt, rng, rate_increase, uncertainty)
     }
 
     /// Returns a tuple of the electric and magnetic fields, as well
@@ -182,6 +184,14 @@ pub trait Field {
     #[allow(unused_variables)]
     fn fields(&self, r: FourVector) -> (ThreeVector, ThreeVector, f64) {
         ([0.0; 3].into(), [0.0; 3].into(), 0.0)
+    }
+
+    /// Returns the derivative combinations `(3 e.e'' + e'.e') / [45 (e.e)^2]`
+    /// and `(3 e.e'' - 4 e'.e') / [45 (e.e)^2]`, where e is the electric
+    /// field
+    #[allow(unused_variables)]
+    fn field_derivatives(&self, r: FourVector) -> (f64, f64) {
+        (0.0, 0.0)
     }
 
     /// Returns the total energy of the electromagnetic field and the

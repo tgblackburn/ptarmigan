@@ -9,6 +9,7 @@ use mpi::traits::*;
 use no_mpi::*;
 
 use crate::particle::*;
+use crate::Uncertainty;
 
 mod error;
 use error::*;
@@ -156,6 +157,7 @@ pub struct DistributionFunction {
     funcs: Vec<ParticleOutput>,
     func_types: Vec<ParticleOutputType>,
     filter: Filter,
+    uncertainty: Uncertainty,
 }
 
 impl fmt::Debug for DistributionFunction {
@@ -171,7 +173,7 @@ impl fmt::Debug for DistributionFunction {
 }
 
 impl DistributionFunction {
-    pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F) -> Result<Self, OutputError> {
+    pub fn load<F: Fn(&str) -> Option<f64>>(spec: &str, parser: F, uncertainty: Uncertainty) -> Result<Self, OutputError> {
         // break into substrings, separated by colons
         let mut ss: Vec<&str> = spec.split(':').collect();
 
@@ -242,6 +244,7 @@ impl DistributionFunction {
                 funcs: funcs.into_iter().flatten().collect(),
                 func_types: func_types.into_iter().map(|u| u.unwrap()).collect(),
                 filter: filter.unwrap(),
+                uncertainty,
             })
         } else {
             Err(OutputError::conversion(spec, "distribution function"))
@@ -263,6 +266,8 @@ impl DistributionFunction {
                     &|pt| {self.funcs[0](pt).convert(&units[0])},
                     &self.fweight,
                     &|pt| self.filter.accepts(pt),
+                    &|pt| pt.uncertainty(),
+                    self.uncertainty,
                     &self.names[0],
                     units[0].name(),
                     self.bspec,
@@ -274,7 +279,7 @@ impl DistributionFunction {
                     suffix.push_str(&self.weight);
                     suffix.push_str("-weight");
                 }
-                if self.bspec == BinSpec::LogScaled {
+                if self.bspec.is_log_scaled() {
                     suffix.push_str("_log");
                 }
                 if self.filter.func.is_some() {
@@ -292,6 +297,8 @@ impl DistributionFunction {
                     &|pt| {self.funcs[1](pt).convert(&units[1])},
                     &self.fweight,
                     &|pt| self.filter.accepts(pt),
+                    &|pt| pt.uncertainty(),
+                    self.uncertainty,
                     [&self.names[0], &self.names[1]],
                     [units[0].name(), units[1].name()],
                     [self.bspec; 2],
@@ -303,7 +310,7 @@ impl DistributionFunction {
                     suffix.push_str(&self.weight);
                     suffix.push_str("-weight");
                 }
-                if self.bspec == BinSpec::LogScaled {
+                if self.bspec.is_log_scaled() {
                     suffix.push_str("_log");
                 }
                 if self.filter.func.is_some() {
@@ -337,7 +344,7 @@ mod tests {
     fn read_ospec() {
         let test = "angle_x:angle_y:(100;auto)";
         let parser = |_: &str| {None};
-        let dstr = DistributionFunction::load(test, parser);
+        let dstr = DistributionFunction::load(test, parser, Uncertainty::None);
         println!("{:?}", dstr);
         assert!(dstr.is_ok());
     }

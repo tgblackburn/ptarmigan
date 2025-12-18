@@ -31,6 +31,8 @@ default = []
 hdf5-output = ["hdf5-writer", "unzip-n"]
 with-mpi = ["mpi", "hdf5-writer?/with-mpi"]
 compensating-chirp = []
+modified-event-generator = []
+uncertainty-tracking = ["modified-event-generator"]
 
 [build-dependencies]
 vergen = {version = "4", default-features = false, features = ["git"]}

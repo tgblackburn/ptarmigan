@@ -194,6 +194,159 @@ impl Field for FastPlaneWave {
         (E, B, a)
     }
 
+    #[inline(always)]
+    fn field_derivatives(&self, r: FourVector) -> (f64, f64) {
+        let phi: f64 = self.wavevector * r;
+        // A^mu = (m c a0 / e) {0, sin(phi), delta cos(phi), 0} f(phi)
+        // where delta = 0 for LP and 1 for CP
+        match self.envelope {
+            Envelope::CosSquared => {
+                // f(phi) = cos(phi/2N)^2
+                let n = self.n_cycles;
+                let arg = 0.5 * phi / n;
+                let cos2 = arg.cos().powi(2);
+                let sin2 = arg.sin().powi(2);
+                let tan2 = arg.tan().powi(2);
+                match self.pol {
+                    Polarization::Circular => {
+                        let denom = 180.0 * self.a0.powi(2) * (n * n * cos2 + sin2).powi(2);
+                        let num_1 = -8.0 * (-2.0 + n * n + n.powi(4)) - 2.0 * (8.0 + 3.0 * n * n) / cos2 + 1.0 / (cos2 * cos2);
+                        let num_2 = -2.0 * (2.0 + 17.0 * n * n + 14.0 * n.powi(4) + (33.0 * n * n + 2.0 / cos2) * tan2);
+                        (num_1 / denom, num_2 / denom)
+                    },
+                    Polarization::Linear => {
+                        let y = phi / n;
+
+                        let denom = 45.0 * (self.a0 * cos2).powi(2) * (
+                            phi.cos() * arg.cos()
+                            - phi.sin() * arg.sin() / n
+                        ).powi(4);
+
+                        let e_dot_e2 = -0.5 * (
+                            arg.cos()
+                            * (phi.cos() * arg.cos() - phi.sin() * arg.sin() / n)
+                            * (
+                                phi.cos() * (1.0 + y.cos())
+                                - 3.0 * phi.sin() * y.sin() / n
+                                + 3.0 * phi.cos() * y.cos() / (n * n)
+                                - phi.sin() * y.sin() / n.powi(3)
+                            )
+                        );
+
+                        let e1_dot_e1 = (
+                            0.5 * phi.sin() * (1.0 + y.cos() + y.cos() / (n * n))
+                            + phi.cos() * y.sin() / n
+                        ).powi(2);
+
+                        let dv1 = (3.0 * e_dot_e2 + e1_dot_e1) / denom;
+                        let dv2 = (3.0 * e_dot_e2 - 4.0 * e1_dot_e1) / denom;
+
+                        (dv1, dv2)
+                    }
+                }
+            },
+
+            Envelope::Gaussian => {
+                // f(phi) = e^[-ln2 phi^2 / (2 pi^2 n^2)] = e(-phi^2/tau^2)
+                let tau = (2.0 / consts::LN_2).sqrt() * consts::PI * self.n_cycles;
+                match self.pol {
+                    Polarization::Circular => {
+                        let arg = 2.0 * phi * phi / (tau * tau);
+                        let denom = 45.0 * self.a0.powi(2) * (tau.powi(4) + 4.0 * phi * phi).powi(2);
+                        let num_1 = -2.0 * arg.exp() * (
+                            tau.powi(8) + 7.0 * tau.powi(6) - 2.0 * tau.powi(4) * (1.0 + 2.0 * phi * phi)
+                            + 44.0 * (tau * phi).powi(2) - 32.0 * phi.powi(4)
+                        );
+                        let num_2 = -1.0 * arg.exp() * (
+                            7.0 * tau.powi(8) + 34.0 * tau.powi(6) + 16.0 * tau.powi(4) * (1.0 + 2.0 * phi * phi)
+                            + 8.0 * (tau * phi).powi(2) + 16.0 * phi.powi(4)
+                        );
+                        (num_1 / denom, num_2 / denom)
+                    },
+                    Polarization::Linear => {
+                        let arg = -2.0 * phi * phi / (tau * tau);
+
+                        let denom = 45.0 * self.a0.powi(2) * arg.exp() * (
+                            phi.cos() - 2.0 * phi * phi.sin() / (tau * tau)
+                        ).powi(4);
+
+                        let e_dot_e2 = -(phi.cos() - 2.0 * phi * phi.sin() / (tau * tau)) * (
+                            (1.0 + 6.0 / (tau * tau) - 12.0 * phi * phi / tau.powi(4)) * phi.cos()
+                            - phi * (6.0 + 12.0 / (tau * tau) - 8.0 * phi * phi / tau.powi(4)) * phi.sin() / (tau * tau)
+                        );
+
+                        let e1_dot_e1 = (
+                            (1.0 + 2.0 / (tau * tau) - 4.0 * phi * phi / tau.powi(4)) * phi.sin()
+                            + 4.0 * phi * phi.cos() / (tau * tau)
+                        ).powi(2);
+
+                        let dv1 = (3.0 * e_dot_e2 + e1_dot_e1) / denom;
+                        let dv2 = (3.0 * e_dot_e2 - 4.0 * e1_dot_e1) / denom;
+
+                        (dv1, dv2)
+                    },
+                }
+            },
+
+            Envelope::Flattop => {
+                let n_pi = self.n_cycles * consts::PI;
+                let nm1_pi = n_pi - consts::PI;
+                let np1_pi = n_pi + consts::PI;
+                match self.pol {
+                    Polarization::Circular => {
+                        let (denom, num_1, num_2) = if phi.abs() > np1_pi {
+                            (0.0, 0.0, 0.0)
+                        } else if phi.abs() > nm1_pi {
+                            let y = 0.25 * (phi.abs() - nm1_pi);
+                            let z = n_pi - phi.abs();
+                            (
+                                45.0 * self.a0.powi(2) * y.cos().powi(4) * (5.0 + 3.0 * (2.0 * y).cos()).powi(2) / 64.0,
+                                (-73.0 + 18.0 * z.cos() - 92.0 * (0.5 * z).sin()) / 64.0,
+                                (81.0 * z.cos() - 73.0 * (7.0 + 8.0 * (0.5 * z).sin())) / 128.0,
+                            )
+                        } else {
+                            (45.0 * self.a0.powi(2), -2.0, -7.0)
+                        };
+                        (num_1 / denom, num_2 / denom)
+                    },
+                    Polarization::Linear => {
+                        let y = 0.5 * (phi.abs() + n_pi);
+                        let z = 0.5 * (n_pi - 3.0 * phi.abs());
+
+                        let denom = if phi.abs() > np1_pi {
+                            0.0
+                        } else if phi.abs() > nm1_pi {
+                            45.0 * (phi.cos() + 0.25 * y.sin() + 0.75 * z.sin()) / 16.0
+                        } else {
+                            45.0 * self.a0.powi(2) * phi.cos().powi(4)
+                        };
+
+                        let e_dot_e2 = if phi.abs() > np1_pi {
+                            0.0
+                        } else if phi.abs() > nm1_pi {
+                            -0.25 * (phi.cos() + 0.25 * y.sin() + 0.75 * z.sin()) * (phi.cos() + y.sin() / 16.0 + 27.0 * z.sin() / 16.0)
+                        } else {
+                            -phi.cos().powi(2)
+                        };
+
+                        let e1_dot_e1 = if phi.abs() > np1_pi {
+                            0.0
+                        } else if phi.abs() > nm1_pi {
+                            0.25 * (-8.0 * phi.abs().sin() + y.cos() / 8.0 - 9.0 * z.cos() / 8.0).powi(2)
+                        } else {
+                            phi.sin().powi(2)
+                        };
+
+                        let dv1 = (3.0 * e_dot_e2 + e1_dot_e1) / denom;
+                        let dv2 = (3.0 * e_dot_e2 - 4.0 * e1_dot_e1) / denom;
+
+                        (dv1, dv2)
+                    },
+                }
+            },
+        }
+    }
+
     fn energy(&self) -> (f64, &'static str) {
         if self.chirp_b != 0.0 || cfg!(feature = "compensating-chirp") {
             let ppw = 1.0 + 2.0 * consts::PI * self.chirp_b * self.n_cycles;

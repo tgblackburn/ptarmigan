@@ -1,13 +1,15 @@
 //! Quantum synchrotron emission, e -> e + gamma, in a background field
 
 use std::f64::consts;
+use rand::prelude::*;
 use crate::constants::*;
 use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use crate::pwmci;
 use crate::special_functions::Airy;
 
-mod tables;
 pub mod classical;
+mod energy_spectrum;
+mod tables;
 
 /// Returns the quantum synchrotron rate, per unit time (in seconds)
 pub fn rate(chi: f64, gamma: f64) -> f64 {
@@ -30,6 +32,31 @@ pub fn rate(chi: f64, gamma: f64) -> f64 {
     };
 
     3.0f64.sqrt() * ALPHA_FINE * chi * h / (2.0 * consts::PI * gamma * COMPTON_TIME)
+}
+
+/// Returns the quantum synchrotron rate, per unit time (in seconds),
+/// at a particular fractional energy f
+#[cfg(feature = "modified-event-generator")]
+pub fn spectral_rate(chi: f64, gamma: f64, f: f64) -> f64 {
+    use energy_spectrum::Spectrum;
+    let spectrum = Spectrum::at(chi);
+    let prefactor = ALPHA_FINE / (3_f64.sqrt() * consts::PI * gamma * COMPTON_TIME);
+    prefactor * spectrum.value(f)
+}
+
+#[cfg(feature = "modified-event-generator")]
+pub fn spectral_rate_corr(chi: f64, gamma: f64, dv1: f64, dv2: f64, f: f64) -> f64 {
+    use crate::special_functions::Airy;
+
+    let z = (f / (chi * (1.0 - f))).powf(2.0 / 3.0);
+    let g = 2.0 / z + chi * z.sqrt();
+
+    let ai_z = z.ai().unwrap_or(0.0);
+    let aip_z = z.ai_prime().unwrap_or(0.0);
+
+    let prefactor = ALPHA_FINE / (gamma * COMPTON_TIME);
+
+    prefactor * (dv2 * g * (ai_z / z + aip_z) - dv1 * (g - 0.5) * (z * z * ai_z + 2.0 * aip_z))
 }
 
 fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tables::CDF) -> f64 {
@@ -68,125 +95,13 @@ fn from_linear_cdf_table(global_zero: f64, local_zero: f64, rand: f64, cdf: &tab
     y
 }
 
-/// Samples the quantum synchrotron spectrum of an electron with
-/// quantum parameter `chi` and Lorentz factor `gamma`.
-/// 
-/// Returns a triple of the photon energy, in units of mc^2,
-/// and the polar and azimuthal angles of emission, in the range
-/// [0,pi] and [0,2pi] respectively.
-///
-/// If the polar angle would be larger than pi (which is possible
-/// at very low energy), then None is returned instead.
-pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64, Option<f64>, f64) {
-    use tables::{LN_CHI_MIN, LN_CHI_STEP, QUANTUM_CDF};
+/// Returns omega/mc^2 and sampled values for the polar and azimuthal angles
+/// of a photon with energy f γ m c^2 that has been emitted by an electron
+/// with given quantum parameter and Lorentz factor.
+pub fn sample_at_fixed_f(chi: f64, gamma: f64, f: f64, rand2: f64, rand3: f64) -> (f64, Option<f64>, f64) {
     use tables::{LN_DELTA_MIN, LN_DELTA_STEP, Y_CDF, Y_INFINITE_DELTA_CDF};
-    use tables::{HIGH_CHI_CDF, HIGH_CHI_PEAK_CDF};
 
-    // index of closest tabulated chi
-    let index = (chi.ln() - LN_CHI_MIN) / LN_CHI_STEP;
-    let weight = index.fract(); // of upper table
-    let index: usize = index.floor() as usize;
-    //println!("index = {}, weight = {}", index, weight);
-
-    if chi.ln() <= LN_CHI_MIN {
-        let (omega_mc2, theta, cphi) = classical::sample(chi, gamma, rand1, rand2, rand3);
-        // omega = u gamma m classically, but u/(1+u) gamma m in QED
-        return (omega_mc2 * gamma / (gamma + omega_mc2), theta, cphi);
-    }
-
-    let u = if index >= QUANTUM_CDF.len() - 1 {
-        // The CDF is split into two parts: 0 < frac < 1 - 8 / chi, where the shape
-        // is universal, and 1 - 8 / chi < frac < 1, where the shape of the peak
-        // depends on chi. Is rand1 above or below the boundary?
-        let u_bdy = (chi - 8.0) / 8.0;
-
-        // HIGH_CHI_CDF tabulates ln u vs ln[-ln(1 - cdf)], where
-        // cdf(u) = int_0^u dN/du du is properly normalised.
-        let lower = pwmci::Interpolant::new(&HIGH_CHI_CDF);
-
-        let p_lower = if u_bdy.ln() < HIGH_CHI_CDF[0][0] {
-            1.06327715546 * u_bdy.cbrt()
-        } else if u_bdy.ln() < HIGH_CHI_CDF[31][0] {
-            let y = lower.evaluate(u_bdy.ln()).unwrap();
-            1.0 - (-1.0 * y.exp()).exp()
-        } else {
-            1.0 - 0.265819288864 * u_bdy.powf(-2.0/3.0)
-        };
-
-        // HIGH_CHI_PEAK_CDF tabulates ln y vs ln[-ln(1 - cdf)],
-        // scaled appropriately, where y = u / chi - 1 / 9.
-        // The contribution of the peak is p_higher = A [1 - cdf(y_bdy)],
-        // where the scaling factor is A = ... / chi^(2/3).
-        let y_bdy = u_bdy / chi - 1.0 / 9.0;
-        let scale = 0.84626000931 * chi.powf(-2.0/3.0);
-        let higher = pwmci::Interpolant::new(&HIGH_CHI_PEAK_CDF)
-            .extrapolate(true);
-
-        let p_higher = if y_bdy.ln() < HIGH_CHI_PEAK_CDF[0][0] {
-            scale * (1.0 - 7.7567692587 * y_bdy)
-        } else if y_bdy.ln() < HIGH_CHI_PEAK_CDF[31][0] {
-            let t = higher.evaluate(y_bdy.ln()).unwrap();
-            scale * (-1.0 * t.exp()).exp()
-        } else {
-            scale * 0.46534912384 * (-0.45 * u_bdy / chi).exp() * y_bdy.powf(-5.0/3.0)
-        };
-
-        // Now invert r = cdf(u)
-        let r = rand1 * (p_lower + p_higher);
-
-        let u = if r <= p_lower {
-            // invert from lower table
-            let target = (-(1.0 - r).ln()).ln();
-            if target < HIGH_CHI_CDF[0][1] {
-                // cdf = 1.06327715546 * u^(1/3)
-                let u = (r / 1.06327715546).powi(3);
-                u + 1.5 * u * u // add next-order correction
-            } else if target < HIGH_CHI_CDF[31][1] {
-                lower.invert(target).unwrap().exp()
-            } else {
-                // cdf = 1 - 0.265819288864 / u^(2/3)
-                (0.265819288864 / (1.0 - r)).powf(1.5)
-            }
-        } else {
-            // solve A [cdf(y) - cdf(y_bdy)] == r - p_L, r < p_L + p_H
-            // => 1 - cdf(y) = (p_L + p_H - r) / A
-            let target = (p_lower + p_higher - r) / scale;
-            let y = if target < HIGH_CHI_PEAK_CDF[0][1] {
-                (1.0 - target) / 7.7567692587
-            } else {
-                let target = (-1.0 * target.ln()).ln();
-                higher.invert(target).unwrap().exp()
-            };
-            (y + 1.0 / 9.0) * chi
-        };
-
-        u
-    } else {
-        // First sample u from r_1 = cdf(u; chi)
-        let lower = &QUANTUM_CDF[index];
-        //println!("lrand = {:e}, bounds = {:e}, {:e}", rand1.ln(), lower.table[0][1], lower.table[30][1]);
-        let ln_u_lower = if rand1.ln() <= lower.table[0][1] {
-            (rand1.ln() - lower.coeff.ln()) / lower.power
-        } else if let Some(result) = pwmci::Interpolant::new(&lower.table).invert(rand1.ln()) {
-            result
-        } else {
-            lower.table[30][0] // clip to last tabulated ln_u
-        };
-
-        let upper = &QUANTUM_CDF[index+1];
-        let ln_u_upper = if rand1.ln() <= upper.table[0][1] {
-            (rand1.ln() - upper.coeff.ln()) / upper.power
-        } else if let Some(result) = pwmci::Interpolant::new(&upper.table).invert(rand1.ln()) {
-            result
-        } else {
-            upper.table[30][0]
-        };
-
-        let u = ((1.0 - weight) * ln_u_lower + weight * ln_u_upper).exp();
-        //println!("rand1 = {}, u = {}", rand1, u);
-
-        u
-    };
+    let u = f / (1.0 - f);
 
     let theta = {
         // Now get the angle, sampling r_2 = cdf(z|u; chi)
@@ -207,14 +122,14 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         } else {
             let y_lower = from_linear_cdf_table(delta.powf(-1.5), beta, rand2, &Y_CDF[index]);
             let y_upper = from_linear_cdf_table(delta.powf(-1.5), beta, rand2, &Y_CDF[index+1]);
-            //assert!(y_lower >= beta);
-            //assert!(y_upper >= beta);
+            // assert!(y_lower >= beta);
+            // assert!(y_upper >= beta);
             (1.0 - weight) * y_lower + weight * y_upper
         };
 
         let z = (y / beta).max(1.0);
-        //assert!(y >= beta);
-        //assert!(z >= 1.0);
+        // assert!(y >= beta);
+        // assert!(z >= 1.0);
         let cos_theta = (gamma - z.powf(2.0/3.0) / (2.0 * gamma)) / (gamma.powi(2) - 1.0).sqrt();
         let theta = if cos_theta >= 1.0 {
             Some(0.0)
@@ -227,7 +142,30 @@ pub fn sample(chi: f64, gamma: f64, rand1: f64, rand2: f64, rand3: f64) -> (f64,
         theta
     };
 
-    (gamma * u / (1.0 + u), theta, 2.0 * consts::PI * rand3)
+    (gamma * f, theta, 2.0 * consts::PI * rand3)
+}
+
+/// Samples the quantum synchrotron spectrum of an electron with
+/// quantum parameter `chi` and Lorentz factor `gamma`.
+///
+/// Returns a triple of the photon energy, in units of mc^2,
+/// and the polar and azimuthal angles of emission, in the range
+/// [0,pi] and [0,2pi] respectively.
+///
+/// If the polar angle would be larger than pi (which is possible
+/// at very low energy), then None is returned instead.
+#[allow(unused)]
+pub fn sample<R: Rng>(chi: f64, gamma: f64, rng: &mut R) -> (f64, Option<f64>, f64) {
+    if chi < 0.01 {
+        let (omega_mc2, theta, cphi) = classical::sample(chi, gamma, rng.gen(), rng.gen(), rng.gen());
+        // omega = u gamma m classically, but u/(1+u) gamma m in QED
+        (omega_mc2 * gamma / (gamma + omega_mc2), theta, cphi)
+    } else {
+        use energy_spectrum::Spectrum;
+        let (_, u, _) = Spectrum::at(chi).sample(rng);
+        let f = u / (1.0 + u);
+        sample_at_fixed_f(chi, gamma, f, rng.gen(), rng.gen())
+    }
 }
 
 /// Returns the Stokes vector of the photon with four-momentum `k` (normalized to the
@@ -297,37 +235,11 @@ pub fn stokes_parameters(k: FourVector, chi: f64, gamma: f64, v: ThreeVector, w:
     [1.0, xi[0], xi[1], xi[2]].into()
 }
 
-static GAUNT_FACTOR_TABLE: [[f64; 2]; 25] = [
-    [-6.907755278982137, -0.005923910174592344],
-    [-6.332109005733626, -0.01049345707375475],
-    [-5.756462732485114, -0.01853326677632520],
-    [-5.180816459236603, -0.03256813342821585],
-    [-4.605170185988091, -0.05674922246157141],
-    [-4.029523912739580, -0.09754530350543557],
-    [-3.453877639491069, -0.1642291108677053],
-    [-2.878231366242557, -0.2685646952510789],
-    [-2.302585092994046, -0.4231867286719710],
-    [-1.726938819745534, -0.6390383238080004],
-    [-1.151292546497023, -0.9232385209997736],
-    [-0.575646273248511, -1.278436642040118],
-    [ 0.000000000000000, -1.703334719200724],
-    [ 0.575646273248511, -2.193501426179741],
-    [ 1.151292546497023, -2.742164851781891],
-    [ 1.726938819745534, -3.341092923053680],
-    [ 2.302585092994046, -3.981546623633449],
-    [ 2.878231366242557, -4.655120578676737],
-    [ 3.453877639491069, -5.354319063765299],
-    [ 4.029523912739580, -6.072838862057530],
-    [ 4.605170185988091, -6.805618017945314],
-    [ 5.180816459236603, -7.548736622847868],
-    [ 5.756462732485114, -8.299245624917244],
-    [ 6.332109005733626, -9.054976772950048],
-    [ 6.907755278982137, -9.814364636712657],
-];
-
 /// Returns the Gaunt factor `g(χ)`, the ratio between the radiated power in the quantum and
 /// classical cases.
 pub fn gaunt_factor(chi: f64) -> f64 {
+    use tables::GAUNT_FACTOR_TABLE;
+
     if chi <= 1.0e-3 {
         1.0 - 55.0 * 3_f64.sqrt() * chi / 16.0 + 48.0 * chi * chi
     } else if chi > 500.0 {
@@ -354,43 +266,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rate_0_026() {
-        let value = rate(0.026, 1000.0);
-        let target = 2.07935e14;
-        println!("rate(chi = 0.026, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
-        assert!( ((value - target) / target).abs() < 1.0e-3 );
-    }
+    fn emission_rate() {
+        let data = [
+            (0.026, 1000.0, 2.07935e14),
+            (3.5, 1000.0, 1.58485e16),
+            (9.98, 1000.0, 3.45844e16),
+            (12.4, 1000.0, 4.04647e16),
+            (403.0, 1000.0, 4.46834e17),
+        ];
 
-    #[test]
-    fn rate_3_5() {
-        let value = rate(3.5, 1000.0);
-        let target = 1.58485e16;
-        println!("rate(chi = 3.5, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
-        assert!( ((value - target) / target).abs() < 1.0e-3 );
-    }
-
-    #[test]
-    fn rate_9_98() {
-        let value = rate(9.98, 1000.0);
-        let target = 3.45844e16;
-        println!("rate(chi = 9.98, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
-        assert!( ((value - target) / target).abs() < 1.0e-3 );
-    }
-
-    #[test]
-    fn rate_12_4() {
-        let value = rate(12.4, 1000.0);
-        let target = 4.04647e16;
-        println!("rate(chi = 12.4, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
-        assert!( ((value - target) / target).abs() < 1.0e-3 );
-    }
-
-    #[test]
-    fn rate_403() {
-        let value = rate(403.0, 1000.0);
-        let target = 4.46834e17;
-        println!("rate(chi = 403, gamma = 1000) = {:e}, target = {:e}, error = {:e}", value, target, ((value - target) / target).abs() );
-        assert!( ((value - target) / target).abs() < 1.0e-3 );
+        for (chi, gamma, target) in data.iter() {
+            let value = rate(*chi, *gamma);
+            let error = ((value - target) / target).abs();
+            println!(
+                "rate(chi = {:.3e}, gamma = {:.3e}) = {:.3e}, target = {:.3e}, error = {:.3e}",
+                chi, gamma, value, target, error,
+            );
+            assert!(error < 1.0e-3);
+        }
     }
 
     #[test]
@@ -401,8 +294,8 @@ mod tests {
         let perp: ThreeVector = [1.0, 0.0, 0.0].into();
         let mut rng = Xoshiro256StarStar::seed_from_u64(0);
 
-        let rand1 = 0.98;
-        let (omega_mc2, _, _) = sample(chi, gamma, rand1, rng.gen(), rng.gen());
+        let u = 2.0;
+        let (omega_mc2, _, _) = sample_at_fixed_f(chi, gamma, u / (1.0 + u), rng.gen(), rng.gen());
         println!("Sampling at omega/(m gamma) = {:.3e}...", omega_mc2 / gamma);
 
         // integrating over all angles is expected to yield a Stokes vector
@@ -410,7 +303,7 @@ mod tests {
         let sv: StokesVector = (0..10_000)
             .map(|_| {
                 // sample at fixed energy
-                let (omega_mc2, theta, cphi) = sample(chi, gamma, rand1, rng.gen(), rng.gen());
+                let (omega_mc2, theta, cphi) = sample_at_fixed_f(chi, gamma, u / (1.0 + u), rng.gen(), rng.gen());
                 let theta = theta.unwrap();
                 //println!("omega/(m gamma) = {:.2e}, gamma theta = {:.3e}, phi = {:.3e}", omega_mc2 / gamma, gamma * theta, cphi);
 
@@ -485,62 +378,4 @@ mod tests {
             assert!(error < 1.0e-3);
         }
     }
-
-    // #[test]
-    // fn extreme_chi() {
-    //     use std::fs::File;
-    //     use std::io::Write;
-
-    //     const N: usize = 4000;
-    //     const M: usize = 500;
-    //     let chi = 100.0;
-    //     let mut hgram = vec![0.0; N];
-    //     let mut angle = vec![[0.0; 4]; M];
-    //     let mut count = 0.0;
-    //     let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-
-    //     for _i in 0..100_000_000 {
-    //         let (omega_mc2, theta, _) = sample(chi, 1000.0, rng.gen(), rng.gen(), rng.gen());
-    //         let f = omega_mc2 / 1000.0;
-
-    //         let bin = ((N as f64) * f) as usize;
-    //         if bin < N {
-    //             hgram[bin] += f * 1.0e-8;
-    //         }
-
-    //         if theta.is_some() {
-    //             count += 1.0e-8;
-    //         }
-
-    //         let theta = 1000.0 * theta.unwrap_or(consts::PI);
-    //         let bin = ((M as f64) * theta / 20.0) as usize;
-    //         if bin < M {
-    //             if f > 0.1 - 0.01 && f <= 0.1 + 0.01 {
-    //                 angle[bin][0] += 1.0e-8;
-    //             } else if f > 0.5 - 0.01 && f <= 0.5 + 0.01 {
-    //                 angle[bin][1] += 1.0e-8;
-    //             } else if f > 0.8 - 0.01 && f <= 0.8 + 0.01 {
-    //                 angle[bin][2] += 1.0e-8;
-    //             } else if f > 0.95 - 0.01 && f <= 0.95 + 0.01 {
-    //                 angle[bin][3] += 1.0e-8;
-    //             }
-    //         }
-    //     }
-
-    //     let mut file = File::create("spectrum.dat").unwrap();
-    //     for (i, c) in hgram.iter().enumerate() {
-    //         writeln!(file, "{:.3e} {:.3e}", ((i as f64) + 0.5) / (N as f64), (N as f64) * c).unwrap();
-    //     }
-
-    //     let mut file = File::create("angle_spectrum.dat").unwrap();
-    //     for (i, c) in angle.iter().enumerate() {
-    //         writeln!(
-    //             file, "{:.3e} {:.3e} {:.3e} {:.3e} {:.3e}",
-    //             20.0 * ((i as f64) + 0.5) / (M as f64),
-    //             (M as f64) * c[0] / 20.0, (M as f64) * c[1] / 20.0, (M as f64) * c[2] / 20.0, (M as f64) * c[3] / 20.0,
-    //         ).unwrap();
-    //     }
-
-    //     println!("fraction with correct theta = {:.4}", count);
-    // }
 }

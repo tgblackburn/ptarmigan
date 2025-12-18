@@ -19,6 +19,8 @@ Find out more about [generating a particle beam](beam_generation.md) and [loadin
 * The [`output`](output.md) and [`stats`](output.md#summary-statistics) blocks define what output
 Ptarmigan will produce, including raw data, distribution functions, and summary statistics.
 
+* The [`uncertainty`](uncertainty.md) block controls whether the code should track systematic theory uncertainties.
+
 * The `constants` block contains user-specified named variables, which can be used anywhere a numerical value is
 required in the input file. More information about parsing of numerical values [is given here](parsing.md).
 

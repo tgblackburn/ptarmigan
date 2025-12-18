@@ -3,127 +3,29 @@
 use std::{fmt, io::BufWriter};
 use std::fs::File;
 use std::io::Write;
-
-/// Writer that keeps track of how many bytes it's written.
-/// A single write! call will never write more than `limit` bytes.
-struct WriteCounter<W: Write> {
-    inner: W,
-    limit: usize,
-    count: usize,
-}
-
-impl<W> WriteCounter<W> where W: Write {
-    fn new(inner: W, limit: usize) -> Self {
-        Self {inner, limit, count: 0}
-    }
-
-    fn bytes_written(&self) -> usize {
-        self.count
-    }
-
-    /// Writes the given bytes, ignoring the limit set.
-    fn write_unchecked(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let res = self.inner.write(buf);
-        if let Ok(count) = res {
-            self.count += count;
-        }
-        res
-    }
-}
-
-impl<W> Write for WriteCounter<W> where W: Write {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let end = buf.len().min(self.limit);
-        let res = self.inner.write(&buf[..end]);
-        if let Ok(count) = res {
-            self.count += count;
-        }
-        res
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
-}
+use crate::Uncertainty;
 
 #[cfg(feature = "with-mpi")]
 use mpi::{traits::*, collective::SystemOperation};
 #[cfg(not(feature = "with-mpi"))]
 use no_mpi::*;
 
-#[derive(Copy,Clone,PartialEq)]
-pub enum BinSpec {
-    Automatic,
-    LogScaled,
-    FixedNumber(usize),
-    FixedSize(f64),
-}
+mod write;
+use write::WriteCounter;
 
-impl fmt::Display for BinSpec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            BinSpec::Automatic => write!(f, "BinSpec:Automatic"),
-            BinSpec::LogScaled => write!(f, "BinSpec:LogScaled"),
-            BinSpec::FixedNumber(n) => write!(f, "BinSpec:FixedNumber({})", n),
-            BinSpec::FixedSize(dx) => write!(f, "BinSpec:FixedSize({})", dx),
-        }
-    }
-}
+mod spec;
+pub use spec::{BinSpec, HeightSpec};
 
-impl From<&str> for BinSpec {
-    fn from(s: &str) -> Self {
-        if let Ok(nbins) = s.parse::<usize>() {
-            BinSpec::FixedNumber(nbins)
-        } else if let Ok(dx) = s.parse::<f64>() {
-            BinSpec::FixedSize(dx)
-        } else if s == "auto" {
-            BinSpec::Automatic
-        } else if s == "log" {
-            BinSpec::LogScaled
-        } else {
-            BinSpec::Automatic
-        }
-    }
-}
-
-#[derive(Copy,Clone,PartialEq)]
-pub enum HeightSpec {
-    Count,
-    Density,
-    ProbabilityDensity,
-}
-
-impl From<&str> for HeightSpec {
-    fn from(s: &str) -> Self {
-        match s {
-            "count" => HeightSpec::Count,
-            "density" | "auto" => HeightSpec::Density,
-            "probablity_density" | "pdf" => HeightSpec::ProbabilityDensity,
-            _ => HeightSpec::Density,
-        }
-    }
-}
-
-impl fmt::Display for HeightSpec {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            HeightSpec::Count => write!(f, "count"),
-            HeightSpec::Density => write!(f, "density"),
-            HeightSpec::ProbabilityDensity => write!(f, "pdf"),
-        }
-    }
-
-}
-
-#[allow(unused)]
 pub struct Histogram {
     dim: usize,
     total: f64,
     unweighted_total: f64,
-    bin_vol: f64,
     min: Vec<f64>,
     max: Vec<f64>,
     cts: Vec<f64>,
+    stat_err: Vec<f64>,
+    syst_err: Vec<f64>,
+    uncertainty: Uncertainty,
     bins: Vec<usize>,
     bin_sz: Vec<f64>,
     name: String,
@@ -177,6 +79,8 @@ fn number_of_bins(min: f64, max: f64, n: usize, bspec: BinSpec) -> usize {
                 (2.0 * (n as f64).cbrt()).ceil() as usize,
             BinSpec::FixedNumber(n) =>
                 n,
+            BinSpec::FixedNumberLog(n) =>
+                n,
             BinSpec::FixedSize(dx) =>
                 ((max - min) / dx).ceil() as usize,
         }
@@ -192,7 +96,7 @@ fn bin_size_and_volume(dim: usize, min: &[f64], max: &[f64], nbins: &[usize], bs
             size.push(0.0);
         } else {
             let dx = match bspec[i] {
-                BinSpec::Automatic | BinSpec::LogScaled | BinSpec::FixedNumber(_) =>
+                BinSpec::Automatic | BinSpec::LogScaled | BinSpec::FixedNumber(_) | BinSpec::FixedNumberLog(_) =>
                     (max[i] - min[i]) / (nbins[i] as f64),
                 BinSpec::FixedSize(dx) =>
                     dx,
@@ -205,18 +109,19 @@ fn bin_size_and_volume(dim: usize, min: &[f64], max: &[f64], nbins: &[usize], bs
 }
 
 impl Histogram {
-    #[allow(unused)]
     pub fn generate_1d<T>(
         comm: &impl Communicator,
         base: &[T], accessor: &impl Fn(&T) -> f64, weight: &impl Fn(&T) -> f64,
         filter: &impl Fn(&T) -> bool,
+        uncertainty: &impl Fn(&T) -> f64,
+        max_uncertainty: Uncertainty,
         name: &str, unit: &str,
         bspec: BinSpec, hspec: HeightSpec) -> Option<Histogram> {
         //let rank = comm.rank();
 
         // Local min and max
         // Adjust for log-scaling!
-        let (min, max) = if bspec == BinSpec::LogScaled {
+        let (min, max) = if bspec.is_log_scaled() {
             min_max_by(base, accessor, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
             min_max_by(base, accessor, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
@@ -245,7 +150,7 @@ impl Histogram {
             1.0
         } else {
             match bspec {
-                BinSpec::Automatic | BinSpec::LogScaled | BinSpec::FixedNumber(_) =>
+                BinSpec::Automatic | BinSpec::LogScaled | BinSpec::FixedNumber(_) | BinSpec::FixedNumberLog(_) =>
                     (gmax - gmin) / (nbins as f64),
                 BinSpec::FixedSize(dx) =>
                     dx,
@@ -256,10 +161,13 @@ impl Histogram {
 
         // Binning
         let mut cts: Vec<f64> = vec![0.0; nbins];
+        let mut cts_sq: Vec<f64> = vec![0.0; nbins];
+        let mut cts_ui: Vec<f64> = vec![0.0; nbins];
         let mut total = 0.0;
+        let mut total2 = 0.0;
 
         for e in base.iter() {
-            let value = if bspec == BinSpec::LogScaled {
+            let value = if bspec.is_log_scaled() {
                 accessor(e).ln()
             } else {
                 accessor(e)
@@ -268,7 +176,17 @@ impl Histogram {
             let bin = ((value - gmin) / bin_vol).floor() as usize;
 
             let w = weight(e);
-            total = total + w; // count everything, even if not binned
+
+            if max_uncertainty.is_some() {
+                let w = 2.0 * w;
+                if uncertainty(e) == 0.0 {
+                    total += w;
+                } else {
+                    total2 += w;
+                }
+            } else {
+                total = total + w; // count everything, even if not binned
+            }
 
             if !value.is_finite() {
                 continue;
@@ -279,21 +197,40 @@ impl Histogram {
             }
 
             // adjust weight to include actual size of bin / log-scaled size
-            let w = if bspec == BinSpec::LogScaled && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
+            let w = if bspec.is_log_scaled() && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
                 w * bin_vol / linear_bin_vol(gmin, bin_vol, bin)
             } else {w};
 
             // access by row-major order
             let fbin = bin;
             if fbin < cts.len() {
-                cts[fbin] = cts[fbin] + w;
+                match max_uncertainty {
+                    Uncertainty::Fixed { .. } | Uncertainty::None => {
+                        cts[fbin] = cts[fbin] + w;
+                        cts_sq[fbin] = cts_sq[fbin] + w * w;
+                    },
+                    Uncertainty::Between { min, max } => {
+                        let w = 2.0 * w;
+                        let mid = 0.5 * (min + max);
+                        if uncertainty(e) < mid {
+                            cts_ui[fbin] = cts_ui[fbin] - w;
+                        } else if uncertainty(e) > mid {
+                            cts_ui[fbin] = cts_ui[fbin] + w;
+                        } else {
+                            cts[fbin] = cts[fbin] + w;
+                            cts_sq[fbin] = cts_sq[fbin] + w * w;
+                        }
+                    },
+                }
             }
         }
 
         // total weight across world
         let mut gtotal = 0.0;
         comm.all_reduce_into(&total, &mut gtotal, SystemOperation::sum());
-        //println!("{}: local total = {:e}, global = {:e}", rank, total, gtotal);
+
+        let mut gtotal2 = 0.0;
+        comm.all_reduce_into(&total2, &mut gtotal2, SystemOperation::sum());
 
         let cts = match hspec {
             HeightSpec::Count => cts,
@@ -305,14 +242,40 @@ impl Histogram {
         let mut gcts: Vec<f64> = vec![0.0; nbins];
         comm.all_reduce_into(&cts[..], &mut gcts[..], SystemOperation::sum());
 
+        // Statistical errors
+
+        let mut stat_err: Vec<f64> = vec![0.0; nbins];
+        comm.all_reduce_into(&cts_sq[..], &mut stat_err[..], SystemOperation::sum());
+        for err in stat_err.iter_mut() {
+            match hspec {
+                HeightSpec::Count => *err = err.sqrt(),
+                HeightSpec::Density => *err = err.sqrt() / bin_vol,
+                HeightSpec::ProbabilityDensity => *err = err.sqrt() / (bin_vol * gtotal),
+            }
+        }
+
+        // Systematic errors
+
+        let mut syst_err: Vec<f64> = vec![0.0; nbins];
+        comm.all_reduce_into(&cts_ui[..], &mut syst_err[..], SystemOperation::sum());
+        for err in syst_err.iter_mut() {
+            match hspec {
+                HeightSpec::Density => *err = *err / bin_vol,
+                HeightSpec::ProbabilityDensity => *err = *err / (bin_vol * gtotal2),
+                _ => {},
+            }
+        }
+
         Some(Histogram {
             dim: 1,
             total: gtotal,
             unweighted_total: gnum as f64,
-            bin_vol: bin_vol,
             min: vec![gmin],
             max: vec![gmax],
             cts: gcts,
+            stat_err,
+            syst_err: if max_uncertainty.is_some() { syst_err } else { vec![] },
+            uncertainty: max_uncertainty,
             bins: vec![nbins],
             bin_sz: if nbins <= 1 {vec![0.0]} else {vec![bin_vol]},
             name: format!("hgram/{}/{}", hspec, name),
@@ -322,24 +285,25 @@ impl Histogram {
         })
     }
 
-    #[allow(unused)]
     pub fn generate_2d<T>(
         comm: &impl Communicator,
         base: &[T], fx: &impl Fn(&T) -> f64, fy: &impl Fn(&T) -> f64, weight: &impl Fn(&T) -> f64,
         filter: &impl Fn(&T) -> bool,
+        uncertainty: &impl Fn(&T) -> f64,
+        max_uncertainty: Uncertainty,
         name: [&str; 2], unit: [&str; 2],
         bspec: [BinSpec; 2], hspec: HeightSpec) -> Option<Histogram> {
         //let rank = comm.rank();
 
         // Local min and max
 
-        let (xmin, xmax) = if bspec[0] == BinSpec::LogScaled {
+        let (xmin, xmax) = if bspec[0].is_log_scaled() {
             min_max_by(base, fx, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
             min_max_by(base, fx, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
         };
 
-        let (ymin, ymax) = if bspec[1] == BinSpec::LogScaled {
+        let (ymin, ymax) = if bspec[1].is_log_scaled() {
             min_max_by(base, fy, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
         } else {
             min_max_by(base, fy, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
@@ -374,16 +338,29 @@ impl Histogram {
 
         // Binning
         let mut cts: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
+        let mut cts_sq: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
+        let mut cts_ui: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
         let mut total = 0.0;
+        let mut total2 = 0.0;
 
         for e in base.iter() {
             let value = [
-                if bspec[0] == BinSpec::LogScaled {fx(e).ln()} else {fx(e)},
-                if bspec[1] == BinSpec::LogScaled {fy(e).ln()} else {fy(e)},
+                if bspec[0].is_log_scaled() {fx(e).ln()} else {fx(e)},
+                if bspec[1].is_log_scaled() {fy(e).ln()} else {fy(e)},
             ];
 
             let mut w = weight(e);
-            total = total + w; // count everything, even if not binned
+
+            if max_uncertainty.is_some() {
+                let w = 2.0 * w;
+                if uncertainty(e) == 0.0 {
+                    total += w;
+                } else {
+                    total2 += w;
+                }
+            } else {
+                total = total + w; // count everything, even if not binned
+            }
 
             if value.iter().any(|&x| !x.is_finite()) {
                 continue; // all of value[i] must be finite
@@ -399,24 +376,43 @@ impl Histogram {
             ];
 
             // adjust weight to include actual size of bin / log-scaled size
-            if bspec[0] == BinSpec::LogScaled && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
+            if bspec[0].is_log_scaled() && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
                 w *= if bin_sz[0] == 0.0 {1.0} else {bin_sz[0] / linear_bin_vol(gmin[0], bin_sz[0], bin[0])};
             }
 
-            if bspec[1] == BinSpec::LogScaled && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
+            if bspec[1].is_log_scaled() && (hspec == HeightSpec::Density || hspec == HeightSpec::ProbabilityDensity) {
                 w *= if bin_sz[1] == 0.0 {1.0} else {bin_sz[1] / linear_bin_vol(gmin[1], bin_sz[1], bin[1])};
             }
 
             let fbin = bin[1] * nbins[1] + bin[0]; // row_index * elements_in_row + column_index
             if fbin < cts.len() {
-                cts[fbin] = cts[fbin] + w;
+                match max_uncertainty {
+                    Uncertainty::Fixed { .. } | Uncertainty::None => {
+                        cts[fbin] = cts[fbin] + w;
+                        cts_sq[fbin] = cts_sq[fbin] + w * w;
+                    },
+                    Uncertainty::Between { min, max } => {
+                        let w = 2.0 * w;
+                        let mid = 0.5 * (min + max);
+                        if uncertainty(e) < mid {
+                            cts_ui[fbin] = cts_ui[fbin] - w;
+                        } else if uncertainty(e) > mid {
+                            cts_ui[fbin] = cts_ui[fbin] + w;
+                        } else {
+                            cts[fbin] = cts[fbin] + w;
+                            cts_sq[fbin] = cts_sq[fbin] + w * w;
+                        }
+                    },
+                }
             }
         }
 
         // total weight across world
         let mut gtotal = 0.0;
         comm.all_reduce_into(&total, &mut gtotal, SystemOperation::sum());
-        //println!("{}: local total = {:e}, global = {:e}", rank, total, gtotal);
+
+        let mut gtotal2 = 0.0;
+        comm.all_reduce_into(&total2, &mut gtotal2, SystemOperation::sum());
 
         let cts = match hspec {
             HeightSpec::Count => cts,
@@ -428,14 +424,40 @@ impl Histogram {
         let mut gcts: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
         comm.all_reduce_into(&cts[..], &mut gcts[..], SystemOperation::sum());
 
+        // Statistical errors
+
+        let mut stat_err: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
+        comm.all_reduce_into(&cts_sq[..], &mut stat_err[..], SystemOperation::sum());
+        for err in stat_err.iter_mut() {
+            match hspec {
+                HeightSpec::Count => *err = err.sqrt(),
+                HeightSpec::Density => *err = err.sqrt() / bin_vol,
+                HeightSpec::ProbabilityDensity => *err = err.sqrt() / (bin_vol * gtotal),
+            }
+        }
+
+        // Systematic errors
+
+        let mut syst_err: Vec<f64> = vec![0.0; nbins[0] * nbins[1]];
+        comm.all_reduce_into(&cts_ui[..], &mut syst_err[..], SystemOperation::sum());
+        for err in syst_err.iter_mut() {
+            match hspec {
+                HeightSpec::Density => *err = *err / bin_vol,
+                HeightSpec::ProbabilityDensity => *err = *err / (bin_vol * gtotal2),
+                _ => {},
+            }
+        }
+
         Some(Histogram {
             dim: 2,
             total: gtotal,
             unweighted_total: gnum as f64,
-            bin_vol: bin_vol,
             min: gmin.to_vec(),
             max: gmax.to_vec(),
             cts: gcts,
+            stat_err,
+            syst_err: if max_uncertainty.is_some() { syst_err } else { vec![] },
+            uncertainty: max_uncertainty,
             bins: nbins.to_vec(),
             bin_sz: bin_sz,
             name: format!("hgram/{}/{}_{}", hspec, name[0], name[1]),
@@ -471,6 +493,7 @@ impl Histogram {
             write!(file, "CRVAL{:<3}= {:>20.9E}{:<50}", n, self.min[n-1], "")?;
             write!(file, "CDELT{:<3}= {:>20.9E}{:<50}", n, self.bin_sz[n-1], "")?;
             write!(file, "CNAME{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
+            write!(file, "CTYPE{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
             write!(file, "CUNIT{:<3}= '{}'{:<3$}", n, self.unit[n-1], "", 80 - 12 - self.unit[n-1].len())?;
         }
 
@@ -522,6 +545,143 @@ impl Histogram {
             file.write_unchecked(&padding)?;
         }
 
+        // Statistical error
+        write!(file, "XTENSION= {:<20} / {:<47}", "'IMAGE   '", "")?;
+        write!(file, "BITPIX  = {:>20} / {:<47}", -64, "number of bits per data pixel")?;
+        write!(file, "NAXIS   = {:>20} / {:<47}", naxis, "number of data axes")?;
+
+        for n in 1..=naxis {
+            write!(file, "NAXIS{:<3}= {:>20} / {:<47}", n, self.bins[n-1], "number of pixels along this axis")?;
+        }
+
+        write!(file, "PCOUNT  = {:>20} / {:<47}", '0', "")?;
+        write!(file, "GCOUNT  = {:>20} / {:<47}", '1', "")?;
+
+        for n in 1..=naxis {
+            // 0.5 => left aligned, 1.0 => centred
+            write!(file, "CRPIX{:<3}= {:>20.9E}{:<50}", n, 0.5, "")?;
+            write!(file, "CRVAL{:<3}= {:>20.9E}{:<50}", n, self.min[n-1], "")?;
+            write!(file, "CDELT{:<3}= {:>20.9E}{:<50}", n, self.bin_sz[n-1], "")?;
+            write!(file, "CNAME{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
+            write!(file, "CTYPE{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
+            write!(file, "CUNIT{:<3}= '{}'{:<3$}", n, self.unit[n-1], "", 80 - 12 - self.unit[n-1].len())?;
+        }
+
+        write!(file, "BUNIT   = '{}'{:<2$}", self.bunit, "", 80 - 12 - self.bunit.len())?;
+        write!(file, "OBJECT  = '{}/stat_err'{:<2$}", self.name, "", 80 - 12 - 9 - self.name.len())?;
+        write!(file, "EXTNAME = 'Statistical error'{:<1$}", "", 80 - 12 - "statistical error".len())?;
+        write!(file, "NSIGMA  = {:>20.9E}{:<50}", 1.0, "")?;
+
+        if !self.stat_err.is_empty() {
+            let mut min = self.stat_err[0];
+            let mut max = min;
+            for elem in self.stat_err.iter() {
+                if *elem < min {
+                    min = *elem;
+                } else if *elem > max {
+                    max = *elem;
+                }
+            }
+            write!(file, "DATAMIN = {:>20.9E}{:<50}", min, "")?;
+            write!(file, "DATAMAX = {:>20.9E}{:<50}", max, "")?;
+        }
+
+        let version = env!("CARGO_PKG_VERSION");
+        let sha = env!("VERGEN_GIT_SHA");
+        let sha = &sha[..7];
+        write!(file, "COMMENT   Generated by Ptarmigan v{} ({:<7}){:<3$}", version, sha, "", 80 - 37 - version.len() - sha.len())?;
+        write!(file, "{:80}", "END")?;
+
+        // Header padding
+        let count = file.bytes_written();
+        assert_eq!(count % 80, 0);
+        let excess = count % 2880;
+        if excess > 0 {
+            let padding = vec![b' '; 2880 - excess];
+            file.write_unchecked(&padding)?;
+        }
+
+        for elem in self.stat_err.iter() {
+            // FITS standard requires big-endian
+            let raw = elem.to_be_bytes();
+            file.write_unchecked(&raw)?;
+        }
+
+        // Padding
+        let count = file.bytes_written();
+        let excess = count % 2880; // how far we wrote into the next block
+        if excess > 0 {
+            let padding = vec![0; 2880 - excess];
+            file.write_unchecked(&padding)?;
+        }
+
+        // Systematic error
+        if !self.syst_err.is_empty() {
+            write!(file, "XTENSION= {:<20} / {:<47}", "'IMAGE   '", "")?;
+            write!(file, "BITPIX  = {:>20} / {:<47}", -64, "number of bits per data pixel")?;
+            write!(file, "NAXIS   = {:>20} / {:<47}", naxis, "number of data axes")?;
+
+            for n in 1..=naxis {
+                write!(file, "NAXIS{:<3}= {:>20} / {:<47}", n, self.bins[n-1], "number of pixels along this axis")?;
+            }
+
+            write!(file, "PCOUNT  = {:>20} / {:<47}", '0', "")?;
+            write!(file, "GCOUNT  = {:>20} / {:<47}", '1', "")?;
+
+            for n in 1..=naxis {
+                // 0.5 => left aligned, 1.0 => centred
+                write!(file, "CRPIX{:<3}= {:>20.9E}{:<50}", n, 0.5, "")?;
+                write!(file, "CRVAL{:<3}= {:>20.9E}{:<50}", n, self.min[n-1], "")?;
+                write!(file, "CDELT{:<3}= {:>20.9E}{:<50}", n, self.bin_sz[n-1], "")?;
+                write!(file, "CNAME{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
+                write!(file, "CTYPE{:<3}= '{}'{:<3$}", n, self.axis[n-1], "", 80 - 12 - self.axis[n-1].len())?;
+                write!(file, "CUNIT{:<3}= '{}'{:<3$}", n, self.unit[n-1], "", 80 - 12 - self.unit[n-1].len())?;
+            }
+
+            write!(file, "BUNIT   = '{}'{:<2$}", self.bunit, "", 80 - 12 - self.bunit.len())?;
+            write!(file, "OBJECT  = '{}/syst_err'{:<2$}", self.name, "", 80 - 12 - 9 - self.name.len())?;
+            write!(file, "EXTNAME = 'Systematic error'{:<1$}", "", 80 - 12 - "systematic error".len())?;
+            write!(file, "NSIGMA  = {:>20.9E}{:<50}", self.uncertainty.range().unwrap_or(0.0), "")?;
+
+            let mut min = self.syst_err[0];
+            let mut max = min;
+            for elem in self.syst_err.iter() {
+                if *elem < min {
+                    min = *elem;
+                } else if *elem > max {
+                    max = *elem;
+                }
+            }
+            write!(file, "DATAMIN = {:>20.9E}{:<50}", min, "")?;
+            write!(file, "DATAMAX = {:>20.9E}{:<50}", max, "")?;
+
+            let version = env!("CARGO_PKG_VERSION");
+            let sha = env!("VERGEN_GIT_SHA");
+            let sha = &sha[..7];
+            write!(file, "COMMENT   Generated by Ptarmigan v{} ({:<7}){:<3$}", version, sha, "", 80 - 37 - version.len() - sha.len())?;
+            write!(file, "{:80}", "END")?;
+
+            let count = file.bytes_written();
+            assert_eq!(count % 80, 0);
+            let excess = count % 2880;
+            if excess > 0 {
+                let padding = vec![b' '; 2880 - excess];
+                file.write_unchecked(&padding)?;
+            }
+
+            for elem in self.syst_err.iter() {
+                let raw = elem.to_be_bytes();
+                file.write_unchecked(&raw)?;
+            }
+
+            let count = file.bytes_written();
+            let excess = count % 2880; // how far we wrote into the next block
+            if excess > 0 {
+                let padding = vec![0; 2880 - excess];
+                file.write_unchecked(&padding)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -534,17 +694,28 @@ impl Histogram {
         let mut axes = self.axis.join("\t");
         axes.push('\t');
         axes.push_str(&self.name);
+        axes.push_str("\tstat_err");
+        if !self.syst_err.is_empty() {
+            axes.push_str("\tsyst_err");
+        }
 
         let mut units = self.unit.join("\t");
         units.push('\t');
         units.push_str(&self.bunit);
+        units.push('\t');
+        units.push_str(&self.bunit); // stat err
+        if !self.syst_err.is_empty() {
+            units.push('\t');
+            units.push_str(&self.bunit);
+        }
 
         writeln!(file, "{}", axes)?;
         writeln!(file, "{}", units)?;
 
         let mut index = vec![0usize; self.dim];
         let mut coord = vec![0.0; self.dim];
-        for ct in self.cts.iter() {
+
+        for i in 0..self.cts.len() {
             for j in 0..(self.dim-1) {
                 if index[j] >= self.bins[j] {
                     index[j] -= self.bins[j];
@@ -557,7 +728,11 @@ impl Histogram {
             for j in 0..self.dim {
                 write!(file, "{:.9e}\t", coord[j])?;
             }
-            writeln!(file, "{:.9e}", ct)?;
+            if self.syst_err.is_empty() {
+                writeln!(file, "{:.9e}\t{:.9e}", self.cts[i], self.stat_err[i])?;
+            } else {
+                writeln!(file, "{:.9e}\t{:.9e}\t{:.9e}", self.cts[i], self.stat_err[i], self.syst_err[i])?;
+            }
             index[0] += 1;
         }
         
@@ -590,7 +765,7 @@ mod tests {
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
         let filter = |_pt: &[f64; 3]| true;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, &|_| 0_f64, Uncertainty::None, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
@@ -612,7 +787,7 @@ mod tests {
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
         let filter = |_pt: &[f64; 3]| true;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::LogScaled; 2], HeightSpec::Density);
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, &|_| 0_f64, Uncertainty::None, ["x", "y"], ["1", "1"], [BinSpec::LogScaled; 2], HeightSpec::Density);
         assert!(hgram.is_some());
         let hgram = hgram.unwrap();
         println!("hgram = {}", hgram);
@@ -634,7 +809,7 @@ mod tests {
         let fy = Box::new(|pt: &[f64; 3]| pt[1]) as Accessor<[f64; 3]>;
         let weight = |_pt: &[f64; 3]| 1.0;
         let filter = |_pt: &[f64; 3]| true;
-        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
+        let hgram = Histogram::generate_2d(&world, &data, &fx, &fy, &weight, &filter, &|_| 0_f64, Uncertainty::None, ["x", "y"], ["1", "1"], [BinSpec::Automatic; 2], HeightSpec::Density);
         assert!(hgram.is_none());
     }
 }

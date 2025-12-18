@@ -257,7 +257,7 @@ impl Field for FocusedLaser {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode, _uncertainty: f64) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let width = 1.0 + self.bandwidth * rng.sample::<f64,_>(StandardNormal);
         assert!(width > 0.0, "The fractional bandwidth of the pulse, {:.3e}, is large enough that the sampled frequency has fallen below zero!", self.bandwidth);
@@ -280,7 +280,7 @@ impl Field for FocusedLaser {
         }
     }
 
-    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+    fn pair_create<R: Rng>(&self, r: FourVector, ell: FourVector, pol: StokesVector, dt: f64, rng: &mut R, rate_increase: f64, _uncertainty: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector;
         let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.pol, self.pol_angle);

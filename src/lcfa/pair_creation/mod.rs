@@ -1,219 +1,172 @@
 //! Nonlinear pair creation, gamma -> e- + e+, in a background field
 
-use std::f64::consts;
 use rand::prelude::*;
 use crate::constants::*;
 use crate::geometry::*;
-use crate::quadrature::{GL_NODES, GL_WEIGHTS};
 
+mod angular_spectra;
+mod energy_spectrum;
 mod tables;
 
-/// Returns the value of the auxiliary function T for photons that are polarized parallel,
-/// and perpendicular to, the instantaneous acceleration (respectively).
-fn auxiliary_t(chi: f64) -> (f64, f64) {
-    use tables::*;
-    if chi <= 0.01 {
-        // if chi < 5e-3, T(chi) < 1e-117, so ignore
-        // 3.0 * 3.0f64.sqrt() / (8.0 * consts::SQRT_2) * (-4.0 / (3.0 * chi)).exp()
-        (0.0, 0.0)
-    } else if chi < 1.0 {
-        // use exp(-f/chi) fit
-        let i = ((chi.ln() - LN_T_CHI_TABLE[0][0]) / DELTA_LN_CHI) as usize;
-        let dx = (chi - LN_T_CHI_TABLE[i][0].exp()) / (LN_T_CHI_TABLE[i+1][0].exp() - LN_T_CHI_TABLE[i][0].exp());
-        let par = (1.0 - dx) / LN_T_CHI_TABLE[i][1] + dx / LN_T_CHI_TABLE[i+1][1];
-        let perp = (1.0 - dx) / LN_T_CHI_TABLE[i][2] + dx / LN_T_CHI_TABLE[i+1][2];
-        ((1.0 / par).exp(), (1.0 / perp).exp())
-    } else if chi < 100.0 {
-        // use power-law fit
-        let i = ((chi.ln() - LN_T_CHI_TABLE[0][0]) / DELTA_LN_CHI) as usize;
-        let dx = (chi.ln() - LN_T_CHI_TABLE[i][0]) / DELTA_LN_CHI;
-        let par = (1.0 - dx) * LN_T_CHI_TABLE[i][1] + dx * LN_T_CHI_TABLE[i+1][1];
-        let perp= (1.0 - dx) * LN_T_CHI_TABLE[i][2] + dx * LN_T_CHI_TABLE[i+1][2];
-        (par.exp(), perp.exp())
-    } else {
-        // use asymptotic expression, which is accurate to better than 0.3%
-        // for chi > 100:
-        //   T(x) = [C - C_1 x^(-2/3)] x^(-1/3)
-        // where <C> = 5 Gamma(5/6) (2/3)^(1/3) / [14 Gamma(7/6)] and C_1 = 2/3
-        (0.3036898468348568 / chi.cbrt() - 2.0 / (3.0 * chi), 0.4555347702522852 / chi.cbrt() - 2.0 / (3.0 * chi))
-    }
+/// Routines for a handling a nonlinear Breit-Wheeler pair creation event,
+/// as considered within the LCFA.
+pub struct PairCreation {
+    ell: FourVector,
+    sv: StokesVector,
+    cos_2theta: f64,
+    sin_2theta: f64,
+    chi: f64,
+    dv1: f64,
+    uncertainty: f64,
 }
 
-/// Returns the nonlinear Breit-Wheeler probability
-/// for a photon with four-momentum `ell` and Stokes vector `sv` in a
-/// constant, crossed field.
-///
-/// The field is defined by the transverse acceleration `a_perp`, quantum
-/// parameter `chi`, and duration `dt` (in seconds).
-pub fn probability(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector, dt: f64) -> (f64, StokesVector) {
-    let (sv, cos_2theta, sin_2theta) = sv.in_basis(a_perp, ell.into());
-    let parallel_proj = 0.5 * (1.0 + sv[1]);
-    let perp_proj = 0.5 * (1.0 - sv[1]);
-    let (t_par, t_perp) = auxiliary_t(chi);
-    let prob = ALPHA_FINE * chi * (parallel_proj * t_par + perp_proj * t_perp) * dt / (COMPTON_TIME * ell[0]);
+impl PairCreation {
+    /// Sets up a nonlinear Breit-Wheeler pair creation event for a photon with four-momentum `ell`
+    /// and Stokes parameter `sv` in a constant, crossed field.
+    /// The field is defined by the transverse acceleration `a_perp`, quantum
+    /// parameter `chi`, and duration `dt` (in seconds).
+    pub fn new(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector) -> Self {
+        let (sv, cos_2theta, sin_2theta) = sv.in_basis(a_perp, ell.into());
 
-    // If pair creation does not occur, photon Stokes parameters should be changed to:
-    let sv: StokesVector = {
-        let prob_avg = ALPHA_FINE * chi * 0.5 * (t_par + t_perp) * dt / (COMPTON_TIME * ell[0]);
-        let delta = ALPHA_FINE * chi * 0.5 * (t_par - t_perp) * dt / (COMPTON_TIME * ell[0]);
-
-        let sv1 = (sv[1] * (1.0 - prob_avg) - delta) / (1.0 - prob);
-        let sv2 = sv[2] * (1.0 - prob_avg) / (1.0 - prob);
-
-        // transform to simulation basis, rotating by -theta
-        [
-            sv[0],
-            cos_2theta * sv1 + sin_2theta * sv2,
-            -sin_2theta * sv1 + cos_2theta * sv2,
-            sv[3] * (1.0 - prob_avg) / (1.0 - prob),
-        ].into()
-    };
-
-    (prob, sv)
-}
-
-/// Proportional to the probability spectrum dW/ds for a photon
-/// with quantum parameter `chi` and Stokes parameter `sv1`.
-///
-/// The rate is obtained by integrating [spectrum] over s and multiplying
-/// by ɑ m^2 / (√3 π ω).
-fn spectrum(s: f64, chi: f64, sv1: f64) -> f64 {
-    GL_NODES.iter()
-        .zip(GL_WEIGHTS.iter())
-        .map(|(t, w)| {
-            let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
-            let prefactor = (-xi * t.cosh() + t).exp();
-            w * prefactor * ((1.0 / (s * (1.0 - s)) - sv1 - 2.0) * (2.0 * t / 3.0).cosh() + (t / 3.0).cosh() / t.cosh())
-        })
-        .sum()
-}
-
-/// Returns the maximum value of [spectrum] for a polarized photon,
-/// padded by a small safety margin.
-fn spectrum_ceiling(chi: f64, sv1: f64) -> f64 {
-    let chi_switch = ((1.5 - sv1) / 3_f64.sqrt()).exp();
-
-    let max = if chi < chi_switch {
-        spectrum(0.5, chi, sv1)
-    } else if chi > 100.0 {
-        spectrum(4.0 / (3.0 * chi), chi, sv1)
-    } else {
-        let m = -0.94866 + 0.170159 * sv1;
-        let s = 0.5 * chi_switch.powf(-m) * chi.powf(m);
-        // println!("\tchi_switch = {:.3}, m = {:.3}, s = {:.3}", chi_switch, m, s);
-        spectrum(s, chi, sv1)
-    };
-
-    1.05 * max
-}
-
-/// Proportional to the angularly resolved spectrum d^2 W/(ds dy),
-/// where z = [2ɣ^2(1 - β cosθ)]^(3/2) = 1 + 4 chi y^2.
-/// The domain of interest is 0 < y < 1.
-fn angular_spectrum(y: f64, s: f64, chi: f64, sv1: f64) -> f64 {
-    // The spectrum is given by
-    // dW/(ds dy) = y [1 + z^(2/3) (s/(1-s) + (1-s)/s - sv1)] K_{1/3}(xi z)
-    // where z = 1 + 4 chi y^2, xi = 2 / [3 chi s (1-s)]
-    // In principle, 1 < z < infty, but dominated by 1 < z < 1 + 4 chi
-    use crate::special_functions::*;
-    let xi = 2.0 / (3.0 * chi * s * (1.0 - s));
-    let prefactor = s / (1.0 - s) + (1.0 - s) / s - sv1;
-    let z = 1.0 + 4.0 * chi * y * y;
-    y * (1.0 + prefactor * z.powf(2.0 / 3.0)) * (xi * z).bessel_K_1_3().unwrap_or(0.0)
-}
-
-/// Returns the maximum value of [angular_spectrum] for a polarized photon,
-/// padded by a small safety margin.
-fn angular_spectrum_ceiling(s: f64, chi: f64, sv1: f64) -> f64 {
-    // y that maximises the spectrum, assuming s = 1/2:
-    let y_peak = {
-        let y_min = 0.216;
-        let y_max = 0.259;
-        y_min + (y_max - y_min) * (1.0 - (8.3 / chi).powf(2.0/3.0).tanh())
-    };
-
-    // and for general s:
-    let y = y_peak * (1.0 - (1.0 - 2.0 * s).powi(2)).sqrt();
-
-    1.05 * angular_spectrum(y, s, chi, sv1)
-}
-
-fn sample_azimuthal_angle<R: Rng>(s: f64, z: f64, chi: f64, sv: StokesVector, rng: &mut R) -> f64 {
-    let arg = 2.0 * z / (3.0 * chi * s * (1.0 - s));
-    // ratio of K_{2/3}(arg) / K_{1/3}(arg)
-    let k_ratio = if arg < 1.0e-4 {
-        0.6368498843179743 / arg.cbrt()
-    } else {
-        1.0 + 1.0 / (1.4624087952220928 * arg.cbrt() + 1.023821552056939 * arg.sqrt() + 6.0 * arg)
-    };
-    let a = 1.0 + z.powf(2.0/3.0) * (s.powi(2) + (1.0 - s).powi(2)) / (s * (1.0 - s));
-    let b = 1.0;
-    let c = z.powf(2.0/3.0);
-    let d = z.powf(2.0/3.0) - 1.0;
-    let e = z.powf(1.0/3.0) * (z.powf(2.0/3.0) - 1.0) * (s.powi(2) + (1.0 - s).powi(2)) * k_ratio / (s * (1.0 - s));
-
-    fn azimuthal_spectrum(phi: f64, a: f64, b: f64, c: f64, d: f64, e: f64, sv: StokesVector) -> f64 {
-        a + b * ((2.0 * phi).cos() * (1.0 - c) - c) * sv[1] - d * (2.0 * phi).sin() * sv[2] + e * phi.sin() * sv[3]
-    }
-
-    let max = (0..32)
-        .map(|i| azimuthal_spectrum(2.0 * consts::PI * (i as f64) / 32.0, a, b, c, d, e, sv))
-        .reduce(f64::max)
-        .map(|y| 1.1 * y)
-        .unwrap();
-
-    loop {
-        let phi = 2.0 * consts::PI * rng.gen::<f64>();
-        let u = rng.gen::<f64>();
-        let f = azimuthal_spectrum(phi, a, b, c, d, e, sv);
-        if u <= f / max {
-            break phi;
+        Self {
+            ell,
+            sv,
+            cos_2theta,
+            sin_2theta,
+            chi,
+            dv1: 0.0,
+            uncertainty: 0.0,
         }
     }
-}
 
-/// Samples the positron spectrum of an photon with
-/// quantum parameter `chi` and energy (per electron
-/// mass) `gamma`, returning the positron Lorentz factor,
-/// the cosine of the scattering angle, as well as the
-/// equivalent s and z for debugging purposes
-pub fn sample<R: Rng>(ell: FourVector, sv: StokesVector, chi: f64, a_perp: ThreeVector, rng: &mut R) -> (f64, f64, f64, f64, f64) {
-    let gamma = ell[0];
-    let (sv, _, _) = sv.in_basis(a_perp, ell.into());
-
-    // Rejection sampling for s
-    let max = spectrum_ceiling(chi, sv[1]);
-    let s = loop {
-        let s = rng.gen::<f64>();
-        let u = rng.gen::<f64>();
-        let f = spectrum(s, chi, sv[1]);
-        if u <= f / max {
-            break s;
+    /// Sets the uncertainty in the pair creation rate to be a fraction of the leading order correction
+    /// to the LCFA, which depends on the derivative term `dv1 = (3 e.e'' + e'.e') / [45 (e.e)^2]`.
+    pub fn with_uncertainty(self, dv1: f64, frac: f64) -> Self {
+        Self {
+            dv1,
+            uncertainty: frac,
+            ..self
         }
-    };
+    }
 
-    // Now that s is fixed, sample from the angular spectrum
-    let max = angular_spectrum_ceiling(s, chi, sv[1]);
-    let z = loop {
-        let y = rng.gen::<f64>();
-        let u = rng.gen::<f64>();
-        let f = angular_spectrum(y, s, chi, sv[1]);
-        if u <= f / max {
-            break 1.0 + 4.0 * chi * y * y;
+    /// Returns the value of the auxiliary function T for photons that are polarized parallel,
+    /// and perpendicular to, the instantaneous acceleration (respectively), as well as the
+    /// value of Y, the auxiliary function that controls derivative corrections.
+    fn auxiliary_t_and_y(chi: f64) -> (f64, f64, f64) {
+        use tables::*;
+        if chi <= 0.01 {
+            // if chi < 5e-3, T(chi) < 1e-117, so ignore
+            // 3.0 * 3.0f64.sqrt() / (8.0 * consts::SQRT_2) * (-4.0 / (3.0 * chi)).exp()
+            (0.0, 0.0, 0.0)
+        } else if chi < 100.0 {
+            let i = (chi.ln() - MIN_LN_CHI) / DELTA_LN_CHI;
+            let dx = i.fract();
+            let i = i as usize;
+
+            let lower = &SCALED_T_Y_TABLE[i];
+            let upper = &SCALED_T_Y_TABLE[i+1];
+
+            let prefactor = -8.0 / (3.0 * chi);
+
+            let t_par = (prefactor + (1.0 - dx) * lower[0] + dx * upper[0]).exp();
+            let t_perp = (prefactor + (1.0 - dx) * lower[1] + dx * upper[1]).exp();
+            let y = prefactor.exp() * (((1.0 - dx) * lower[2] + dx * upper[2]).exp() + tables::Y_SHIFT);
+
+            (t_par, t_perp, y)
+        } else {
+            // use asymptotic expression, which is accurate to better than 0.3%
+            // for chi > 100:
+            //   T(x) = [C - C_1 x^(-2/3)] x^(-1/3)
+            // where <C> = 5 Gamma(5/6) (2/3)^(1/3) / [14 Gamma(7/6)] and C_1 = 2/3
+            let t_par = 0.3036898468348568 / chi.cbrt() - 2.0 / (3.0 * chi);
+            let t_perp = 0.4555347702522852 / chi.cbrt() - 2.0 / (3.0 * chi);
+
+            // Much less accurate
+            let y = 0.41757353939792824 * chi.powf(2.0 / 3.0);
+
+            (t_par, t_perp, y)
         }
-    };
+    }
 
-    let phi = sample_azimuthal_angle(s, z, chi, sv, rng);
+    /// Returns the probability that pair creation occurs in the given time interval,
+    /// and the Stokes parameters the photon should have if it does not.
+    pub fn probability(&self, dt: f64) -> (f64, StokesVector) {
+        let gamma = self.ell[0];
 
-    // recall z = 2 gamma^2 (1 - beta cos_theta), where
-    // beta = sqrt(1 - 1/gamma^2), so cos_theta is close
-    // to (2 gamma^2 - z^(2/3)) / (2 gamma^2 - 1)
-    // note that gamma here is the positron gamma
-    let gamma_p = s * gamma;
-    let cos_theta = (2.0 * gamma_p * gamma_p - z.powf(2.0/3.0)) / (2.0 * gamma_p * gamma_p - 1.0);
-    let cos_theta = cos_theta.max(-1.0);
+        let parallel_proj = 0.5 * (1.0 + self.sv[1]);
+        let perp_proj = 0.5 * (1.0 - self.sv[1]);
 
-    (gamma_p, cos_theta, phi, s, z)
+        let (t_par, t_perp, y) = PairCreation::auxiliary_t_and_y(self.chi);
+
+        let prob = ALPHA_FINE * self.chi * (parallel_proj * t_par + perp_proj * t_perp) * dt / (COMPTON_TIME * gamma);
+        let delta_prob = ALPHA_FINE * y * self.uncertainty * self.dv1 * dt / (COMPTON_TIME * gamma);
+
+        // If pair creation does not occur, photon Stokes parameters should be changed to:
+        let sv: StokesVector = {
+            let prob_avg = ALPHA_FINE * self.chi * 0.5 * (t_par + t_perp) * dt / (COMPTON_TIME * gamma);
+            let delta = ALPHA_FINE * self.chi * 0.5 * (t_par - t_perp) * dt / (COMPTON_TIME * gamma);
+
+            let sv1 = (self.sv[1] * (1.0 - prob_avg) - delta) / (1.0 - prob);
+            let sv2 = self.sv[2] * (1.0 - prob_avg) / (1.0 - prob);
+
+            // transform to simulation basis, rotating by -theta
+            [
+                self.sv[0],
+                self.cos_2theta * sv1 + self.sin_2theta * sv2,
+                -self.sin_2theta * sv1 + self.cos_2theta * sv2,
+                self.sv[3] * (1.0 - prob_avg) / (1.0 - prob),
+            ].into()
+        };
+
+        (prob + delta_prob, sv)
+    }
+
+    fn sample_internal<R: Rng>(&self, rng: &mut R) -> (f64, f64, f64) {
+        // Rejection sampling for s
+        let spectrum = energy_spectrum::Spectrum::new(self.chi, self.sv[1]);
+        let max = spectrum.ceiling();
+        let s = loop {
+            let s = rng.gen::<f64>();
+            let u = rng.gen::<f64>();
+            let f = spectrum.value(s);
+            if u <= f / max {
+                break s;
+            }
+        };
+
+        // Now that s is fixed, sample from the angular spectrum
+        let spectrum = angular_spectra::Spectrum::new(s, self.chi, self.sv);
+        let max = spectrum.polar_ceiling();
+        let z = loop {
+            let y = rng.gen::<f64>();
+            let u = rng.gen::<f64>();
+            let f = spectrum.polar(y);
+            if u <= f / max {
+                break 1.0 + 4.0 * self.chi * y * y;
+            }
+        };
+
+        let phi = spectrum.sample_azimuthal(z, rng);
+
+        (s, z, phi)
+    }
+
+    /// Samples the nonlinear Breit-Wheeler spectrum, returning the positron Lorentz factor,
+    /// the cosine of the scattering angle, and the azimuthal angle.
+    pub fn sample<R: Rng>(&self, rng: &mut R) -> (f64, f64, f64) {
+        let gamma = self.ell[0];
+        let (s, z, phi) = self.sample_internal(rng);
+
+        // recall z = 2 gamma^2 (1 - beta cos_theta), where
+        // beta = sqrt(1 - 1/gamma^2), so cos_theta is close
+        // to (2 gamma^2 - z^(2/3)) / (2 gamma^2 - 1)
+        // note that gamma here is the positron gamma
+        let gamma_p = s * gamma;
+        let cos_theta = (2.0 * gamma_p * gamma_p - z.powf(2.0/3.0)) / (2.0 * gamma_p * gamma_p - 1.0);
+        let cos_theta = cos_theta.max(-1.0);
+
+        (gamma_p, cos_theta, phi)
+    }
 }
 
 #[cfg(test)]
@@ -240,15 +193,16 @@ mod tests {
         ];
 
         for (chi, target) in &pts {
-            let (t_par, t_perp) = auxiliary_t(*chi);
+            let (t_par, t_perp, _) = PairCreation::auxiliary_t_and_y(*chi);
             let result = 0.5 * (t_par + t_perp);
 
             let prefactor = 1.0 / (3_f64.sqrt() * std::f64::consts::PI * chi);
+            let spectrum = energy_spectrum::Spectrum::new(*chi, 0.0);
             let intgd: f64 = GAUSS_32_NODES.iter()
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    prefactor * 0.5 * w * spectrum(s, *chi, 0.0)
+                    prefactor * 0.5 * w * spectrum.value(s)
                 })
                 .sum();
 
@@ -271,21 +225,23 @@ mod tests {
         ];
 
         for chi in &pts {
-            let (target_t_par, target_t_perp) = auxiliary_t(*chi);
+            let (target_t_par, target_t_perp, _) = PairCreation::auxiliary_t_and_y(*chi);
 
+            let spectrum = energy_spectrum::Spectrum::new(*chi, 1.0);
             let t_par: f64 = GAUSS_32_NODES.iter()
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    w * spectrum(s, *chi, 1.0)
+                    w * spectrum.value (s)
                 })
                 .sum();
 
+            let spectrum = energy_spectrum::Spectrum::new(*chi, -1.0);
             let t_perp: f64 = GAUSS_32_NODES.iter()
                 .zip(GAUSS_32_WEIGHTS.iter())
                 .map(|(t, w)| {
                     let s = 0.5 * (1.0 + t);
-                    w * spectrum(s, *chi, -1.0)
+                    w * spectrum.value(s)
                 })
                 .sum();
 
@@ -294,61 +250,6 @@ mod tests {
             let error = (target - result).abs() / target;
             println!("chi = {:.3e}, expected T_parallel / T_perp = {:.3}, error = {:.3}%", chi, target, 100.0 * error);
             assert!(error < 1.0e-2);
-        }
-    }
-
-    #[test]
-    fn pair_spectrum_ceiling() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-
-        for _i in 0..100 {
-            let chi = (1_f64.ln() + (100_f64.ln() - 1_f64.ln()) * rng.gen::<f64>()).exp();
-            let sv1 = -1.0 + 2.0 * rng.gen::<f64>();
-
-            let target: f64 = (0..10_000)
-                .map(|i| 0.5 * (i as f64) / 10000.0)
-                .map(|s| spectrum(s, chi, sv1))
-                .reduce(f64::max)
-                .unwrap();
-
-            let result = spectrum_ceiling(chi, sv1);
-
-            let err = (target - result) / target;
-
-            println!(
-                "chi = {:>9.3e}, ξ_1 = {:>6.3} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
-                chi, sv1, target, result, 100.0 * err,
-            );
-
-            assert!(err < 0.0);
-        }
-    }
-
-    #[test]
-    fn pair_angular_spectrum_ceiling() {
-        let mut rng = Xoshiro256StarStar::seed_from_u64(0);
-
-        for _i in 0..1000 {
-            let chi = (0.1_f64.ln() + (100_f64.ln() - 1_f64.ln()) * rng.gen::<f64>()).exp();
-            let sv1 = -1.0 + 2.0 * rng.gen::<f64>();
-            let s = 0.5 * rng.gen::<f64>();
-
-            let target: f64 = (0..100)
-                .map(|i| 0.5 * (i as f64) / 100.0) // search in 0 < y < 0.5
-                .map(|y| angular_spectrum(y, s, chi, sv1))
-                .reduce(f64::max)
-                .unwrap();
-
-            let result = angular_spectrum_ceiling(s, chi, sv1);
-
-            let err = (target - result) / target;
-
-            println!(
-                "chi = {:>9.3e}, ξ_1 = {:>6.3}, s = {:.3} => max = {:>9.3e}, predicted = {:>9.3e}, err = {:.2}%",
-                chi, sv1, s, target, result, 100.0 * err,
-            );
-
-            assert!(err < 0.0 || target < 1.0e-200);
         }
     }
 
@@ -362,13 +263,13 @@ mod tests {
         let path = format!("output/lcfa_pair_spectrum_{}_{}.dat", chi, s1);
         let mut file = File::create(path).unwrap();
         for _i in 0..200000 {
-            let (_, _, phi, s, z) = sample(
+            let event = PairCreation::new(
                 [gamma, 0.0, 0.0, -gamma].into(),
                 [1.0, s1, 0.0, 0.0].into(),
                 chi,
-                [1.0, 0.0, 0.0].into(),
-                &mut rng
+                [1.0, 0.0, 0.0].into()
             );
+            let (s, z, phi) = event.sample_internal(&mut rng);
             assert!(s > 0.0 && s < 1.0);
             assert!(z >= 1.0);
             writeln!(file, "{:.6e} {:.6e} {:.6e}", s, z, phi).unwrap();
@@ -386,7 +287,8 @@ mod tests {
         ];
 
         for sv in &svs {
-            let (_, sv_new) = probability(ell, *sv, 1.0, a_perp, 1.0e-6 / SPEED_OF_LIGHT);
+            let event = PairCreation::new(ell, *sv, 1.0, a_perp);
+            let (_, sv_new) = event.probability(1.0e-6 / SPEED_OF_LIGHT);
             assert!((sv[1] - sv_new[1]).abs() < 1.0e-12);
         }
     }
@@ -402,7 +304,8 @@ mod tests {
         for i in -300..300 {
             let t = (i as f64) * 0.05;
             let chi = chi_max * (-(t/tau).powi(2)).exp();
-            let (prob, sv_new) = probability(ell, sv, chi, a_perp, dt);
+            let event = PairCreation::new(ell, sv, chi, a_perp);
+            let (prob, sv_new) = event.probability(dt);
             let bias = if prob * bias > 0.1 { 0.1 / prob } else { bias };
             let prob = prob * bias;
             if rng.gen::<f64>() < prob {

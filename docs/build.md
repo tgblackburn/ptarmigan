@@ -14,6 +14,8 @@ The following optional features are available:
 
 * `with-mpi`, which enables parallel processing via MPI. Requires an MPI library (Ptarmigan is tested against OpenMPI and MPICH) and the Clang compiler.
 * `hdf5-output`, which enables output of complete particle data as an HDF5 file. Requires [libhdf5](https://www.hdfgroup.org/solutions/hdf5/).
+* `uncertainty-tracking`, which allows the code to estimate systematic theory uncertainties in the output it produces.
+
 If `with-mpi` and `hdf5-output` are both specified, the HDF5 library must have been compiled with MPI support.
 
 To build with a combination of these features, run:

@@ -82,7 +82,7 @@ pub(super) fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVe
 /// magnetic field `B`.
 #[allow(non_snake_case)]
 #[inline(always)]
-pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: f64, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dv1: f64, dv2: f64, a: f64, dt: f64, rng: &mut R, mode: RadiationMode, uncertainty: f64) -> Option<RadiationEvent> {
     let classical = mode == RadiationMode::Classical;
     let beta = ThreeVector::from(u) / u[0];
     let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
@@ -92,17 +92,45 @@ pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: 
         0.0
     };
 
+    #[cfg(feature = "modified-event-generator")]
+    let f: f64 = rng.gen();
+
     let prob = if classical {
         dt * lcfa::photon_emission::classical::rate(chi, u[0])
     } else {
-        dt * lcfa::photon_emission::rate(chi, u[0])
+        #[cfg(not(feature = "modified-event-generator"))] {
+            let _ = dv1;
+            let _ = dv2;
+            let _ = uncertainty;
+            dt * lcfa::photon_emission::rate(chi, u[0])
+        }
+
+        #[cfg(feature = "modified-event-generator")] {
+            let rate = lcfa::photon_emission::spectral_rate(chi, u[0], f.powi(3));
+            let rate_corr = if uncertainty != 0.0 {
+                let rate_corr = lcfa::photon_emission::spectral_rate_corr(chi, u[0], dv1, dv2, f.powi(3));
+                let rate_corr = uncertainty * rate_corr;
+                // prevent correction being larger than the rate
+                rate_corr.abs().min(rate)
+                    .copysign(uncertainty)
+            } else {
+                0.0
+            };
+            3.0 * f * f * dt * (rate + rate_corr)
+        }
     };
 
     if rng.gen::<f64>() < prob {
         let (omega_mc2, theta, cphi) = if classical {
             lcfa::photon_emission::classical::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen())
         } else {
-            lcfa::photon_emission::sample(chi, u[0], rng.gen(), rng.gen(), rng.gen())
+            #[cfg(not(feature = "modified-event-generator"))] {
+                lcfa::photon_emission::sample(chi, u[0], rng)
+            }
+
+            #[cfg(feature = "modified-event-generator")] {
+                lcfa::photon_emission::sample_at_fixed_f(chi, u[0], f.powi(3), rng.gen(), rng.gen())
+            }
         };
 
         if let Some(theta) = theta {
@@ -141,20 +169,25 @@ pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, a: 
 /// the effective amplitude at the point of creation.
 #[allow(non_snake_case)]
 #[inline(always)]
-pub(super) fn pair_create<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVector, B: ThreeVector, a: f64, dt: f64, rng: &mut R, rate_increase: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+pub(super) fn pair_create<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVector, B: ThreeVector, dv1: f64, a: f64, dt: f64, rng: &mut R, rate_increase: f64, uncertainty: f64) -> (f64, StokesVector, Option<PairCreationEvent>) {
+    use lcfa::pair_creation::PairCreation;
+
     let n = ThreeVector::from(u).normalize();
 
     // transverse "acceleration"
     let a_perp = E - (E * n) * n + SPEED_OF_LIGHT * n.cross(B);
     let E_rf_sqd = a_perp.norm_sqr();
 
-    let (chi, prob, sv_new) = if E_rf_sqd > 0.0 {
-        let chi = u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD;
-        let (prob, sv_new) = lcfa::pair_creation::probability(u, sv, chi, a_perp, dt);
-        (chi, prob, sv_new)
+    let chi = if E_rf_sqd > 0.0 {
+        u[0] * E_rf_sqd.sqrt() / CRITICAL_FIELD
     } else {
-        (0.0, 0.0, sv)
+        return (0.0, sv, None);
     };
+
+    let event = PairCreation::new(u, sv, chi, a_perp)
+        .with_uncertainty(dv1, uncertainty);
+
+    let (prob, sv_new) = event.probability(dt);
 
     let rate_increase = if prob * rate_increase > 0.1 {
         0.1 / prob // limit the rate increase
@@ -163,7 +196,7 @@ pub(super) fn pair_create<R: Rng>(u: FourVector, sv: StokesVector, E: ThreeVecto
     };
 
     if rng.gen::<f64>() < prob * rate_increase {
-        let (gamma_p, cos_theta, cphi, _, _) = lcfa::pair_creation::sample(u, sv, chi, a_perp, rng);
+        let (gamma_p, cos_theta, cphi) = event.sample(rng);
         let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
         let u_p = gamma_p * (1.0 - 1.0 / (gamma_p * gamma_p)).sqrt();
 

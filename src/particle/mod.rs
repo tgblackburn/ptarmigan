@@ -72,6 +72,7 @@ pub struct Particle {
     parent_chi: f64,
     interaction_count: f64,
     work: f64,
+    uncertainty: f64,
     weight: f64,
     id: u64,
     parent_id: u64,
@@ -120,6 +121,7 @@ impl Particle {
             parent_chi: 0.0,
             interaction_count: 0.0,
             work: 0.0,
+            uncertainty: 0.0,
             weight: 1.0,
             id: 0,
             parent_id: 0,
@@ -293,6 +295,7 @@ impl Particle {
             parent_chi: self.parent_chi,
             interaction_count: self.interaction_count,
             work: self.work,
+            uncertainty: self.uncertainty,
             weight: self.weight,
             id: self.id,
             parent_id: self.parent_id,
@@ -355,6 +358,15 @@ impl Particle {
     /// Projects the particle polarization onto the y axis.
     pub fn polarization_along_y(&self) -> f64 {
         self.polarization_along([0.0, 1.0, 0.0])
+    }
+
+    pub fn with_uncertainty(&mut self, delta: f64) -> Self {
+        self.uncertainty = delta;
+        *self
+    }
+
+    pub fn uncertainty(&self) -> f64 {
+        self.uncertainty
     }
 }
 

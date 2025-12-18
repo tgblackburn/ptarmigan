@@ -68,3 +68,4 @@
 | `stats`   |             | `photon`                | optional                         | list of summary stats                       | -                               | as above                                                                                     |
 | `stats`   |             | `positron`              | optional                         | list of summary stats                       | -                               | as above                                                                                     |
 | `stats`   |             | `expression`            | optional                         | list of expressions                         | -                               | ``name[`formula] expression [unit]``                                                         |
+| `uncertainty` | | `lcfa` | optional | numerical | `0.0` | |
