@@ -502,7 +502,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let (focusing, waist) = input
             .read("laser:waist")
             .map(|w| (true, w))
-            .unwrap_or((false, std::f64::INFINITY));
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok((false, std::f64::INFINITY)),
+            })?;
 
         let envelope = input.read::<String, _>("laser:envelope")
             .and_then(|s| match s.as_str() {
