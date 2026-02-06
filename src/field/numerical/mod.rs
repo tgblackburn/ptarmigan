@@ -263,7 +263,7 @@ impl FieldData {
             wavelength: 2.0 * consts::PI * SPEED_OF_LIGHT / omega,
             pol: Polarization::Linear,
             pol_angle: 0.0,
-            focusing: false,
+            focusing: waist.is_finite(),
             envelope: Envelope::Gaussian,
             waist,
             n_cycles,

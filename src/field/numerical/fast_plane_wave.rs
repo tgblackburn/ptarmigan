@@ -69,7 +69,20 @@ impl Field for NumericalFastPW {
         let ex = (1.0 - di) * self.inner.field[i] + di * self.inner.field[i+1];
         let by = ex / SPEED_OF_LIGHT;
 
-        ( [ex, 0.0, 0.0].into(), [0.0, by, 0.0].into(), 0.0 )
+        // Transverse profile, lowest order paraxial
+        let tp = if self.inner.params.focusing {
+            use std::f64::consts;
+            let waist = self.inner.params.waist;
+            let wavelength = 2.0 * consts::PI * SPEED_OF_LIGHT / self.omega();
+            let z_r = consts::PI * waist * waist / wavelength;
+            let width_sqd = 1.0 + (r[3] / z_r).powi(2);
+            let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / waist.powi(2);
+            (-rho_sqd / width_sqd).exp() / width_sqd.sqrt()
+        } else {
+            1.0
+        };
+
+        ( [ex * tp, 0.0, 0.0].into(), [0.0, by * tp, 0.0].into(), 0.0 )
     }
 
     fn energy(&self) -> (f64, &'static str) {
