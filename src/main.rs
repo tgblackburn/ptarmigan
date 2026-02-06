@@ -445,8 +445,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 Err(InputError::conversion("laser:from_plain_text:file", "file"))
             })?;
 
+        let waist = input.read("laser:waist")
+            .unwrap_or(std::f64::INFINITY);
+
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
-        let data = FieldData::preprocess(coord, step, &field)
+        let data = FieldData::preprocess(coord, step, &field, waist)
             .map_err(|err| {
                 report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")
@@ -1443,9 +1446,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_some()).write(&multiplicity.unwrap_or(0))?
                     .new_dataset("select_multiplicity")?.with_condition(|| multiplicity.is_none()).write(&false)?;
 
-                let lsrg = conf.new_group("laser")?;
-
-                lsrg.new_dataset("a0")?
+                conf.new_group("laser")?
+                    .new_dataset("a0")?
                         .with_unit("1")?
                         .with_desc("peak value of the laser normalized amplitude")?
                         .write(&a0)?
@@ -1486,35 +1488,6 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_desc("number of wavelengths corresponding to the total pulse duration")?
                         .with_condition(|| matches!(envelope, Envelope::CosSquared | Envelope::Flattop))
                         .write(&n_cycles)?;
-
-                if let Some(data) = field.is_numerical() {
-                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| a2.sqrt()).collect();
-                    let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
-
-                    lsrg.new_dataset("imported_from_file")?
-                            .write(&true)?
-                        .new_dataset("electric_field")?
-                            .with_alias("ex")?
-                            .with_unit("V/m")?
-                            .with_desc("transverse electric field")?
-                            .write(data.ex())?
-                        .new_dataset("a_rms")?
-                            .with_unit("1")?
-                            .with_desc("envelope of the RMS normalised potential")?
-                            .write(&a_rms[..])?
-                        .new_dataset("local_wavelength")?
-                            .with_unit("m")?
-                            .with_desc("wavelength equivalent to the instantaneous angular frequency")?
-                            .write(&local_lambda[..])?
-                        .new_dataset("phase_step")?
-                            .with_alias("dphi")?
-                            .with_unit("1")?
-                            .with_desc("phase difference between adjacent values of ex, a_rms etc")?
-                            .write(&data.phase_step())?;
-                } else {
-                    lsrg.new_dataset("imported_from_file")?
-                            .write(&false)?;
-                }
 
                 let npart = {
                     let mut npart: usize = 0;
@@ -1827,9 +1800,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                             .write(&p[..])?;
                 }
 
-                fs.new_group("laser")?
-                    .only_task(0)
-                    .new_dataset("energy")?
+                let lsrg = fs.new_group("laser")?
+                    .only_task(0);
+
+                lsrg.new_dataset("energy")?
                         .with_unit(&energy_unit)?
                         .with_desc("total energy of the laser pulse")?
                         .with_condition(|| focusing)
@@ -1843,6 +1817,35 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_unit("J")?
                         .with_desc("energy absorbed from the laser")?
                         .write(&total_absorption)?;
+
+                if let Some(data) = field.is_numerical() {
+                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (0.5 * a2).sqrt()).collect();
+                    let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
+
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&true)?
+                        .new_dataset("electric_field")?
+                            .with_alias("ex")?
+                            .with_unit("V/m")?
+                            .with_desc("transverse electric field")?
+                            .write(data.ex())?
+                        .new_dataset("a_rms")?
+                            .with_unit("1")?
+                            .with_desc("envelope of the RMS normalised potential")?
+                            .write(&a_rms[..])?
+                        .new_dataset("local_wavelength")?
+                            .with_unit("m")?
+                            .with_desc("wavelength equivalent to the instantaneous angular frequency")?
+                            .write(&local_lambda[..])?
+                        .new_dataset("phase_step")?
+                            .with_alias("dphi")?
+                            .with_unit("1")?
+                            .with_desc("phase difference between adjacent values of ex, a_rms etc")?
+                            .write(&data.phase_step())?;
+                } else {
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&false)?;
+                }
             },
             OutputMode::None => {},
         }

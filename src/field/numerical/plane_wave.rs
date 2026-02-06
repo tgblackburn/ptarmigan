@@ -3,7 +3,7 @@ use rand::prelude::*;
 
 use crate::constants::*;
 use crate::field::{Field, Polarization, RadiationMode, EquationOfMotion, RadiationEvent, PairCreationEvent};
-use crate::geometry::{FourVector, StokesVector};
+use crate::geometry::{FourVector, StokesVector, ThreeVector};
 use crate::nonlinear_compton;
 use crate::pair_creation;
 
@@ -67,14 +67,43 @@ impl NumericalPW {
         Some((i, di))
     }
 
+    /// Returns the value and 3D gradient of a Gaussian beam
+    fn transverse_profile(r: FourVector, waist: f64, omega: f64) -> (f64, ThreeVector) {
+        use std::f64::consts;
+
+        if !waist.is_finite() {
+            return (1.0, ThreeVector::new(0.0, 0.0, 0.0))
+        }
+
+        let wavelength = 2.0 * consts::PI * SPEED_OF_LIGHT / omega;
+        let z_r = consts::PI * waist * waist / wavelength;
+        let width_sqd = 1.0 + (r[3] / z_r).powi(2);
+        let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / waist.powi(2);
+
+        let beam = (-2.0 * rho_sqd / width_sqd).exp() / width_sqd;
+
+        let grad_beam = ThreeVector::new(
+            -4.0 * beam * r[1] / (waist.powi(2) * width_sqd),
+            -4.0 * beam * r[2] / (waist.powi(2) * width_sqd),
+            (2.0 * beam * r[3] / (z_r.powi(2) * width_sqd)) * (2.0 * rho_sqd / width_sqd - 1.0)
+        );
+
+        (beam, grad_beam)
+    }
+
     pub fn a_sqd(&self, r: FourVector) -> f64 {
         let phase = self.omega() * (r[0] - r[3]) / SPEED_OF_LIGHT;
 
-        self.get_index(phase)
+        let a_sqd = self.get_index(phase)
             .map(|(i, di)| {
                 0.5 * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1])
             })
-            .unwrap_or(0.0)
+            .unwrap_or(0.0);
+
+        let waist = self.inner.params.waist;
+        let (tp, _) = Self::transverse_profile(r, waist, self.omega());
+
+        a_sqd * tp
     }
 
     /// Returns the four-gradient (index raised) of the cycle-averaged
@@ -83,19 +112,25 @@ impl NumericalPW {
     pub fn grad_a_sqd(&self, r: FourVector) -> FourVector {
         let phase = self.omega() * (r[0] - r[3]) / SPEED_OF_LIGHT;
 
-        let grad = self.get_index(phase)
-            .map(|(i, _)| {
+        // Value and gradient of the pulse itself, a_rms^2 f(phi)
+        let (a_sqd, grad_pulse) = self.get_index(phase)
+            .map(|(i, di)| {
+                let a_sqd = 0.5 * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1]);
                 // ∂/∂z ⟨a^2⟩ = -∂/∂t ⟨a^2⟩ = -ω0/c ∂/∂ϕ ⟨a^2⟩
                 let k = self.omega() / SPEED_OF_LIGHT;
-                -0.5 * k * (self.inner.a_sqd[i+1] - self.inner.a_sqd[i]) / self.inner.step
+                let grad = -0.5 * k * (self.inner.a_sqd[i+1] - self.inner.a_sqd[i]) / self.inner.step;
+                (a_sqd, grad)
             })
-            .unwrap_or(0.0);
+            .unwrap_or((0.0, 0.0));
 
-        FourVector::new(
-            -grad,
-            0.0,
-            0.0,
-            -grad,
+        let waist = self.inner.params.waist;
+        let (tp, grad_tp) = Self::transverse_profile(r, waist, self.omega());
+
+        -FourVector::new(
+            tp * grad_pulse,
+            a_sqd * grad_tp[0],
+            a_sqd * grad_tp[1],
+            tp * grad_pulse + a_sqd * grad_tp[2]
         )
     }
 
@@ -119,7 +154,7 @@ impl NumericalPW {
 
 impl Field for NumericalPW {
     fn max_timestep(&self) -> Option<f64> {
-        let dt = 0.5 * self.inner.step / self.omega();
+        let dt = 0.5 / self.omega();
         Some(dt)
     }
 
@@ -270,7 +305,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY).unwrap();
         let laser: NumericalPW = laser.into();
 
         for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {
@@ -295,6 +330,48 @@ mod tests {
             println!(
                 "phi = {:.1} pi, got wavelength of {:.3} um, expected {:.3} um => error = {:.3}%",
                 phi / consts::PI, 1.0e6 * wavelength, 1.0e6 * target_wavelength, 100.0 * error
+            );
+
+            assert!(error < 0.01);
+        }
+    }
+
+    #[test]
+    fn threed_pulse() {
+        use std::f64::consts;
+        use crate::field::Coordinate;
+
+        let lambda = 0.8e-6;
+        let e0 = 2.0 * consts::PI * ELECTRON_MASS * SPEED_OF_LIGHT_SQD / (ELEMENTARY_CHARGE * lambda);
+        let dz = lambda / 100.0;
+        let n_cycles = 16.0;
+        let waist = 3.0e-6;
+
+        let field: Vec<f64> = (0..2000)
+            .map(|i| {
+                let z = -dz * ((i as f64) - 1000.0);
+                let phi = 2.0 * consts::PI * z / lambda;
+                // derivative of cos(phi/2n)^2 cos(psi)
+                let fx = 0.5 * phi.cos() * (phi / n_cycles).sin() / n_cycles + (0.5 * phi / n_cycles).cos().powi(2) * phi.sin();
+                if phi.abs() < consts::PI * n_cycles { e0 * fx } else { 0.0 }
+            })
+            .collect();
+
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, waist).unwrap();
+        let laser: NumericalPW = laser.into();
+
+        for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {
+            let z = -lambda * phi / (2.0 * consts::PI);
+            let r: FourVector = [0.0, waist, 0.0, z].into();
+
+            let a_rms = laser.a_sqd(r).sqrt();
+            let target_a_rms = (0.5 * phi / n_cycles).cos().powi(2) / consts::SQRT_2;
+            let target_a_rms = target_a_rms * (-1_f64).exp();
+            let error = (target_a_rms - a_rms).abs() / target_a_rms;
+
+            println!(
+                "phi = {:.1} pi, got a_rms of {:.4}, expected {:.4} => error = {:.3}%",
+                phi / consts::PI, a_rms, target_a_rms, 100.0 * error
             );
 
             assert!(error < 0.01);

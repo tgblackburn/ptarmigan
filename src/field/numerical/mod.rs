@@ -99,7 +99,7 @@ impl FieldData {
         Ok(())
     }
 
-    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64]) -> Result<Self, FieldDataError> {
+    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
         let mut buffer: Vec<Complex64> = field.iter().map(|ex| Complex64::new(*ex, 0.0)).collect();
@@ -265,7 +265,7 @@ impl FieldData {
             pol_angle: 0.0,
             focusing: false,
             envelope: Envelope::Gaussian,
-            waist: std::f64::INFINITY,
+            waist,
             n_cycles,
             chirp_b: 0.0
         };
@@ -289,22 +289,26 @@ impl FieldData {
     }
 
     /// Returns a slice of all the electric field values
+    #[cfg(feature = "hdf5-output")]
     pub fn ex(&self) -> &[f64] {
         &self.field
     }
 
     /// Returns a slice of all the squared potential values
+    #[cfg(feature = "hdf5-output")]
     pub fn a_sqd(&self) -> &[f64] {
         &self.a_sqd
     }
 
     /// Returns a slice of the instantaneous frequency shift
+    #[cfg(feature = "hdf5-output")]
     pub fn inst_norm_freq(&self) -> &[f64] {
         &self.dpsi_dphi
     }
 
     /// Returns the phase difference between adjacent values
     /// of the field, rms potential etc
+    #[cfg(feature = "hdf5-output")]
     pub fn phase_step(&self) -> f64 {
         self.step
     }
@@ -333,7 +337,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY).unwrap();
         let params = laser.params;
 
         let print_data = false;

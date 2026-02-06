@@ -42,7 +42,7 @@ at which the intensity falls to $1/e^2$ of its maximum value. Otherwise the lase
 
 ## Numerically defined fields
 
-!> At present, file import is only available for linearly polarized, plane-wave (i.e. 1D) laser pulses and while using the LCFA.
+!> At present, file import is only available for linearly polarized laser pulses.
 
 In order to read in a pulse from a plain-text file, create a subsection called `from_plain_text` under `laser` and specify:
 
@@ -50,12 +50,13 @@ In order to read in a pulse from a plain-text file, create a subsection called `
 Ptarmigan will assume these values are given in units of volts per metre.
 * `axis`: either `t` (time) or `z` (space).
 * `step`: the interval between points along the specified axis, in seconds or metres as appropriate, where the electric-field values are defined.
-Ptarmigan will use this value to define the timestep when tracking particles through the pulse.
 
 and optionally:
 
 * `scale` (default is `1.0`): if specified, the electric-field values read in from the file will be multiplied by this value.
 Intended to facilitate intensity scans, given a numerically defined pulse shape.
+* `waist` (default is infinity): if specified, the laser pulse will additionally be given a Gaussian transverse profile, where `waist` is the radius
+at which the intensity falls to $1/e^2$ of its maximum value.
 
 Ptarmigan will preprocess the electric-field values to determine the pulse's amplitude, wavelength and duration.
 The detected values will be printed to standard output and written to `[ident]_particles.h5/config/laser` if HDF5 output is requested.

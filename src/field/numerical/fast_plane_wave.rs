@@ -102,7 +102,7 @@ mod tests {
             })
             .collect();
 
-        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field).unwrap().into();
+        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY).unwrap().into();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -100.0).unitize();
         let z0 = laser.ideal_initial_z();
