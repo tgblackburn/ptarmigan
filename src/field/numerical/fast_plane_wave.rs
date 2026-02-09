@@ -1,5 +1,7 @@
 //! A numerically defined plane-wave laser pulse, for use with the LCFA
 
+use num_complex::Complex64;
+
 use crate::constants::*;
 use crate::field::Field;
 use crate::geometry::{ThreeVector, FourVector};
@@ -70,19 +72,30 @@ impl Field for NumericalFastPW {
         let by = ex / SPEED_OF_LIGHT;
 
         // Transverse profile, lowest order paraxial
-        let tp = if self.inner.params.focusing {
+        // Longitudinal field components, required for focusing
+        let (tp, ez, bz) = if self.inner.params.focusing {
             use std::f64::consts;
             let waist = self.inner.params.waist;
             let wavelength = 2.0 * consts::PI * SPEED_OF_LIGHT / self.omega();
             let z_r = consts::PI * waist * waist / wavelength;
             let width_sqd = 1.0 + (r[3] / z_r).powi(2);
             let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / waist.powi(2);
-            (-rho_sqd / width_sqd).exp() / width_sqd.sqrt()
+            let tp = (-rho_sqd / width_sqd).exp() / width_sqd.sqrt();
+
+            let ex = (1.0 - di) * self.inner.complex_field[i] + di * self.inner.complex_field[i+1];
+            // ez = i ex epsilon f xi = -ex (x / z_R) / (i + z_R)
+            let ez = -ex * (r[1] / z_r) / (z_r + Complex64::i());
+            let ez = ez.re;
+            // bz = i by epsilon f nu = -(ex/c) (y / z_R) / (i + z_R)
+            let bz = -ex * (r[2] / z_r) / (z_r + Complex64::i());
+            let bz = bz.re / SPEED_OF_LIGHT;
+
+            (tp, ez, bz)
         } else {
-            1.0
+            (1.0, 0.0, 0.0)
         };
 
-        ( [ex * tp, 0.0, 0.0].into(), [0.0, by * tp, 0.0].into(), 0.0 )
+        ( [ex * tp, 0.0, ez * tp].into(), [0.0, by * tp, bz * tp].into(), 0.0 )
     }
 
     fn energy(&self) -> (f64, &'static str) {

@@ -27,6 +27,7 @@ pub struct FieldData {
     energy_flux: f64,
     bandwidth: f64, // rms, normalised
     field: Vec<f64>, // electric field
+    complex_field: Vec<Complex64>, // complex electric field, Ex + i Ey
     a_sqd: Vec<f64>, // squared, normalised potential
     dpsi_dphi: Vec<f64>, // local frequency normalised to omega
 }
@@ -99,6 +100,40 @@ impl FieldData {
         Ok(())
     }
 
+    /// Computes the analytical signal associated with the real function f(t)
+    fn analytical_signal(f: &[Complex64]) -> Vec<Complex64> {
+        let mut planner = FftPlanner::new();
+        let mut buffer: Vec<Complex64> = f.to_vec();
+        let n = buffer.len();
+
+        // First, FFT forwards
+        let fft = planner.plan_fft_forward(n);
+        fft.process(&mut buffer);
+
+        // Kill any DC component
+        buffer[0] *= 0.0;
+
+        // Zero out negative frequency components
+        for i in (n/2 + 1)..n {
+            buffer[i] *= 0.0;
+        }
+
+        for i in 1..n/2 {
+            buffer[i] *= 2.0;
+        }
+
+        // Go backwards
+        let fft = planner.plan_fft_inverse(n);
+        fft.process(&mut buffer);
+
+        // Fix magnitudes
+        for v in &mut buffer {
+            *v = *v / (n as f64);
+        }
+
+        buffer
+    }
+
     pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
@@ -167,6 +202,11 @@ impl FieldData {
 
         let processed_field: Vec<f64> = field.iter().map(|ex| ex.re).collect();
 
+        // In order to get paraxial components, or circular polarisation,
+        // we need the analytical signal from the fields, i.e. the complex
+        // form E = E0 e^(i omega t) of which Ex = Re(E).
+        let complex_field = Self::analytical_signal(&field);
+
         // Integrate over field to get potential
         let e_rel = ELECTRON_MASS * SPEED_OF_LIGHT * omega / ELEMENTARY_CHARGE;
         let mut a = Complex64::new(0.0, 0.0);
@@ -179,31 +219,13 @@ impl FieldData {
             if a.re > a0 { a0 = a.re; }
         }
 
-        let mut a = field; // dimensionless potential a = e A / m c
-
-        // Extract analytical signal!
-
-        // First, FFT forwards to get a(omega)
-        let fft = planner.plan_fft_forward(n);
-        fft.process(&mut a);
-
-        // Zero out negative frequency components
-        for i in 1..n/2 {
-            a[i] *= 2.0;
-        }
-        for i in (n/2 + 1)..n {
-            a[i] *= 0.0;
-        }
-
-        // Go backwards to a(t), get envelope and instantaneous phase
-        let fft = planner.plan_fft_inverse(n);
-        fft.process(&mut a);
+        // Extract analytical signal from dimensionless potential a = e A / m c
+        let a = Self::analytical_signal(&field);
 
         let mut env: Vec<f64> = Vec::with_capacity(n);
         let mut psi: Vec<f64> = Vec::with_capacity(n);
 
-        for a_phi in a.iter_mut() {
-            *a_phi /= n as f64;
+        for a_phi in a.iter() {
             env.push(a_phi.norm_sqr());
             psi.push(a_phi.arg());
         }
@@ -279,6 +301,7 @@ impl FieldData {
             energy_flux,
             bandwidth,
             field: processed_field,
+            complex_field,
             a_sqd: env,
             dpsi_dphi,
         })
