@@ -1,5 +1,6 @@
 //! A numerically defined plane-wave laser pulse, for use with the LCFA
 
+use std::f64::consts;
 use num_complex::Complex64;
 
 use crate::constants::*;
@@ -67,14 +68,10 @@ impl Field for NumericalFastPW {
             return ([0.0; 3].into(), [0.0; 3].into(), 0.0);
         }
 
-        // Linear interpolation between specified points
-        let ex = (1.0 - di) * self.inner.field[i] + di * self.inner.field[i+1];
-        let by = ex / SPEED_OF_LIGHT;
+        if self.inner.params.focusing {
+            // Transverse profile, lowest order paraxial
+            // Longitudinal field components, required for focusing
 
-        // Transverse profile, lowest order paraxial
-        // Longitudinal field components, required for focusing
-        let (tp, ez, bz) = if self.inner.params.focusing {
-            use std::f64::consts;
             let waist = self.inner.params.waist;
             let wavelength = 2.0 * consts::PI * SPEED_OF_LIGHT / self.omega();
             let z_r = consts::PI * waist * waist / wavelength;
@@ -82,24 +79,40 @@ impl Field for NumericalFastPW {
             let rho_sqd = (r[1].powi(2) + r[2].powi(2)) / waist.powi(2);
             let tp = (-rho_sqd / width_sqd).exp() / width_sqd.sqrt();
 
-            let ex = (1.0 - di) * self.inner.complex_field[i] + di * self.inner.complex_field[i+1];
-            // ez = i ex epsilon f xi = -ex (x / z_R) / (i + z_R)
-            let ez = -ex * (r[1] / z_r) / (z_r + Complex64::i());
+            let exc = (1.0 - di) * self.inner.field[i] + di * self.inner.field[i+1];
+
+            let eps = waist / z_r;
+            let x = r[1] / waist;
+            let y = r[2] / waist;
+            let z = r[3] / z_r;
+            let f = Complex64::i() / (z + Complex64::i());
+
+            let ex = exc.re;
+
+            let ez = Complex64::i() * exc * eps * f * x;
             let ez = ez.re;
-            // bz = i by epsilon f nu = -(ex/c) (y / z_R) / (i + z_R)
-            let bz = -ex * (r[2] / z_r) / (z_r + Complex64::i());
+
+            let by = exc.re / SPEED_OF_LIGHT;
+
+            let bz = Complex64::i() * exc * eps * f * y;
             let bz = bz.re / SPEED_OF_LIGHT;
 
-            (tp, ez, bz)
+            ( [ex * tp, 0.0, ez * tp].into(), [0.0, by * tp, bz * tp].into(), 0.0 )
         } else {
-            (1.0, 0.0, 0.0)
-        };
-
-        ( [ex * tp, 0.0, ez * tp].into(), [0.0, by * tp, bz * tp].into(), 0.0 )
+            // Linear interpolation between specified points
+            let ex = (1.0 - di) * self.inner.field[i].re + di * self.inner.field[i+1].re;
+            let by = ex / SPEED_OF_LIGHT;
+            ( [ex, 0.0, 0.0].into(), [0.0, by, 0.0].into(), 0.0 )
+        }
     }
 
     fn energy(&self) -> (f64, &'static str) {
-        (self.inner.energy_flux, "J/m^2")
+        if self.inner.params.focusing {
+            let area = 0.5 * consts::PI * self.inner.params.waist.powi(2);
+            (self.inner.energy_flux * area, "J")
+        } else {
+            (self.inner.energy_flux, "J/m^2")
+        }
     }
 }
 

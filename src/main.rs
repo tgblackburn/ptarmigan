@@ -1824,6 +1824,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 if let Some(data) = field.is_numerical() {
                     let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (0.5 * a2).sqrt()).collect();
                     let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
+                    let ex: Vec<f64> = data.electric_field().iter().map(|e| e.re).collect();
 
                     lsrg.new_dataset("imported_from_file")?
                             .write(&true)?
@@ -1831,7 +1832,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                             .with_alias("ex")?
                             .with_unit("V/m")?
                             .with_desc("transverse electric field")?
-                            .write(data.ex())?
+                            .write(&ex[..])?
                         .new_dataset("a_rms")?
                             .with_unit("1")?
                             .with_desc("envelope of the RMS normalised potential")?

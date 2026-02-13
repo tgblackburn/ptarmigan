@@ -168,7 +168,12 @@ impl Field for NumericalPW {
     }
 
     fn energy(&self) -> (f64, &'static str) {
-        (self.inner.energy_flux, "J/m^2")
+        if self.inner.params.focusing {
+            let area = 0.5 * std::f64::consts::PI * self.inner.params.waist.powi(2);
+            (self.inner.energy_flux * area, "J")
+        } else {
+            (self.inner.energy_flux, "J/m^2")
+        }
     }
 
     /// Advances particle position and momentum using a leapfrog method

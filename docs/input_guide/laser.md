@@ -60,6 +60,7 @@ at which the intensity falls to $1/e^2$ of its maximum value.
 
 Ptarmigan will preprocess the electric-field values to determine the pulse's amplitude, wavelength and duration.
 The detected values will be printed to standard output and written to `[ident]_particles.h5/config/laser` if HDF5 output is requested.
+Additionally, the electric field, rms amplitude and local wavelength (as functions of phase) will be written to `[ident]_particles.h5/final-state/laser`.
 It is the user's responsibility to ensure that the density of points and the total interval are large enough to capture the entire pulse with sufficient accuracy.
 
 If the subsection `from_plain_text` is present, it will be prioritized and the parameters given in [Analytically defined fields](#analytically-defined-fields) will be ignored.

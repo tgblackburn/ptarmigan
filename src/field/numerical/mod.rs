@@ -15,6 +15,9 @@ pub use fast_plane_wave::NumericalFastPW;
 mod plane_wave;
 pub use plane_wave::NumericalPW;
 
+mod hilbert;
+use hilbert::AnalyticalSignal;
+
 /// Data necessary to define a custom field structure
 #[allow(unused)]
 #[derive(Clone)]
@@ -26,12 +29,12 @@ pub struct FieldData {
     omega: f64, // angular frequency
     energy_flux: f64,
     bandwidth: f64, // rms, normalised
-    field: Vec<f64>, // electric field
-    complex_field: Vec<Complex64>, // complex electric field, Ex + i Ey
+    field: Vec<Complex64>, // complex electric field, Ex + i Ey
     a_sqd: Vec<f64>, // squared, normalised potential
     dpsi_dphi: Vec<f64>, // local frequency normalised to omega
 }
 
+#[derive(PartialEq, Eq)]
 pub enum Coordinate {
     Space,
     Time,
@@ -100,50 +103,13 @@ impl FieldData {
         Ok(())
     }
 
-    /// Computes the analytical signal associated with the real function f(t)
-    fn analytical_signal(f: &[Complex64]) -> Vec<Complex64> {
-        let mut planner = FftPlanner::new();
-        let mut buffer: Vec<Complex64> = f.to_vec();
-        let n = buffer.len();
-
-        // First, FFT forwards
-        let fft = planner.plan_fft_forward(n);
-        fft.process(&mut buffer);
-
-        // Kill any DC component
-        buffer[0] *= 0.0;
-
-        // Zero out negative frequency components
-        for i in (n/2 + 1)..n {
-            buffer[i] *= 0.0;
-        }
-
-        for i in 1..n/2 {
-            buffer[i] *= 2.0;
-        }
-
-        // Go backwards
-        let fft = planner.plan_fft_inverse(n);
-        fft.process(&mut buffer);
-
-        // Fix magnitudes
-        for v in &mut buffer {
-            *v = *v / (n as f64);
-        }
-
-        buffer
-    }
-
     pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
-        let mut buffer: Vec<Complex64> = field.iter().map(|ex| Complex64::new(*ex, 0.0)).collect();
+        let mut buffer: Vec<Complex64> = field.iter().map(|ex| ex.into()).collect();
         let n = buffer.len();
         let fft = planner.plan_fft_forward(n);
         fft.process(&mut buffer);
-
-        // Take the opportunity to remove any DC component
-        buffer[0] = Complex64::new(0.0, 0.0);
 
         let omega = {
             let mut kappa = 0.0;
@@ -161,11 +127,6 @@ impl FieldData {
                 Coordinate::Space => SPEED_OF_LIGHT * kappa,
                 Coordinate::Time => kappa,
             }
-        };
-
-        let dphi = match coord {
-            Coordinate::Space => omega * delta / SPEED_OF_LIGHT, // lost minus sign
-            Coordinate::Time => omega * delta,
         };
 
         // Determine bandwidth of the pulse
@@ -187,40 +148,36 @@ impl FieldData {
             (num / denom).sqrt() / omega
         };
 
-        // FFT backwards
-        let fft = planner.plan_fft_inverse(n);
-        fft.process(&mut buffer);
-        for ex in buffer.iter_mut() {
-            *ex /= n as f64;
-        }
-
-        // phi = omega (t - z/c) => reverse order if function of z
-        let mut field = match coord {
-            Coordinate::Space => buffer.into_iter().rev().collect(),
-            Coordinate::Time => buffer,
+        let dphi = match coord {
+            Coordinate::Space => omega * delta / SPEED_OF_LIGHT, // lost minus sign
+            Coordinate::Time => omega * delta,
         };
 
-        let processed_field: Vec<f64> = field.iter().map(|ex| ex.re).collect();
+        // phi = omega (t - z/c) => reverse order if function of z
+        let mut field = field.to_vec();
+        if coord == Coordinate::Space { field.reverse(); }
 
         // In order to get paraxial components, or circular polarisation,
         // we need the analytical signal from the fields, i.e. the complex
         // form E = E0 e^(i omega t) of which Ex = Re(E).
-        let complex_field = Self::analytical_signal(&field);
+        let complex_field = field.analytical_signal();
 
         // Integrate over field to get potential
         let e_rel = ELECTRON_MASS * SPEED_OF_LIGHT * omega / ELEMENTARY_CHARGE;
-        let mut a = Complex64::new(0.0, 0.0);
-        let mut a0 = 0.0;
 
-        for ex in field.iter_mut() {
-            let da= *ex * dphi / e_rel;
-            *ex = a;
-            a += da;
-            if a.re > a0 { a0 = a.re; }
+        let mut a: Vec<f64> = Vec::with_capacity(n);
+        let mut acc= 0_f64;
+        let mut a0 = 0_f64;
+
+        for ex in complex_field.iter() {
+            a.push(acc);
+            let da = ex.re * dphi / e_rel;
+            acc += da;
+            if acc > a0 { a0 = acc; }
         }
 
         // Extract analytical signal from dimensionless potential a = e A / m c
-        let a = Self::analytical_signal(&field);
+        let a = a.analytical_signal();
 
         let mut env: Vec<f64> = Vec::with_capacity(n);
         let mut psi: Vec<f64> = Vec::with_capacity(n);
@@ -276,8 +233,8 @@ impl FieldData {
 
         // Get energy flux from electric field
         let dz = SPEED_OF_LIGHT * dphi / omega;
-        let energy_flux = processed_field.iter()
-            .map(|ex| VACUUM_PERMITTIVITY * ex * ex * dz)
+        let energy_flux = complex_field.iter()
+            .map(|ex| VACUUM_PERMITTIVITY * ex.re * ex.re * dz)
             .sum();
    
         let params = LaserParameters {
@@ -300,8 +257,7 @@ impl FieldData {
             omega,
             energy_flux,
             bandwidth,
-            field: processed_field,
-            complex_field,
+            field: complex_field,
             a_sqd: env,
             dpsi_dphi,
         })
@@ -313,7 +269,7 @@ impl FieldData {
 
     /// Returns a slice of all the electric field values
     #[cfg(feature = "hdf5-output")]
-    pub fn ex(&self) -> &[f64] {
+    pub fn electric_field(&self) -> &[Complex64] {
         &self.field
     }
 
@@ -370,7 +326,7 @@ mod tests {
                 writeln!(
                     file,
                     "{:.6e} {:.6e} {:.6e} {:.6e}",
-                    laser.start + (i as f64) * laser.step, laser.field[i], laser.a_sqd[i], laser.dpsi_dphi[i]
+                    laser.start + (i as f64) * laser.step, laser.field[i].re, laser.a_sqd[i], laser.dpsi_dphi[i]
                 ).unwrap();
             }
         }
