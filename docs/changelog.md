@@ -1,5 +1,14 @@
 # Changelog <!-- {docsify-ignore-all} -->
 
+## v1.6.0
+
+In progress.
+
+Added:
+
+* Importing user-defined laser pulses.
+Read in a custom waveform from a file and then simulate a collision using the LCFA or LMA.
+
 ## v1.5.0
 
 2025-06-04
