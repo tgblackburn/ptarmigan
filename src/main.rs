@@ -446,10 +446,27 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })?;
 
         let waist = input.read("laser:waist")
-            .unwrap_or(std::f64::INFINITY);
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(std::f64::INFINITY),
+            })?;
+
+        let pol = input.read::<String, _>("laser:polarization")
+            .and_then(|s| match s.as_str() {
+                "circular" => Ok(Polarization::Circular),
+                "linear" => Ok(Polarization::Linear),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear' or 'circular' for numerically defined pulses.");
+                    Err(InputError::conversion("laser:polarization", "polarization"))
+                },
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(Polarization::Linear),
+            })?;
 
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
-        let data = FieldData::preprocess(coord, step, &field, waist)
+        let data = FieldData::preprocess(coord, step, &field, waist, pol)
             .map_err(|err| {
                 report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")

@@ -94,9 +94,14 @@ impl NumericalPW {
     pub fn a_sqd(&self, r: FourVector) -> f64 {
         let phase = self.omega() * (r[0] - r[3]) / SPEED_OF_LIGHT;
 
+        let norm = match self.inner.params.pol {
+            Polarization::Linear => 0.5,
+            Polarization::Circular => 1.0,
+        };
+
         let a_sqd = self.get_index(phase)
             .map(|(i, di)| {
-                0.5 * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1])
+                norm * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1])
             })
             .unwrap_or(0.0);
 
@@ -112,13 +117,18 @@ impl NumericalPW {
     pub fn grad_a_sqd(&self, r: FourVector) -> FourVector {
         let phase = self.omega() * (r[0] - r[3]) / SPEED_OF_LIGHT;
 
+        let norm = match self.inner.params.pol {
+            Polarization::Linear => 0.5,
+            Polarization::Circular => 1.0,
+        };
+
         // Value and gradient of the pulse itself, a_rms^2 f(phi)
         let (a_sqd, grad_pulse) = self.get_index(phase)
             .map(|(i, di)| {
-                let a_sqd = 0.5 * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1]);
+                let a_sqd =  norm * ((1.0 - di) * self.inner.a_sqd[i] + di * self.inner.a_sqd[i+1]);
                 // ∂/∂z ⟨a^2⟩ = -∂/∂t ⟨a^2⟩ = -ω0/c ∂/∂ϕ ⟨a^2⟩
                 let k = self.omega() / SPEED_OF_LIGHT;
-                let grad = -0.5 * k * (self.inner.a_sqd[i+1] - self.inner.a_sqd[i]) / self.inner.step;
+                let grad = -norm * k * (self.inner.a_sqd[i+1] - self.inner.a_sqd[i]) / self.inner.step;
                 (a_sqd, grad)
             })
             .unwrap_or((0.0, 0.0));
@@ -147,7 +157,10 @@ impl NumericalPW {
     fn landau_lifshitz_work(&self, r: FourVector, u: FourVector) -> f64 {
         let eta = SPEED_OF_LIGHT * COMPTON_TIME * (self.wavevector(r) * u);
         let omega = self.omega();
-        let delta = 0.75; // assumed to be LP
+        let delta = match self.inner.params.pol {
+            Polarization::Circular => 1.0,
+            Polarization::Linear => 0.75,
+        };
         2.0 * ALPHA_FINE * omega * eta * delta * self.a_sqd(r).powi(2) / 3.0
     }
 }
@@ -235,10 +248,10 @@ impl Field for NumericalPW {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector(r);
 
-        let prob = nonlinear_compton::probability(kappa, u, dt, Polarization::Linear, mode).unwrap_or(0.0);
+        let prob = nonlinear_compton::probability(kappa, u, dt, self.inner.params.pol, mode).unwrap_or(0.0);
 
         if rng.gen::<f64>() < prob {
-            let (n, k, pol) = nonlinear_compton::generate(kappa, u, Polarization::Linear, 0.0, mode, rng);
+            let (n, k, pol) = nonlinear_compton::generate(kappa, u, self.inner.params.pol, 0.0, mode, rng);
             let event = RadiationEvent {
                 k,
                 u_prime: u + (n as f64) * kappa - k,
@@ -257,7 +270,7 @@ impl Field for NumericalPW {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector(r);
 
-        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, Polarization::Linear, 0.0);
+        let (prob, pol_new) = pair_creation::probability(ell, pol, kappa, a, dt, self.inner.params.pol, 0.0);
 
         let rate_increase = if prob * rate_increase > 0.1 {
             0.1 / prob // limit the rate increase
@@ -266,7 +279,7 @@ impl Field for NumericalPW {
         };
 
         if rng.gen::<f64>() < prob * rate_increase {
-            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, Polarization::Linear, 0.0, rng);
+            let (n, q_p) = pair_creation::generate(ell, pol, kappa, a, self.inner.params.pol, 0.0, rng);
             let event = PairCreationEvent {
                 u_e: ell + (n as f64) * kappa - q_p,
                 u_p: q_p,
@@ -310,7 +323,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap();
         let laser: NumericalPW = laser.into();
 
         for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {
@@ -362,7 +375,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, waist).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, waist, Polarization::Linear).unwrap();
         let laser: NumericalPW = laser.into();
 
         for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {

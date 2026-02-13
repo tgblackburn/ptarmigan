@@ -4,7 +4,7 @@ use std::f64::consts;
 use num_complex::Complex64;
 
 use crate::constants::*;
-use crate::field::Field;
+use crate::field::{Field, Polarization};
 use crate::geometry::{ThreeVector, FourVector};
 
 use super::FieldData;
@@ -141,7 +141,7 @@ mod tests {
             })
             .collect();
 
-        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY).unwrap().into();
+        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap().into();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -100.0).unitize();
         let z0 = laser.ideal_initial_z();
