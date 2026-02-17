@@ -262,3 +262,7 @@ pub fn weighted_by_pol_y(pt: &Particle) -> f64 {
 pub fn weighted_by_helicity(pt: &Particle) -> f64 {
     pt.polarization()[3] * pt.weight()
 }
+
+pub fn weighted_by_pol_rc(pt: &Particle) -> f64 {
+    0.5 * (1.0 + pt.polarization()[3]) * pt.weight()
+}
