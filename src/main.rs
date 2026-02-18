@@ -1839,7 +1839,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .write(&total_absorption)?;
 
                 if let Some(data) = field.is_numerical() {
-                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (0.5 * a2).sqrt()).collect();
+                    let delta = match data.params().pol {
+                        Polarization::Linear => 0.5,
+                        Polarization::Circular => 1.0,
+                    };
+                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (delta * a2).sqrt()).collect();
                     let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
                     let ex: Vec<f64> = data.electric_field().iter().map(|e| e.re).collect();
 

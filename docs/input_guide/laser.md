@@ -15,6 +15,7 @@ Alternatively, specifying `a0:start`, `a0:step` and `a0:stop` will run a single 
 * `polarization`: the polarization of the carrier wave, either `linear` or `circular`.
 In LP, the default is that the electric field is parallel to the `x` axis.
 Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, where the `angle` is defined with respect to the `x` axis.
+In CP, the default handedness is *left*, i.e. the electric field rotates clockwise around the direction of propagation.
 
 ### Transverse profile
 
@@ -53,14 +54,18 @@ Ptarmigan will assume these values are given in units of volts per metre.
 
 and optionally:
 
-* `scale` (default is `1.0`): if specified, the electric-field values read in from the file will be multiplied by this value.
+* `scale_field_by` (default is `1.0`): if specified, the electric-field values read in from the file will be multiplied by this value.
 Intended to facilitate intensity scans, given a numerically defined pulse shape.
-* `waist` (default is infinity): if specified, the laser pulse will additionally be given a Gaussian transverse profile, where `waist` is the radius
-at which the intensity falls to $1/e^2$ of its maximum value.
 
 Ptarmigan will preprocess the electric-field values to determine the pulse's amplitude, wavelength and duration.
 The detected values will be printed to standard output and written to `[ident]_particles.h5/config/laser` if HDF5 output is requested.
 Additionally, the electric field, rms amplitude and local wavelength (as functions of phase) will be written to `[ident]_particles.h5/final-state/laser`.
 It is the user's responsibility to ensure that the density of points and the total interval are large enough to capture the entire pulse with sufficient accuracy.
+
+The following keys may be specified under the `laser` heading itself, as in the case of an [analytically defined field](#analytically-defined-fields):
+
+* `polarization`: (optional, default = `linear`): the polarization of the carrier wave, either `linear` or `circular`.
+* `waist` (optional, default is infinity): if specified, the laser pulse will additionally be given a Gaussian transverse profile, where `waist` is the radius
+at which the intensity falls to $1/e^2$ of its maximum value.
 
 If the subsection `from_plain_text` is present, it will be prioritized and the parameters given in [Analytically defined fields](#analytically-defined-fields) will be ignored.
