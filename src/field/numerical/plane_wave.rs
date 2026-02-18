@@ -244,7 +244,7 @@ impl Field for NumericalPW {
         (r, u, dt_actual, dwork)
     }
 
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, _rqm: f64, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let a = self.a_sqd(r).sqrt();
         let kappa = SPEED_OF_LIGHT * COMPTON_TIME * self.wavevector(r);
 

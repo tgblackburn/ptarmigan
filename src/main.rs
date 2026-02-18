@@ -166,16 +166,18 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
 
         match pt.species() {
             Species::Electron | Species::Positron => {
+                let rqm = pt.charge_to_mass_ratio();
+
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
                     let (r, mut u, dt_actual, work_done) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
-                        pt.charge_to_mass_ratio(),
+                        rqm,
                         dt,
                         eqn,
                     );
 
-                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, rqm, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)

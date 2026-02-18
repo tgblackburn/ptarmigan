@@ -9,6 +9,10 @@ Added:
 * Importing user-defined laser pulses.
 Read in a custom waveform from a file and then simulate a collision using the LCFA or LMA.
 
+Fixed:
+
+* Sign of instantaneous acceleration for positrons (needed for polarization-resolved emission in CP lasers).
+
 ## v1.5.0
 
 2025-06-04
