@@ -61,13 +61,13 @@ pub trait Field {
         lcf::vay_push(r, u, E, B, rqm, dt, eqn)
     }
 
-    /// Checks to see whether an electron in the field, located at
+    /// Checks to see whether an electron or positron in the field, located at
     /// position `r` with momentum `u` emits a photon, and if so,
     /// returns information about the event (see [RadiationEvent]).
     #[allow(non_snake_case)]
-    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
+    fn radiate<R: Rng>(&self, r: FourVector, u: FourVector, rqm: f64, dt: f64, rng: &mut R, mode: RadiationMode) -> Option<RadiationEvent> {
         let (E, B, a) = self.fields(r);
-        lcf::radiate(u, E, B, a, dt, rng, mode)
+        lcf::radiate(u, E, B, a, rqm, dt, rng, mode)
     }
 
     /// Checks to see if an electron-positron pair is produced by

@@ -103,7 +103,7 @@ impl FieldData {
         Ok(())
     }
 
-    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64) -> Result<Self, FieldDataError> {
+    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64, pol: Polarization) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
         let mut buffer: Vec<Complex64> = field.iter().map(|ex| ex.into()).collect();
@@ -240,7 +240,7 @@ impl FieldData {
         let params = LaserParameters {
             a0,
             wavelength: 2.0 * consts::PI * SPEED_OF_LIGHT / omega,
-            pol: Polarization::Linear,
+            pol,
             pol_angle: 0.0,
             focusing: waist.is_finite(),
             envelope: Envelope::Gaussian,
@@ -316,7 +316,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap();
         let params = laser.params;
 
         let print_data = false;

@@ -166,16 +166,18 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
 
         match pt.species() {
             Species::Electron | Species::Positron => {
+                let rqm = pt.charge_to_mass_ratio();
+
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
                     let (r, mut u, dt_actual, work_done) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
-                        pt.charge_to_mass_ratio(),
+                        rqm,
                         dt,
                         eqn,
                     );
 
-                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, rqm, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -446,10 +448,27 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })?;
 
         let waist = input.read("laser:waist")
-            .unwrap_or(std::f64::INFINITY);
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(std::f64::INFINITY),
+            })?;
+
+        let pol = input.read::<String, _>("laser:polarization")
+            .and_then(|s| match s.as_str() {
+                "circular" => Ok(Polarization::Circular),
+                "linear" => Ok(Polarization::Linear),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear' or 'circular' for numerically defined pulses.");
+                    Err(InputError::conversion("laser:polarization", "polarization"))
+                },
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(Polarization::Linear),
+            })?;
 
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
-        let data = FieldData::preprocess(coord, step, &field, waist)
+        let data = FieldData::preprocess(coord, step, &field, waist, pol)
             .map_err(|err| {
                 report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")
@@ -1822,7 +1841,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .write(&total_absorption)?;
 
                 if let Some(data) = field.is_numerical() {
-                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (0.5 * a2).sqrt()).collect();
+                    let delta = match data.params().pol {
+                        Polarization::Linear => 0.5,
+                        Polarization::Circular => 1.0,
+                    };
+                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (delta * a2).sqrt()).collect();
                     let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
                     let ex: Vec<f64> = data.electric_field().iter().map(|e| e.re).collect();
 

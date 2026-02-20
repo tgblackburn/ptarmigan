@@ -4,7 +4,7 @@ use std::f64::consts;
 use num_complex::Complex64;
 
 use crate::constants::*;
-use crate::field::Field;
+use crate::field::{Field, Polarization};
 use crate::geometry::{ThreeVector, FourVector};
 
 use super::FieldData;
@@ -68,6 +68,11 @@ impl Field for NumericalFastPW {
             return ([0.0; 3].into(), [0.0; 3].into(), 0.0);
         }
 
+        let delta = match self.inner.params.pol {
+            Polarization::Linear => 0.0f64,
+            Polarization::Circular => 1.0f64,
+        };
+
         if self.inner.params.focusing {
             // Transverse profile, lowest order paraxial
             // Longitudinal field components, required for focusing
@@ -97,12 +102,27 @@ impl Field for NumericalFastPW {
             let bz = Complex64::i() * exc * eps * f * y;
             let bz = bz.re / SPEED_OF_LIGHT;
 
-            ( [ex * tp, 0.0, ez * tp].into(), [0.0, by * tp, bz * tp].into(), 0.0 )
+            // CP components, x -> y, y -> -x, multiply by im by -delta
+
+            let ey2 = -delta * exc.im;
+
+            let ez2 = Complex64::i() * exc * eps * f * y;
+            let ez2 = -delta * ez2.im;
+
+            let bx2 = delta * exc.im / SPEED_OF_LIGHT;
+
+            let bz2 = -Complex64::i() * exc * eps * f * x;
+            let bz2 = -delta * bz2.im / SPEED_OF_LIGHT;
+
+            ( [ex * tp, ey2 * tp, (ez + ez2) * tp].into(), [bx2 * tp, by * tp, (bz + bz2) * tp].into(), 0.0 )
         } else {
             // Linear interpolation between specified points
-            let ex = (1.0 - di) * self.inner.field[i].re + di * self.inner.field[i+1].re;
+            let ec = (1.0 - di) * self.inner.field[i] + di * self.inner.field[i+1];
+            let ex = ec.re;
+            let ey = -delta * ec.im; // left-handed
             let by = ex / SPEED_OF_LIGHT;
-            ( [ex, 0.0, 0.0].into(), [0.0, by, 0.0].into(), 0.0 )
+            let bx = -ey / SPEED_OF_LIGHT;
+            ( [ex, ey, 0.0].into(), [bx, by, 0.0].into(), 0.0 )
         }
     }
 
@@ -141,7 +161,7 @@ mod tests {
             })
             .collect();
 
-        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY).unwrap().into();
+        let laser: NumericalFastPW = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap().into();
 
         let mut u = FourVector::new(0.0, 0.0, 0.0, -100.0).unitize();
         let z0 = laser.ideal_initial_z();
