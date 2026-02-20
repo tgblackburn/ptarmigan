@@ -19,6 +19,7 @@
 /examples/custom_laser/*
 !/examples/custom_laser/*.yml
 !/examples/custom_laser/*.ipynb
+!/examples/custom_laser/ex.dat
 
 /.vscode
 /.DS_Store
