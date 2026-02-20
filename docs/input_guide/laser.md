@@ -43,13 +43,12 @@ at which the intensity falls to $1/e^2$ of its maximum value. Otherwise the lase
 
 ## Numerically defined fields
 
-!> At present, file import is only available for linearly polarized laser pulses.
-
 In order to read in a pulse from a plain-text file, create a subsection called `from_plain_text` under `laser` and specify:
 
 * `file`: the name of a plain-text formatted file, which contains electric-field values (one per line).
 Ptarmigan will assume these values are given in units of volts per metre.
 * `axis`: either `t` (time) or `z` (space).
+In the latter case, the pulse is assumed to be propagating towards positive z.
 * `step`: the interval between points along the specified axis, in seconds or metres as appropriate, where the electric-field values are defined.
 
 and optionally:
@@ -69,3 +68,5 @@ The following keys may be specified under the `laser` heading itself, as in the 
 at which the intensity falls to $1/e^2$ of its maximum value.
 
 If the subsection `from_plain_text` is present, it will be prioritized and the parameters given in [Analytically defined fields](#analytically-defined-fields) will be ignored.
+
+An example of a custom laser pulse may be found in `examples/custom_laser`.

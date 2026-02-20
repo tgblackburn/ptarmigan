@@ -1,0 +1,31 @@
+---
+# Simulate the collision of an electron with a non-Gaussian laser pulse
+
+control:
+  pair_creation: false
+  # Both LMA and LCFA are available for imported pulses:
+  lcfa: true # false
+
+laser:
+  # The default polarization for an imported pulse is linear,
+  # but this can be changed if so desired:
+  polarization: linear # circular
+  from_plain_text:
+    file: ex.dat
+    axis: z
+    step: 0.05 * micro
+
+beam:
+  ne: 100000
+  n_real: 1.0
+  gamma: 1000 * MeV / (m * c^2)
+
+output:
+  dump_all_particles: hdf5
+  coordinate_system: beam
+  file_format: fits
+  electron:
+    - energy
+  photon:
+    - energy:(energy)
+    - angle_x:angle_y:(auto; auto; angle in auto, 10 * milli)
