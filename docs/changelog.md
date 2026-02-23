@@ -12,6 +12,7 @@ Read in a custom waveform from a file and then simulate a collision using the LC
 Fixed:
 
 * Sign of instantaneous acceleration for positrons (needed for polarization-resolved emission in CP lasers).
+* Treatment of bounds (as inclusive) when importing custom energy spectra.
 
 ## v1.5.0
 

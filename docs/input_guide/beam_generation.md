@@ -26,9 +26,14 @@ Alternatively, you can specify a custom spectrum in a sub-section of `beam`:
 * `spectrum`:
   * `function`: a mathematical expression for the spectrum as a function of `gamma`, **or**:
   * `file`: path to a plain-text file of new-line separated values of the spectrum, evaluated at evenly spaced points.
+  The values are assumed to be `f(min), f(min + step), ..., f(max - step), f(max)`, i.e. inclusive of the values of the spectrum at the bounds `min` and `max`.
   * `min`: the minimum value of the Lorentz factor.
   * `max`: the maximum value of the Lorentz factor, **or**, if reading from a file:
   * `step` (optional): the spacing between sampling points.
+  * `interpolation_order` (optional, default = `1`): use linear (`1`) or quadratic (`2`) interpolation when evaluating the spectrum between points.
+
+Ptarmigan will sample Lorentz factors from the half-open interval `min <= gamma < max`.
+The spectrum does not need to be normalised, but it must satisfy `f(gamma) >= 0` over the specified interval.
 
 Examples:
 

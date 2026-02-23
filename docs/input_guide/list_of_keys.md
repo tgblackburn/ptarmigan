@@ -24,6 +24,10 @@
 | `laser`   |             | `fwhm_duration`         | if `envelope: gaussian`          | numerical                                   | -                               | units of seconds                                                                             |
 | `laser`   |             | `chirp_coeff`           | optional                         | numerical                                   | `0.0`                           | ignored in 3D                                                                                |
 | `laser`   |             | `polarization`          | **yes**                          | `linear` / `linear pol_spec` / `circular`   | -                               | `pol_spec` one of `@ angle`, `\|\| x`, `\|\| y`                                              |
+| `laser`   | `from_plain_text` | `file`           | optional            | file path | -     | alternative to `a0`, `wavelength` etc. |
+| `laser`   | `from_plain text` | `axis`           | if `file` specified | `t` / `z` | -     | |
+| `laser`   | `from_plain text` | `step`           | if `file` specified | numerical | -     | in units of seconds or metres, as appropriate |
+| `laser`   | `from_plain text` | `scale_field_by` | optional            | numerical | `1.0` | |
 ||
 | `beam`    |             | `n`                     | **yes**                          | integer                                     | -                               |                                                                                              |
 | `beam`    |             | `n_real`                | optional                         | numerical                                   | `n`                             | alternative to `charge`                                                                      |
@@ -36,6 +40,7 @@
 | `beam`    | `spectrum`  | `min`                   | **yes**                          | numerical                                   | -                               |                                                                                              |
 | `beam`    | `spectrum`  | `max`                   | **yes**                          | numerical                                   | -                               |                                                                                              |
 | `beam`    | `spectrum`  | `step`                  | optional                         | numerical                                   | -                               | read if `spectrum:file` is specified                                                         |
+| `beam`    | `spectrum`  | `interpolation_order`   | optional                         | `1` / `2`                                   | `1`                             | read if `spectrum:file` is specified                                                         |
 | `beam`    |             | `rms_divergence`        | optional                         | numerical                                   | `0.0`                           | in units of radians                                                                          |
 | `beam`    |             | `radius`                | optional                         | numerical / `[radius, dstr, max]`           | `[0.0, normally_distributed]`   | `radius` in units of metres, `dstr` one of `normally_distributed` or `uniformly_distributed` |
 | `beam`    |             | `length`                | optional                         | numerical                                   | `0.0`                           | in units of metres                                                                           |

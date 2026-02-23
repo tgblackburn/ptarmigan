@@ -1,6 +1,9 @@
 //! Probability distribution functions
 
+use std::convert::{TryFrom, TryInto};
+use std::error::Error;
 use std::f64::consts;
+use std::fmt;
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 use crate::geometry::ThreeVector;
@@ -50,6 +53,49 @@ impl RadialDistribution {
     }
 }
 
+pub enum DistributionError {
+    NonNumerical,
+    Positivity,
+    Length,
+    InterpolationOrder,
+}
+
+impl fmt::Debug for DistributionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DistributionError::NonNumerical => write!(f, "the distribution contains non-numerical values"),
+            DistributionError::Positivity => write!(f, "the distribution contains negative values"),
+            DistributionError::Length => write!(f, "the number of points in distribution < 2"),
+            DistributionError::InterpolationOrder => write!(f, "the interpolation order is not one or two"),
+        }
+    }
+}
+
+impl fmt::Display for DistributionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Error for DistributionError {}
+
+#[derive(Copy, Clone)]
+pub enum InterpolationOrder {
+    Linear = 1,
+    Quadratic = 2,
+}
+
+impl TryFrom<i32> for InterpolationOrder {
+    type Error = DistributionError;
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(InterpolationOrder::Linear),
+            2 => Ok(InterpolationOrder::Quadratic),
+            _ => Err(DistributionError::InterpolationOrder)
+        }
+    }
+}
+
 /// Represents the distribution of Lorentz factors (i.e. energy divided by
 /// the mass) in a particle beam
 #[derive(Clone)]
@@ -68,11 +114,13 @@ pub enum GammaDistribution {
     /// Arbitrary function
     Custom {
         vals: Vec<f64>,
+        /// Guaranteed to satisfy 0 <= cdf <= 1.
         cdf: Vec<[f64; 2]>,
         min: f64,
         max: f64,
         step: f64,
         rho: f64,
+        order: InterpolationOrder,
     }
 }
 
@@ -85,23 +133,43 @@ impl GammaDistribution {
         Self::Brem { min: min_gamma, max: max_gamma }
     }
 
-    pub fn custom(vals: Vec<f64>, min: f64, max: f64, step: f64) -> Option<Self> {
-        if vals.iter().any(|v| !v.is_finite()) {
-            None
-        } else {
-            let total: f64 = vals.iter().sum();
+    pub fn custom(vals: Vec<f64>, min: f64, max: f64, step: f64, order: i32) -> Result<Self, DistributionError> {
+        let order: InterpolationOrder = order.try_into()?;
 
+        if vals.iter().any(|v| !v.is_finite()) {
+            Err(DistributionError::NonNumerical)
+        } else if vals.iter().any(|v| *v < 0.0) {
+            Err(DistributionError::Positivity)
+        } else if vals.len() < 2 {
+            Err(DistributionError::Length)
+        } else {
             let mut cdf: Vec<[f64; 2]> = vec![];
-            cdf.push([min, 0.0]);
             let mut gamma = min;
             let mut rt = 0.0;
-            for v in vals.iter() {
-                gamma += step;
-                rt += v;
-                cdf.push([gamma, rt / total]);
+            cdf.push([gamma, rt]);
+
+            for y in vals.windows(2) {
+                match order {
+                    InterpolationOrder::Linear => {
+                        let mid = rt + 0.125 * (3.0 * y[0] + y[1]);
+                        cdf.push([gamma + 0.5 * step, mid]);
+                        gamma += step;
+                        rt += 0.5 * (y[0] + y[1]);
+                        cdf.push([gamma, rt]);
+                    },
+                    InterpolationOrder::Quadratic => {
+                        gamma += step;
+                        rt += 0.5 * (y[0] + y[1]);
+                        cdf.push([gamma, rt]);
+                    },
+                }
             }
 
-            Some(Self::Custom { vals, cdf, min, max, step, rho: 0.0 })
+            for entry in cdf.iter_mut() {
+                entry[1] /= rt;
+            }
+
+            Ok(Self::Custom { vals, cdf, min, max, step, rho: 0.0, order })
         }
     }
 
@@ -109,7 +177,7 @@ impl GammaDistribution {
         match self {
             Self::Normal { mu, sigma: _, rho: _ } => *mu,
             Self::Brem { min: _, max } => *max,
-            Self::Custom { vals, cdf: _, min, max: _, step, rho: _ } => {
+            Self::Custom { vals, cdf: _, min, max: _, step, rho: _, order: _ } => {
                 let moments = vals.iter()
                     .enumerate()
                     .map(|(i, f)| {
@@ -132,7 +200,7 @@ impl GammaDistribution {
             Self::Normal { mu: _, sigma, rho: _ } => *sigma,
             // approximation that works for min / max > 0.2
             Self::Brem { min, max } => 0.5 * (max - min) / 3_f64.sqrt(),
-            Self::Custom { vals, cdf: _, min, max: _, step, rho: _ } => {
+            Self::Custom { vals, cdf: _, min, max: _, step, rho: _ , order: _} => {
                 let moments = vals.iter()
                     .enumerate()
                     .map(|(i, f)| {
@@ -154,7 +222,7 @@ impl GammaDistribution {
         match self {
             Self::Normal { mu, sigma, rho: _ } => mu - 3.0 * sigma,
             Self::Brem { min, max: _ } => *min,
-            Self::Custom { vals: _, cdf: _, min, max: _, step: _, rho: _ } => *min,
+            Self::Custom { vals: _, cdf: _, min, max: _, step: _, rho: _, order: _ } => *min,
         }
     }
 
@@ -190,7 +258,7 @@ impl GammaDistribution {
                 (x * max, dz)
             },
 
-            Self::Custom { vals: _, cdf, min: _, max: _, step: _, rho} => {
+            Self::Custom { vals: _, cdf, min: _, max: _, step: _, rho, order} => {
                 // Correlated variables
                 let n0 = rng.sample::<f64,_>(StandardNormal);
                 let n1 = {
@@ -205,8 +273,37 @@ impl GammaDistribution {
                     0.5 * (1.0 + erf_x)
                 };
 
+                let u1 = u1.clamp(0.0, 1.0);
+
+                let gamma = match order {
+                    InterpolationOrder::Linear => {
+                        let index = cdf.iter().step_by(2).position(|[_, y]| u1 < *y).unwrap();
+                        let index = 2 * index;
+                        let [x0, c0] = cdf[index-2];
+                        let [_, c1] = cdf[index-1];
+                        let [x2, c2] = cdf[index];
+                        let d = x2 - x0; // x1 is midpoint
+                        // cdf = alpha * gamma^2 + beta * gamma + charl
+                        let alpha = 2.0 * (c0 - 2.0 * c1 + c2) / (d * d);
+                        let bravo = -(3.0 * c0 - 4.0 * c1 + c2) / d - 4.0 * (c0 - 2.0 * c1 + c2) * x0 / (d * d);
+                        let charl = c0 + (3.0 * c0 - 4.0 * c1 + c2) * x0 / d + 2.0 * (c0 - 2.0 * c1 + c2) * x0 * x0 / (d * d);
+                        // solve u1 = cdf
+                        let charl = charl - u1;
+                        let det = bravo * bravo - 4.0 * alpha * charl;
+                        let gamma = if alpha != 0.0 && det >= 0.0 {
+                            (-bravo + det.sqrt()) / (2.0 * alpha)
+                        } else {
+                            // fall back to linear
+                            x0 + (u1 - c0) * (x2 - x0) / (c2 - c0)
+                        };
+                        gamma
+                    },
+                    InterpolationOrder::Quadratic => {
+                        Interpolant::new(cdf).invert(u1).unwrap()
+                    },
+                };
+
                 let dz = sigma_z * n0;
-                let gamma = Interpolant::new(cdf).invert(u1).unwrap();
 
                 (gamma, dz)
             },

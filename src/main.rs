@@ -418,7 +418,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 "z" => Ok(Coordinate::Space),
                 "t" => Ok(Coordinate::Time),
                 _ => {
-                    report!(Diagnostic::Error, id == 0, "Invalid axis (\"{}\"). Imported field data must be a function of z or t.", s);
+                    report!(Diagnostic::Error, id == 0, "invalid axis (\"{}\"). Imported field data must be a function of z or t.", s);
                     Err(InputError::conversion("laser:from_plain_text:axis", "axis"))
                 }
             })
@@ -434,8 +434,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         // Read the contents of the file
         let field = std::fs::read_to_string(&filename)
             .or_else(|_| {
-                report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
-                Err(InputError::location("laser:from_plain_text:file", "file"))
+                report!(Diagnostic::Error, id == 0, "unable to open \"{}\": no such file or directory.", filename);
+                Err(InputError::import("laser:from_plain_text:file", "file"))
             })?
             .lines()
             .map(|s| {
@@ -443,8 +443,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })
             .collect::<Result<Vec<f64>,_>>()
             .or_else(|_| {
-                report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of field values.", filename);
-                Err(InputError::conversion("laser:from_plain_text:file", "file"))
+                report!(Diagnostic::Error, id == 0, "unable to import \"{}\" as a 1D array of field values.", filename);
+                Err(InputError::import("laser:from_plain_text:file", "file"))
             })?;
 
         let waist = input.read("laser:waist")
@@ -470,7 +470,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
         let data = FieldData::preprocess(coord, step, &field, waist, pol)
             .map_err(|err| {
-                report!(Diagnostic::Error, id == 0, "Unable to preprocess custom laser: {}.", err.cause);
+                report!(Diagnostic::Error, id == 0, "unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")
             })?;
 
@@ -642,7 +642,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let beam = if input.contains("beam:from_hdf5") {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
-            return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
+            return Err(InputError::import("beam:from_hdf5:file", "file").into());
         }
 
         #[cfg(feature = "hdf5-output")] {
@@ -721,6 +721,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
             let analytical = input.contains("beam:spectrum:function");
             let numerical = input.contains("beam:spectrum:file");
+            let order = input.read("beam:spectrum:interpolation_order").unwrap_or(1_i64) as i32;
 
             if analytical && numerical {
                 report!(Diagnostic::Error, id == 0, "specify a function or a file in beam:spectrum, not both.");
@@ -734,13 +735,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .unwrap_or((10.0 + 2.0 * (npart as f64).cbrt()) as usize);
                 let step = (max - min) / (n as f64);
 
-                let vals: Vec<f64> = (0..n)
+                let vals: Vec<f64> = (0..=n)
                     .map(|i| func(min + (i as f64) * step))
                     .collect();
 
-                GammaDistribution::custom(vals, min, max, step)
-                    .ok_or_else(|| {
-                        report!(Diagnostic::Error, id == 0, "beam:spectrum:function evaluated to non-numerical values in the specified domain.");
+                GammaDistribution::custom(vals, min, max, step, order)
+                    .map_err(|e| {
+                        report!(Diagnostic::Error, id == 0, "specified function invalid because {}.", e);
                         InputError::conversion("beam:spectrum:function", "function")
                     })?
             } else {
@@ -756,15 +757,15 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 // Read the contents of the file
                 let vals = std::fs::read_to_string(&filename)
                     .or_else(|_| {
-                        report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
-                        Err(InputError::location("beam:spectrum:file", "file"))
+                        report!(Diagnostic::Error, id == 0, "unable to open \"{}\": no such file or directory.", filename);
+                        Err(InputError::import("beam:spectrum:file", "file"))
                     })?
                     .lines()
                     .map(|s| s.parse::<f64>())
                     .collect::<Result<Vec<f64>,_>>()
                     .or_else(|_| {
-                        report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of spectral values.", filename);
-                        Err(InputError::conversion("beam:spectrum:file", "file"))
+                        report!(Diagnostic::Error, id == 0, "unable to import \"{}\" as a 1D array of spectral values.", filename);
+                        Err(InputError::import("beam:spectrum:file", "file"))
                     })?;
 
                 let n = vals.len() - 1; // number of steps, not entries
@@ -777,10 +778,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     })
                     ?;
 
-                GammaDistribution::custom(vals, min, max, step)
-                    .ok_or_else(|| {
-                        report!(Diagnostic::Error, id == 0, "beam:spectrum:file contains non-numerical values.");
-                        InputError::conversion("beam:spectrum:file", "file")
+                GammaDistribution::custom(vals, min, max, step, order)
+                    .map_err(|e| {
+                        report!(Diagnostic::Error, id == 0, "imported spectrum invalid because {}.", e);
+                        InputError::import("beam:spectrum:file", "file")
                     })?
             }
         } else if use_brem_spec {
