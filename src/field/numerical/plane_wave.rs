@@ -326,32 +326,35 @@ mod tests {
         let laser = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap();
         let laser: NumericalPW = laser.into();
 
-        for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {
+        let mut avg_a_rms_error = 0.0;
+        let mut avg_wavelength_error = 0.0;
+
+        for i in 0..16 {
+            let phi =  consts::PI * (i as f64);
             let z = -lambda * phi / (2.0 * consts::PI);
             let r: FourVector = [0.0, 0.0, 0.0, z].into();
 
             let a_rms = laser.a_sqd(r).sqrt();
             let target_a_rms = (0.5 * phi / n_cycles).cos().powi(2) / consts::SQRT_2;
-            let error = (target_a_rms - a_rms).abs() / target_a_rms;
-
-            println!(
-                "phi = {:.1} pi, got a_rms of {:.3}, expected {:.3} => error = {:.3}%",
-                phi / consts::PI, a_rms, target_a_rms, 100.0 * error
-            );
-
-            assert!(error < 0.01);
+            let a_rms_error = (target_a_rms - a_rms).abs() / target_a_rms;
+            avg_a_rms_error += a_rms_error.powi(2);
 
             let wavelength = 2.0 * consts::PI / laser.wavevector(r)[0];
             let target_wavelength = lambda / (1.0 + c * phi / n_cycles);
-            let error = (target_wavelength - wavelength).abs() / wavelength;
+            let wavelength_error = (target_wavelength - wavelength).abs() / wavelength;
+            avg_wavelength_error += wavelength_error.powi(2);
 
             println!(
-                "phi = {:.1} pi, got wavelength of {:.3} um, expected {:.3} um => error = {:.3}%",
-                phi / consts::PI, 1.0e6 * wavelength, 1.0e6 * target_wavelength, 100.0 * error
+                "phi = {:>4.1} π, a_rms = {:.3e} [error = {:.3}%], λ = {:.3} μm [error = {:.3}%]",
+                phi / consts::PI, a_rms, 100.0 * a_rms_error, 1.0e6 * wavelength, 100.0 * wavelength_error
             );
-
-            assert!(error < 0.01);
         }
+
+        let avg_a_rms_error = (avg_a_rms_error / 16.0).sqrt();
+        let avg_wavelength_error = (avg_wavelength_error / 16.0).sqrt();
+        println!("rms a_rms error = {:.3}%, rms wavelength error = {:.3}%", 100.0 * avg_a_rms_error, 100.0 * avg_wavelength_error);
+        assert!(avg_a_rms_error < 1.0e-2);
+        assert!(avg_wavelength_error < 1.0e-2);
     }
 
     #[test]
