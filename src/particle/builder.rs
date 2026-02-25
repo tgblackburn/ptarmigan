@@ -1,8 +1,9 @@
+use std::f64::consts;
 use rand::prelude::*;
 use rand_distr::StandardNormal;
 use crate::geometry::{ThreeVector, FourVector, StokesVector};
 use super::{Species, Particle};
-use super::dstr::{RadialDistribution, GammaDistribution};
+use super::dstr::{GammaDistribution, SpatialDistribution};
 
 #[derive(Clone)]
 pub struct BeamBuilder {
@@ -10,8 +11,8 @@ pub struct BeamBuilder {
     num: usize,
     pub weight: f64,
     gamma_dstr: GammaDistribution,
-    radial_dstr: RadialDistribution,
-    pub sigma_z: f64,
+    r_dstr: SpatialDistribution,
+    z_dstr: SpatialDistribution,
     angle: f64,
     collision_plane_angle: f64,
     pub rms_div: f64,
@@ -28,8 +29,8 @@ impl BeamBuilder {
             weight: 1.0,
             // gamma_dstr: GammaDistribution::Normal { mu: 1.0, sigma: 0.0, rho: 0.0 },
             gamma_dstr,
-            radial_dstr: RadialDistribution::Uniform {r_max: 0.0},
-            sigma_z: 0.0,
+            r_dstr: SpatialDistribution::Normal { sigma: 0.0, max: None, dim: 2 },
+            z_dstr: SpatialDistribution::Normal { sigma: 0.0, max: None, dim: 1 },
             angle: 0.0,
             collision_plane_angle: 0.0,
             rms_div: 0.0,
@@ -74,30 +75,16 @@ impl BeamBuilder {
         }
     }
 
-    pub fn with_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64) -> Self {
+    pub fn with_transverse_dstr(self, dstr: SpatialDistribution) -> Self {
         BeamBuilder {
-            radial_dstr: RadialDistribution::Normal { sigma_x, sigma_y },
+            r_dstr: dstr,
             ..self
         }
     }
 
-    pub fn with_trunc_normally_distributed_xy(self, sigma_x: f64, sigma_y: f64, x_max: f64, y_max: f64) -> Self {
+    pub fn with_longitudinal_dstr(self, dstr: SpatialDistribution) -> Self {
         BeamBuilder {
-            radial_dstr: RadialDistribution::TruncNormal { sigma_x, sigma_y, x_max, y_max },
-            ..self
-        }
-    }
-
-    pub fn with_uniformly_distributed_xy(self, r_max: f64) -> Self {
-        BeamBuilder {
-            radial_dstr: RadialDistribution::Uniform { r_max },
-            ..self
-        }
-    }
-
-    pub fn with_length(self, sigma_z: f64) -> Self {
-        BeamBuilder {
-            sigma_z,
+            z_dstr: dstr,
             ..self
         }
     }
@@ -110,16 +97,8 @@ impl BeamBuilder {
     }
 
     pub fn with_energy_chirp(self, energy_chirp: f64) -> Self {
-        let gamma_dstr = match self.gamma_dstr {
-            GammaDistribution::Normal { mu, sigma, rho: _ } => {
-                // note sign change!
-                GammaDistribution::Normal { mu, sigma, rho: -energy_chirp}
-            },
-            GammaDistribution::Custom { vals, cdf, min, max, step, rho: _, order } => {
-                GammaDistribution::Custom { vals, cdf, min, max, step, rho: -energy_chirp, order }
-            }
-            _ => self.gamma_dstr,
-        };
+        // note sign change!
+        let gamma_dstr = self.gamma_dstr.with_correlation_coeff(-energy_chirp);
 
         BeamBuilder {
             gamma_dstr,
@@ -136,7 +115,7 @@ impl BeamBuilder {
 
     #[cfg(feature = "hdf5-output")]
     pub fn transverse_dstr_is_normal(&self) -> bool {
-        matches!(self.radial_dstr, RadialDistribution::Normal {..} | RadialDistribution::TruncNormal {..})
+        matches!(self.r_dstr, SpatialDistribution::Normal { .. })
     }
 
     #[cfg(feature = "hdf5-output")]
@@ -149,11 +128,15 @@ impl BeamBuilder {
 
     #[cfg(feature = "hdf5-output")]
     pub fn radius(&self) -> (f64, f64) {
-        match self.radial_dstr {
-            RadialDistribution::Normal { sigma_x, sigma_y: _ } => (sigma_x, std::f64::INFINITY),
-            RadialDistribution::TruncNormal { sigma_x, sigma_y: _, x_max, y_max: _ } => (sigma_x, x_max),
-            RadialDistribution::Uniform { r_max } => (r_max, r_max),
+        match self.r_dstr {
+            SpatialDistribution::Normal { sigma, max, dim: _ } => (sigma, max.unwrap_or(std::f64::INFINITY)),
+            SpatialDistribution::Disk { max, dim: _ } => (max, max),
         }
+    }
+
+    /// Root mean square displacement of a particle from the beam centroid, along the beam propagation axis
+    pub fn sigma_z(&self) -> f64 {
+        self.z_dstr.std_dev()
     }
 
     pub fn gamma(&self) -> f64 {
@@ -175,7 +158,7 @@ impl BeamBuilder {
         (0..self.num).into_iter()
             .map(|i| {
                 // Sample gamma from relevant distribution
-                let (gamma, dz) = self.gamma_dstr.sample(self.sigma_z, rng);
+                let (gamma, dz) = self.gamma_dstr.sample(&self.z_dstr, rng);
 
                 let u = match self.species {
                     Species::Electron | Species::Positron => -(gamma * gamma - 1.0).sqrt(),
@@ -200,7 +183,10 @@ impl BeamBuilder {
                     (-self.initial_z - self.offset[2].abs(), self.initial_z + dz)
                 };
 
-                let (x, y) = self.radial_dstr.sample(rng);
+                let r = self.r_dstr.sample(rng.gen());
+                let theta = 2.0 * consts::PI * rng.gen::<f64>();
+                let x = r * theta.cos();
+                let y = r * theta.sin();
 
                 let (x, y) = (x + self.offset[0], y + self.offset[1]);
                 let r = ThreeVector::new(x, y, z);

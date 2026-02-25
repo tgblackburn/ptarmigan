@@ -802,50 +802,57 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         // Spatial structure
 
-        let length: f64 = input.read("beam:length").unwrap_or(0.0);
+        fn read_spatial_dstr(input: &Config, name: &str, dim: i32, id: i32) -> Result<SpatialDistribution, InputError> {
+            let vs: Vec<String> = input.read(name)
+                .unwrap_or_else(|_| vec![]);
+
+            // whether a single f64 or a tuple of [f64, dstr],
+            // the first value must be the radius/length
+            let length = vs.first()
+                .map_or(Some(0_f64), |s| input.evaluate(s))
+                .ok_or_else(|| InputError::conversion("beam", name));
+
+            // a second entry, if present, is a distribution spec
+            let normally_distributed = vs.get(1)
+                .map_or(
+                    Ok(true),
+                    |s| match s.as_str() {
+                        "normally_distributed" => Ok(true),
+                        "uniformly_distributed" => Ok(false),
+                        _ => Err(InputError::conversion("beam", name)),
+                    });
+
+            // a third entry, if present, would be the optional cutoff for a
+            // normal distribution
+            let max_length: Option<f64> = vs.get(2)
+                .and_then(|s| input.evaluate(s));
+
+            if let (Ok(len), Ok(ndstr)) = (length, normally_distributed) {
+                if ndstr {
+                    Ok(SpatialDistribution::normal(len, max_length, dim))
+                } else {
+                    Ok(SpatialDistribution::uniform(len, dim))
+                }
+            } else {
+                let key = name.split(":").last().unwrap();
+                report!(
+                    Diagnostic::Error, id == 0, concat!(
+                    "beam {0} must be specified with a single numerical value, e.g.,\n",
+                    "         {0}: 2.0e-6\n",
+                    "       or as a numerical value and a distribution, e.g.,\n",
+                    "         {0}: [2.0e-6, uniformly_distributed]\n",
+                    "         {0}: [2.0e-6, normally_distributed]."
+                    ),
+                    key
+                );
+                Err(InputError::conversion(name, key))
+            }
+        }
+
+        let z_dstr = read_spatial_dstr(&input, "beam:length", 1, id)?;
+        let x_dstr = read_spatial_dstr(&input, "beam:radius", 2, id)?;
 
         let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
-
-        let (radius, normally_distributed, max_radius) = input.read::<Vec<String>,_>("beam:radius")
-            .and_then(|vs| {
-                // whether a single f64 or a tuple of [f64, dstr],
-                // the first value must be the radius
-                let radius = vs.first().map(|s| input.evaluate(s)).flatten();
-
-                // a second entry, if present, is a distribution spec
-                let normally_distributed = match vs.get(1) {
-                    None => Some(true), // if not specified at all, assume normally distributed
-                    Some(s) if s == "normally_distributed" => Some(true),
-                    Some(s) if s == "uniformly_distributed" => Some(false),
-                    _ => None // anything else is an error
-                };
-
-                // a third entry, if present, would be the optional cutoff for a
-                // normal distribution
-                let max_radius = vs.get(2).and_then(|s| input.evaluate(s));
-
-                if let (Some(r), Some(b)) = (radius, normally_distributed) {
-                    Ok((r, b, max_radius))
-                } else {
-                    report!(
-                        Diagnostic::Error, id == 0, concat!(
-                        "beam radius must be specified with a single numerical value, e.g.,\n",
-                        "         radius: 2.0e-6\n",
-                        "       or as a numerical value and a distribution, e.g.,\n",
-                        "         radius: [2.0e-6, uniformly_distributed]\n",
-                        "         radius: [2.0e-6, normally_distributed]."
-                    ));
-                    Err(InputError::conversion("beam:radius", "radius"))
-                }
-            })
-            .or_else(|e| {
-                // if radius is just missing (as opposed to malformed), return 0.0
-                if e.kind() == InputErrorKind::Conversion {
-                    Err(e)
-                } else {
-                    Ok((0.0, true, None))
-                }
-            })?;
 
         let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
             .or_else(|e| match e.kind() {
@@ -906,17 +913,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
             .with_polarization(sv)
-            .with_length(length);
-
-        let builder = if normally_distributed {
-            if let Some(r_max) = max_radius {
-                builder.with_trunc_normally_distributed_xy(radius, radius, r_max, r_max)
-            } else {
-                builder.with_normally_distributed_xy(radius, radius)
-            }
-        } else {
-            builder.with_uniformly_distributed_xy(radius)
-        };
+            .with_longitudinal_dstr(z_dstr)
+            .with_transverse_dstr(x_dstr);
 
         BeamParameters::FromRng { builder }
     };
@@ -1190,7 +1188,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let primaries = match beam {
             BeamParameters::FromRng { ref builder } => {
-                let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
+                let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z();
                 builder.clone().with_initial_z(initial_z).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
@@ -1564,7 +1562,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                                 .with_unit(units.length.name())?
                                 .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
                                 .write(&r_max.convert(&units.length))?
-                            .new_dataset("length")?.with_unit(units.length.name())?.write(&builder.sigma_z.convert(&units.length))?
+                            .new_dataset("length")?.with_unit(units.length.name())?.write(&builder.sigma_z().convert(&units.length))?
                             .new_dataset("rms_divergence")?.with_unit("rad")?.write(&builder.rms_div)?
                             .new_dataset("polarization")?
                                 .with_unit("1")?
