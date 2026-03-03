@@ -205,7 +205,7 @@ impl FieldData {
         }
         psi[0] = psi[1];
 
-        let r = (0.5 * consts::PI / dphi) as i32;
+        let r = (1.0 * consts::PI / dphi) as i32;
         let mut dpsi_dphi = psi_cont; // reuse
         Self::gaussian_filter(&psi, &mut dpsi_dphi, r)?;
 

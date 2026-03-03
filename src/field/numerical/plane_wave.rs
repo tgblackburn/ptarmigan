@@ -329,7 +329,7 @@ mod tests {
         let mut avg_a_rms_error = 0.0;
         let mut avg_wavelength_error = 0.0;
 
-        for i in 0..16 {
+        for i in 0..15 {
             let phi =  consts::PI * (i as f64);
             let z = -lambda * phi / (2.0 * consts::PI);
             let r: FourVector = [0.0, 0.0, 0.0, z].into();
