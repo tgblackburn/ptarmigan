@@ -16,7 +16,7 @@ mod plane_wave;
 pub use plane_wave::NumericalPW;
 
 mod hilbert;
-use hilbert::AnalyticalSignal;
+use hilbert::{ AnalyticalSignal, Bandpass };
 
 /// Data necessary to define a custom field structure
 #[allow(unused)]
@@ -103,7 +103,7 @@ impl FieldData {
         Ok(())
     }
 
-    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], waist: f64, pol: Polarization) -> Result<Self, FieldDataError> {
+    pub fn preprocess(coord: Coordinate, delta: f64, field: &[f64], high_pass: f64, waist: f64, pol: Polarization) -> Result<Self, FieldDataError> {
         // Start by computing the carrier frequency
         let mut planner = FftPlanner::new();
         let mut buffer: Vec<Complex64> = field.iter().map(|ex| ex.into()).collect();
@@ -156,6 +156,8 @@ impl FieldData {
         // phi = omega (t - z/c) => reverse order if function of z
         let mut field = field.to_vec();
         if coord == Coordinate::Space { field.reverse(); }
+
+        field.high_pass_filter(delta, high_pass);
 
         // In order to get paraxial components, or circular polarisation,
         // we need the analytical signal from the fields, i.e. the complex
@@ -316,7 +318,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, 0.0, std::f64::INFINITY, Polarization::Linear).unwrap();
         let params = laser.params;
 
         let print_data = false;

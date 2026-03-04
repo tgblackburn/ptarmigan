@@ -323,7 +323,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space, dz, &field, std::f64::INFINITY, Polarization::Linear).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space, dz, &field, 0.0, std::f64::INFINITY, Polarization::Linear).unwrap();
         let laser: NumericalPW = laser.into();
 
         let mut avg_a_rms_error = 0.0;
@@ -378,7 +378,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, waist, Polarization::Linear).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, 0.0, waist, Polarization::Linear).unwrap();
         let laser: NumericalPW = laser.into();
 
         for phi in [0.0, 2.0 * consts::PI, 8.0 * consts::PI, 14.0 * consts::PI].iter() {

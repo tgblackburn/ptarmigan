@@ -55,6 +55,8 @@ and optionally:
 
 * `scale_field_by` (default is `1.0`): if specified, the electric-field values read in from the file will be multiplied by this value.
 Intended to facilitate intensity scans, given a numerically defined pulse shape.
+* `high_pass` (default is `0.0`): if specified, applies a filter to the electric field that passes all frequencies (or wavenumbers) higher than the given value.
+The units are expected to be consistent with `axis` and `step`, i.e. Hz if `axis` is `t` or inverse metres if `axis` is `z`.
 
 Ptarmigan will preprocess the electric-field values to determine the pulse's amplitude, wavelength and duration.
 The detected values will be printed to standard output and written to `[ident]_particles.h5/config/laser` if HDF5 output is requested.

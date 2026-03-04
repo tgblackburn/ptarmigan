@@ -447,6 +447,12 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 Err(InputError::import("laser:from_plain_text:file", "file"))
             })?;
 
+        let high_pass = input.read("laser:from_plain_text:high_pass")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(0.0),
+            })?;
+
         let waist = input.read("laser:waist")
             .or_else(|e| match e.kind() {
                 InputErrorKind::Conversion => Err(e),
@@ -468,7 +474,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             })?;
 
         // At this point, we need to do a bit of work to extract the a0, wavelength etc.
-        let data = FieldData::preprocess(coord, step, &field, waist, pol)
+        let data = FieldData::preprocess(coord, step, &field, high_pass, waist, pol)
             .map_err(|err| {
                 report!(Diagnostic::Error, id == 0, "unable to preprocess custom laser: {}.", err.cause);
                 InputError::conversion("laser:from_file", "from_file")

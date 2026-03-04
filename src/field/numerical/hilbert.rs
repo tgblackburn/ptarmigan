@@ -64,3 +64,41 @@ impl AnalyticalSignal for [Complex64] {
         buffer
     }
 }
+
+pub trait Bandpass {
+    /// Applies a high pass filter to the data, assuming the
+    /// given spacing between points
+    fn high_pass_filter(&mut self, delta: f64, min: f64);
+}
+
+impl Bandpass for [f64] {
+    fn high_pass_filter(&mut self, delta: f64, min: f64) {
+        let mut planner = FftPlanner::new();
+        let n = self.len();
+        let mut buffer: Vec<Complex64> = self.iter().map(|x| x.into()).collect();
+
+        let fft = planner.plan_fft_forward(n);
+        fft.process(&mut buffer);
+
+        // Find index equivalent to cutoff freq
+        // 0..n/2 equiv to 0..1/delta
+        let index = 0.5 * (n as f64) * min * delta;
+        let index = index.ceil() as usize;
+        let index = index.min(n - 1);
+
+        for i in 0..index {
+            buffer[i] *= 0.0;
+        }
+
+        for i in (n-index)..n {
+            buffer[i] *= 0.0;
+        }
+
+        let fft = planner.plan_fft_inverse(n);
+        fft.process(&mut buffer);
+
+        for i in 0..n {
+            self[i] = buffer[i].re / (n as f64);
+        }
+    }
+}
