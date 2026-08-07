@@ -83,7 +83,7 @@ mod tests {
         ];
 
         for (x, target) in args.iter().zip(targets.iter()) {
-            let value = x.erf();
+            let value = Erf::erf(x);
             let error = (target - value) / target;
             println!("x = {:.3}, erf = {:.6e}, err = {:.3e}", x, value, error);
             assert!(error.abs() < 1.0e-12);
@@ -123,7 +123,7 @@ mod tests {
         let mut rms_err = 0.0;
         for i in -20..20 {
             let x = 0.01 + 0.14 * (i as f64);
-            let y = x.erf().inv_erf();
+            let y = Erf::erf(&x).inv_erf();
             let err = (y - x) / x;
             rms_err += err * err;
         }

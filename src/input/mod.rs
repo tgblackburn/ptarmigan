@@ -6,6 +6,7 @@ use yaml_rust::{YamlLoader, yaml::Yaml};
 use evalexpr::*;
 
 use crate::constants::*;
+use crate::special_functions::Erf;
 
 mod error;
 mod types;
@@ -100,7 +101,7 @@ impl Config {
         context_function!(ctx, "round",  f64::round);
         context_function!(ctx, "signum", f64::signum);
 
-        context_function!(ctx, "erf",      |x: f64| (167.0 * x / 148.0 + 11.0 * x.powi(3) / 109.0).tanh());
+        context_function!(ctx, "erf",      |x: f64| Erf::erf(&x));
         context_function!(ctx, "step",     |x: f64, min: f64, max: f64| {if x >= min && x < max {1.0} else {0.0}}, 3);
         context_function!(ctx, "gauss",    |x: f64, mu: f64, sigma: f64| (-(x - mu).powi(2) / (2.0 * sigma.powi(2))).exp(), 3);
         context_function!(ctx, "critical", |omega: f64| VACUUM_PERMITTIVITY * ELECTRON_MASS * omega.powi(2) / ELEMENTARY_CHARGE.powi(2));

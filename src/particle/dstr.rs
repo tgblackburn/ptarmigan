@@ -43,7 +43,8 @@ impl SpatialDistribution {
                 match dim {
                     1 => {
                         let multiplier = if let Some(max) = max {
-                            (max / (consts::SQRT_2 * sigma)).erf()
+                            let arg = max / (consts::SQRT_2 * sigma);
+                            Erf::erf(&arg)
                         } else {
                             1.0
                         };
@@ -86,7 +87,7 @@ impl SpatialDistribution {
             SpatialDistribution::Normal { sigma, max, dim: _ } => {
                 if let Some(max) = max {
                     let arg = max / (consts::SQRT_2 * sigma);
-                    let var = sigma * (sigma - (2.0 / consts::PI).sqrt() * max * (-arg * arg).exp() / arg.erf());
+                    let var = sigma * (sigma - (2.0 / consts::PI).sqrt() * max * (-arg * arg).exp() / Erf::erf(&arg));
                     var.sqrt()
                 } else {
                     *sigma
@@ -295,7 +296,8 @@ impl GammaDistribution {
 
                     let dz = {
                         // NORTA method: transform from N(0,1) to U(0,1)
-                        let u = 0.5 * (1.0 + (n0 / consts::SQRT_2).erf());
+                        let arg = n0 / consts::SQRT_2;
+                        let u = 0.5 * (1.0 + Erf::erf(&arg));
                         z_dstr.sample(u)
                     };
 
@@ -332,7 +334,8 @@ impl GammaDistribution {
                 };
 
                 // NORTA method: transform from N(0,1) to U(0,1)
-                let u1 = 0.5 * (1.0 + (n1 / consts::SQRT_2).erf());
+                let arg = n1 / consts::SQRT_2;
+                let u1 = 0.5 * (1.0 + Erf::erf(&arg));
                 let u1 = u1.clamp(0.0, 1.0);
 
                 let gamma = match order {
@@ -365,7 +368,8 @@ impl GammaDistribution {
 
                 let dz = {
                     // NORTA method: transform from N(0,1) to U(0,1)
-                    let u = 0.5 * (1.0 + (n0 / consts::SQRT_2).erf());
+                    let arg = n0 / consts::SQRT_2;
+                    let u = 0.5 * (1.0 + Erf::erf(&arg));
                     z_dstr.sample(u)
                 };
 
