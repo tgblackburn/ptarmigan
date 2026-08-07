@@ -26,9 +26,14 @@ Alternatively, you can specify a custom spectrum in a sub-section of `beam`:
 * `spectrum`:
   * `function`: a mathematical expression for the spectrum as a function of `gamma`, **or**:
   * `file`: path to a plain-text file of new-line separated values of the spectrum, evaluated at evenly spaced points.
+  The values are assumed to be `f(min), f(min + step), ..., f(max - step), f(max)`, i.e. inclusive of the values of the spectrum at the bounds `min` and `max`.
   * `min`: the minimum value of the Lorentz factor.
   * `max`: the maximum value of the Lorentz factor, **or**, if reading from a file:
   * `step` (optional): the spacing between sampling points.
+  * `interpolation_order` (optional, default = `1`): use linear (`1`) or quadratic (`2`) interpolation when evaluating the spectrum between points.
+
+Ptarmigan will sample Lorentz factors from the half-open interval `min <= gamma < max`.
+The spectrum does not need to be normalised, but it must satisfy `f(gamma) >= 0` over the specified interval.
 
 Examples:
 
@@ -84,10 +89,26 @@ Ptarmigan will look up named parameters (`mu`, `alpha` and `sigma`) in the [cons
 
 ### Spatial distribution
 
-* `radius` (optional, default = `0.0`): if a single value is specified, the beam is given a cylindrically symmetric Gaussian charge distribution, with specified standard deviation in radius (metres). The distribution is set explicitly if a tuple of `[radius, dstr]` is given. `dstr` may be either `normally_distributed` (the default) or `uniformly_distributed`. In the latter case, `radius` specifies the maximum, rather than the standard deviation.
-The distribution (if normal) may be optionally truncated by specifying `[radius, normally_distributed, max_radius]`.
-* `length` (optional, default = `0.0`): standard deviation of the (Gaussian) charge distribution along the beam propagation axis (metres)
+* `radius` (optional, default = `0.0`): specify the beam distribution in the plane orthogonal to the propagation axis as `[value, dstr]`, where `dstr` is one of `normally_distributed` or `uniformly_distributed`.
+
+  * If `dstr` is `normally_distributed`, `value` is interpreted as the standard deviation σ of the distribution in both of the transverse directions: ⟨x<sup>2</sup>⟩ = ⟨y<sup>2</sup>⟩ = ⟨σ<sup>2</sup>⟩.
+  The distribution may optionally be truncated to a disk of radius `max_r` by specifying `[std_dev, normally_distributed, max_r]`.
+  * If `dstr` is `uniformly_distributed`, the particles will be distributed uniformly over a disk of radius `value`.
+  * A single value, with no specified distribution, will be interpreted as `[value, normally_distributed]`.
+
+* `length` (optional, default = `0.0`): specify the beam distribution along the propagation axis as `[value, dstr]`, where `dstr` is one of `normally_distributed` or `uniformly_distributed`.
+
+  * If `dstr` is `normally_distributed`, `value` is interpreted as the standard deviation of the distribution.
+  The distribution may optionally be truncated such that no particle is more than `max_dz` from the beam centroid by specifying `[std_dev, normally_distributed, max_dz]`.
+  * If `dstr` is `uniformly_distributed`, `value` is interpreted as the total length of the beam.
+  * A single value, with no specified distribution, will be interpreted as `[value, normally_distributed]`.
+
 * `energy_chirp` (optional, default = `0.0`): if specified, introduces a correlation of the requested magnitude between the particle's energy and its longitudinal offset from the beam centroid. A positive chirp means that the head of the beam (which hits the laser first) has higher energy than the tail. The specified value must be between -1 and +1.
+
+> [!NOTE]
+> `radius`, `length` etc describe the beam's extrapolated spatial distribution at time zero (when the laser pulses passes through focus).
+> Ptarmigan initialises the particles' positions by propagating them backwards to a suitable reference point.
+> This means that if the beam has some divergence, its transverse profile will shrink and then expand as it passes through the collision point.
 
 ### Spin and polarization
 

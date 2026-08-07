@@ -4,10 +4,12 @@
 mod bessel;
 mod airy;
 mod double_bessel;
+mod erf;
 
 pub use bessel::*;
 pub use airy::*;
 pub use double_bessel::*;
+pub use erf::*;
 
 const SERIES_MAX_LENGTH: usize = 20;
 

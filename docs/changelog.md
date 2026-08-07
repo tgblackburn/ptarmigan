@@ -1,5 +1,22 @@
 # Changelog <!-- {docsify-ignore-all} -->
 
+## v1.6.1
+
+2026-08-07
+
+Added:
+
+* Importing user-defined laser pulses.
+Read in a custom waveform from a file and then simulate a collision using the LCFA or LMA.
+* Particle beam distribution along propagation axis can be normal or uniform (i.e. flat-top).
+
+Fixed:
+
+* Sign of instantaneous acceleration for positrons (needed for polarization-resolved emission in CP lasers).
+* Treatment of bounds (as inclusive) when importing custom energy spectra.
+* Failing test for numerically defined, chirped pulses.
+* Ordering in initialisation of beam divergence and radius; radius now defined w.r.t. time zero.
+
 ## v1.5.0
 
 2025-06-04

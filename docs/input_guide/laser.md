@@ -1,5 +1,10 @@
 # Specifying a laser pulse
 
+There are two ways to specify the colliding laser pulse.
+Ptarmigan can either use an analytically defined set of electric and magnetic fields, based on the parameters read in from the input file, or read in a numerically defined pulse.
+
+## Analytically defined fields
+
 ### Basic information
 
 * `a0`: the laser strength parameter, normalized amplitude, etc.
@@ -10,6 +15,7 @@ Alternatively, specifying `a0:start`, `a0:step` and `a0:stop` will run a single 
 * `polarization`: the polarization of the carrier wave, either `linear` or `circular`.
 In LP, the default is that the electric field is parallel to the `x` axis.
 Change this by specifying `linear || x`, `linear || y` or `linear @ angle`, where the `angle` is defined with respect to the `x` axis.
+In CP, the default handedness is *left*, i.e. the electric field rotates clockwise around the direction of propagation.
 
 ### Transverse profile
 
@@ -34,3 +40,35 @@ at which the intensity falls to $1/e^2$ of its maximum value. Otherwise the lase
 * `fwhm_duration` (if `envelope: gaussian`): the full width at half max of the *intensity envelope*, in seconds.
 * `n_cycles` (if `envelope: cos^2` or `flattop`): the total duration of the pulse, expressed in wavelengths. Usually (but not required to be) an integer.
 * `chirp_coeff` (optional, ignored if `waist` is specified): specifies `b`, the chirp coefficient, which appears in the total phase `ϕ + b ϕ^2` of the laser carrier wave. A positive `b` leads to an instantaneous frequency that increases linearly from head to tail.
+
+## Numerically defined fields
+
+In order to read in a pulse from a plain-text file, create a subsection called `from_plain_text` under `laser` and specify:
+
+* `file`: the name of a plain-text formatted file, which contains electric-field values (one per line).
+Ptarmigan will assume these values are given in units of volts per metre.
+* `axis`: either `t` (time) or `z` (space).
+In the latter case, the pulse is assumed to be propagating towards positive z.
+* `step`: the interval between points along the specified axis, in seconds or metres as appropriate, where the electric-field values are defined.
+
+and optionally:
+
+* `scale_field_by` (default is `1.0`): if specified, the electric-field values read in from the file will be multiplied by this value.
+Intended to facilitate intensity scans, given a numerically defined pulse shape.
+* `high_pass` (default is `0.0`): if specified, applies a filter to the electric field that passes all frequencies (or wavenumbers) higher than the given value.
+The units are expected to be consistent with `axis` and `step`, i.e. Hz if `axis` is `t` or inverse metres if `axis` is `z`.
+
+Ptarmigan will preprocess the electric-field values to determine the pulse's amplitude, wavelength and duration.
+The detected values will be printed to standard output and written to `[ident]_particles.h5/config/laser` if HDF5 output is requested.
+Additionally, the electric field, rms amplitude and local wavelength (as functions of phase) will be written to `[ident]_particles.h5/final-state/laser`.
+It is the user's responsibility to ensure that the density of points and the total interval are large enough to capture the entire pulse with sufficient accuracy.
+
+The following keys may be specified under the `laser` heading itself, as in the case of an [analytically defined field](#analytically-defined-fields):
+
+* `polarization`: (optional, default = `linear`): the polarization of the carrier wave, either `linear` or `circular`.
+* `waist` (optional, default is infinity): if specified, the laser pulse will additionally be given a Gaussian transverse profile, where `waist` is the radius
+at which the intensity falls to $1/e^2$ of its maximum value.
+
+If the subsection `from_plain_text` is present, it will be prioritized and the parameters given in [Analytically defined fields](#analytically-defined-fields) will be ignored.
+
+An example of a custom laser pulse may be found in `examples/custom_laser`.

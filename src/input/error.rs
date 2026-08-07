@@ -9,6 +9,7 @@ pub enum InputErrorKind {
     File,
     Location,
     Conversion,
+    Import,
 }
 
 /// Error returned when Config::read fails.
@@ -26,6 +27,7 @@ impl fmt::Debug for InputError {
             InputErrorKind::File => write!(f, "unable to open configuration file.\n       {}.\n{}", self.cause, help_msg),
             InputErrorKind::Location => write!(f, "failed to follow specified path \"{}\": component \"{}\" is missing.", self.path, self.cause),
             InputErrorKind::Conversion => write!(f, "could not convert field \"{}\" to target type.", self.cause),
+            InputErrorKind::Import => write!(f, "unable to import from \"{}\".", self.path),
         }
     }
 }
@@ -58,6 +60,14 @@ impl InputError {
     pub fn conversion(path: &str, cause: &str) -> Self {
         Self {
             kind: InputErrorKind::Conversion,
+            path: path.to_owned(),
+            cause: cause.to_owned(),
+        }
+    }
+
+    pub fn import(path: &str, cause: &str) -> Self {
+        Self {
+            kind: InputErrorKind::Import,
             path: path.to_owned(),
             cause: cause.to_owned(),
         }

@@ -82,7 +82,7 @@ pub(super) fn vay_push(r: FourVector, ui: FourVector, E: ThreeVector, B: ThreeVe
 /// magnetic field `B`.
 #[allow(non_snake_case)]
 #[inline(always)]
-pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dv1: f64, dv2: f64, a: f64, dt: f64, rng: &mut R, mode: RadiationMode, uncertainty: f64) -> Option<RadiationEvent> {
+pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dv1: f64, dv2: f64, a: f64, rqm: f64, dt: f64, rng: &mut R, mode: RadiationMode, uncertainty: f64) -> Option<RadiationEvent> {
     let classical = mode == RadiationMode::Classical;
     let beta = ThreeVector::from(u) / u[0];
     let E_rf_sqd = (E + SPEED_OF_LIGHT * beta.cross(B)).norm_sqr() - (E * beta).powi(2);
@@ -135,7 +135,7 @@ pub(super) fn radiate<R: Rng>(u: FourVector, E: ThreeVector, B: ThreeVector, dv1
 
         if let Some(theta) = theta {
             let long: ThreeVector = beta.normalize();
-            let w = -(E - (long * E) * long / E.norm_sqr().sqrt() + SPEED_OF_LIGHT * beta.cross(B)).normalize();
+            let w = rqm.signum() * (E - (long * E) * long / E.norm_sqr().sqrt() + SPEED_OF_LIGHT * beta.cross(B)).normalize();
             let perp: ThreeVector = w.rotate_around(long, cphi);
             let k: ThreeVector = omega_mc2 * (theta.cos() * long + theta.sin() * perp);
             let k = FourVector::lightlike(k[0], k[1], k[2]);
