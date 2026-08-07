@@ -16,6 +16,7 @@ pub use loader::BeamLoader;
 
 mod dstr;
 pub use dstr::GammaDistribution;
+pub use dstr::SpatialDistribution;
 
 mod shower;
 pub use shower::*;

@@ -166,16 +166,18 @@ fn collide<F: Field, R: Rng>(field: &F, incident: Particle, rng: &mut R, current
 
         match pt.species() {
             Species::Electron | Species::Positron => {
+                let rqm = pt.charge_to_mass_ratio();
+
                 while field.contains(pt.position()) && pt.time() < options.t_stop {
                     let (r, mut u, dt_actual, work_done) = field.push(
                         pt.position(),
                         pt.normalized_momentum(),
-                        pt.charge_to_mass_ratio(),
+                        rqm,
                         dt,
                         eqn,
                     );
 
-                    if let Some(event) = field.radiate(r, u, dt_actual, rng, mode) {
+                    if let Some(event) = field.radiate(r, u, rqm, dt_actual, rng, mode) {
                         let id = *current_id;
                         *current_id = *current_id + 1;
                         let photon = Particle::create(Species::Photon, r)
@@ -396,79 +398,192 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             val
         });
 
-    let a0_values: Vec<f64> = input.read_loop("laser:a0")?;
-    let wavelength: f64 = input
-        .read("laser:wavelength")
-        .or_else(|_e|
-            // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
-            input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
-        )?;
+    // Electromagnetic field properties
 
-    let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
-        .and_then(|s| match s.as_str() {
-            "circular" => Ok((Polarization::Circular, 0.0)),
-            "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
-            "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
-            _ => {
-                if let Some(expr) = s.strip_prefix("linear @") {
-                    if let Some(pol_angle) = input.evaluate(expr) {
-                        Ok((Polarization::Linear, pol_angle))
+    // Check if we're reading from a file first.
+
+    let fields = if input.read::<String, _>("laser:from_plain_text:file").is_ok() {
+        let filename: String = input.read("laser:from_plain_text:file")?;
+        let filename = format!("{}{}{}", output_dir, if output_dir.is_empty() {""} else {"/"}, filename);
+
+        if id == 0 {
+            println!("{} incident laser from {}...", "Importing".bold().cyan(), filename.bold().blue());
+        }
+
+        let step: f64 = input.read("laser:from_plain_text:step")?;
+
+        // Check that axis is valid
+        let coord = input.read::<String, _>("laser:from_plain_text:axis")
+            .and_then(|s| match s.as_str() {
+                "z" => Ok(Coordinate::Space),
+                "t" => Ok(Coordinate::Time),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "invalid axis (\"{}\"). Imported field data must be a function of z or t.", s);
+                    Err(InputError::conversion("laser:from_plain_text:axis", "axis"))
+                }
+            })
+            ?;
+
+        // Check for optional scale factor
+        let scale: f64 = input.read("laser:from_plain_text:scale_field_by")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(1_f64),
+            })?;
+
+        // Read the contents of the file
+        let field = std::fs::read_to_string(&filename)
+            .or_else(|_| {
+                report!(Diagnostic::Error, id == 0, "unable to open \"{}\": no such file or directory.", filename);
+                Err(InputError::import("laser:from_plain_text:file", "file"))
+            })?
+            .lines()
+            .map(|s| {
+                s.parse::<f64>().map(|ex| scale * ex)
+            })
+            .collect::<Result<Vec<f64>,_>>()
+            .or_else(|_| {
+                report!(Diagnostic::Error, id == 0, "unable to import \"{}\" as a 1D array of field values.", filename);
+                Err(InputError::import("laser:from_plain_text:file", "file"))
+            })?;
+
+        let high_pass = input.read("laser:from_plain_text:high_pass")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(0.0),
+            })?;
+
+        let waist = input.read("laser:waist")
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(std::f64::INFINITY),
+            })?;
+
+        let pol = input.read::<String, _>("laser:polarization")
+            .and_then(|s| match s.as_str() {
+                "circular" => Ok(Polarization::Circular),
+                "linear" => Ok(Polarization::Linear),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear' or 'circular' for numerically defined pulses.");
+                    Err(InputError::conversion("laser:polarization", "polarization"))
+                },
+            })
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok(Polarization::Linear),
+            })?;
+
+        // At this point, we need to do a bit of work to extract the a0, wavelength etc.
+        let data = FieldData::preprocess(coord, step, &field, high_pass, waist, pol)
+            .map_err(|err| {
+                report!(Diagnostic::Error, id == 0, "unable to preprocess custom laser: {}.", err.cause);
+                InputError::conversion("laser:from_file", "from_file")
+            })?;
+
+        let params = data.params();
+
+        if id == 0 {
+            println!(
+                "{} import, detected a0 = {:.2e}, wavelength = {:.2e} m, duration = {:.2e} cycles.",
+                "Completed".bold().bright_green(), params.a0, params.wavelength, params.n_cycles,
+            );
+        }
+
+        let fs = FieldStructure::Numerical { data };
+        vec![fs]
+    } else {
+        // Field structure will be defined analytically, using values from the input file.
+
+        let a0s: Vec<f64> = input.read_loop("laser:a0")?;
+
+        let wavelength: f64 = input
+            .read("laser:wavelength")
+            .or_else(|_e|
+                // attempt to read a frequency instead, e.g. 'omega: 1.55 * eV'
+                input.read("laser:omega").map(|omega: f64| 2.0 * consts::PI * COMPTON_TIME * ELECTRON_MASS * SPEED_OF_LIGHT.powi(3) / omega)
+            )?;
+
+        let (pol, pol_angle) = input.read::<String, _>("laser:polarization")
+            .and_then(|s| match s.as_str() {
+                "circular" => Ok((Polarization::Circular, 0.0)),
+                "linear" | "linear || x" => Ok((Polarization::Linear, 0.0)),
+                "linear || y" => Ok((Polarization::Linear, consts::FRAC_PI_2)),
+                _ => {
+                    if let Some(expr) = s.strip_prefix("linear @") {
+                        if let Some(pol_angle) = input.evaluate(expr) {
+                            Ok((Polarization::Linear, pol_angle))
+                        } else {
+                            report!(Diagnostic::Error, id == 0, "linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                            Err(InputError::conversion("laser:polarization", "polarization"))
+                        }
                     } else {
-                        report!(Diagnostic::Error, id == 0, "linear polarization specified, but '{}' is not a valid angle.", expr.trim());
+                        report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear [|| x or y]' or 'circular'.");
                         Err(InputError::conversion("laser:polarization", "polarization"))
                     }
-                } else {
-                    report!(Diagnostic::Error, id == 0, "laser polarization must be 'linear [|| x or y]' or 'circular'.");
-                    Err(InputError::conversion("laser:polarization", "polarization"))
                 }
-            }
-        })
-        ?;
-
-    let (focusing, waist) = input
-        .read("laser:waist")
-        .map(|w| (true, w))
-        .unwrap_or((false, std::f64::INFINITY));
-
-    let envelope = input.read::<String, _>("laser:envelope")
-        .and_then(|s| match s.as_str() {
-            "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
-            "flattop" | "flat-top" => Ok(Envelope::Flattop),
-            "gauss" | "gaussian" => Ok(Envelope::Gaussian),
-            _ => {
-                report!(Diagnostic::Error, id == 0, "laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
-                Err(InputError::conversion("laser:envelope", "envelope"))
-            }
-        })
-        .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
-
-    let n_cycles: f64 = match envelope {
-        Envelope::CosSquared => input.read("laser:n_cycles")?,
-        Envelope::Flattop => {
-            input.read("laser:n_cycles")
-                .and_then(|n: f64| if n < 1.0 {
-                    report!(Diagnostic::Error, id == 0, "'n_cycles' must be >= 1.0 for flattop lasers.");
-                    Err(InputError::conversion("laser:envelope", "envelope"))
-                } else {
-                    Ok(n)
-                })?
-        },
-        Envelope::Gaussian => {
-            input.read("laser:fwhm_duration")
-                .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
-                .or_else(|_e| input.read("laser:n_cycles"))?
-        }
-    };
-
-    let chirp_b = if !focusing {
-        input.read("laser:chirp_coeff").unwrap_or(0.0)
-    } else {
-        input.read("laser:chirp_coeff")
-            .map(|_: f64| {
-                report!(Diagnostic::Warning, id == 0, "chirp parameter ignored for focusing laser pulses.");
-                0.0
             })
-            .unwrap_or(0.0)
+            ?;
+
+        let (focusing, waist) = input
+            .read("laser:waist")
+            .map(|w| (true, w))
+            .or_else(|e| match e.kind() {
+                InputErrorKind::Conversion => Err(e),
+                _ => Ok((false, std::f64::INFINITY)),
+            })?;
+
+        let envelope = input.read::<String, _>("laser:envelope")
+            .and_then(|s| match s.as_str() {
+                "cos2" | "cos^2" | "cos_sqd" | "cos_squared" => Ok(Envelope::CosSquared),
+                "flattop" | "flat-top" => Ok(Envelope::Flattop),
+                "gauss" | "gaussian" => Ok(Envelope::Gaussian),
+                _ => {
+                    report!(Diagnostic::Error, id == 0, "laser envelope must be one of 'cos^2', 'flattop' or 'gaussian'.");
+                    Err(InputError::conversion("laser:envelope", "envelope"))
+                }
+            })
+            .unwrap_or_else(|_| if focusing {Envelope::Gaussian} else {Envelope::CosSquared});
+
+        let n_cycles: f64 = match envelope {
+            Envelope::CosSquared => input.read("laser:n_cycles")?,
+            Envelope::Flattop => {
+                input.read("laser:n_cycles")
+                    .and_then(|n: f64| if n < 1.0 {
+                        report!(Diagnostic::Error, id == 0, "'n_cycles' must be >= 1.0 for flattop lasers.");
+                        Err(InputError::conversion("laser:envelope", "envelope"))
+                    } else {
+                        Ok(n)
+                    })?
+            },
+            Envelope::Gaussian => {
+                input.read("laser:fwhm_duration")
+                    .map(|t: f64| SPEED_OF_LIGHT * t / wavelength)
+                    .or_else(|_e| input.read("laser:n_cycles"))?
+            }
+        };
+
+        let chirp_b = if !focusing {
+            input.read("laser:chirp_coeff").unwrap_or(0.0)
+        } else {
+            input.read("laser:chirp_coeff")
+                .map(|_: f64| {
+                    report!(Diagnostic::Warning, id == 0, "chirp parameter ignored for focusing laser pulses.");
+                    0.0
+                })
+                .unwrap_or(0.0)
+        };
+
+        let fs: Vec<FieldStructure> = a0s
+            .iter()
+            .map(|a0| {
+                let params = LaserParameters {
+                    a0: *a0, wavelength, pol, pol_angle, focusing, waist, envelope, n_cycles, chirp_b
+                };
+                FieldStructure::Analytical { params }
+            })
+            .collect();
+
+        fs
     };
 
     // Particle beam properties
@@ -533,7 +648,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     let beam = if input.contains("beam:from_hdf5") {
         #[cfg(not(feature = "hdf5-output"))] {
             report!(Diagnostic::Error, id == 0, "cannot import particles from file (Ptarmigan not compiled with HDF5 support).");
-            return Err(InputError::conversion("beam:from_hdf5:file", "file").into());
+            return Err(InputError::import("beam:from_hdf5:file", "file").into());
         }
 
         #[cfg(feature = "hdf5-output")] {
@@ -612,6 +727,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
             let analytical = input.contains("beam:spectrum:function");
             let numerical = input.contains("beam:spectrum:file");
+            let order = input.read("beam:spectrum:interpolation_order").unwrap_or(1_i64) as i32;
 
             if analytical && numerical {
                 report!(Diagnostic::Error, id == 0, "specify a function or a file in beam:spectrum, not both.");
@@ -625,13 +741,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     .unwrap_or((10.0 + 2.0 * (npart as f64).cbrt()) as usize);
                 let step = (max - min) / (n as f64);
 
-                let vals: Vec<f64> = (0..n)
+                let vals: Vec<f64> = (0..=n)
                     .map(|i| func(min + (i as f64) * step))
                     .collect();
 
-                GammaDistribution::custom(vals, min, max, step)
-                    .ok_or_else(|| {
-                        report!(Diagnostic::Error, id == 0, "beam:spectrum:function evaluated to non-numerical values in the specified domain.");
+                GammaDistribution::custom(vals, min, max, step, order)
+                    .map_err(|e| {
+                        report!(Diagnostic::Error, id == 0, "specified function invalid because {}.", e);
                         InputError::conversion("beam:spectrum:function", "function")
                     })?
             } else {
@@ -647,15 +763,15 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                 // Read the contents of the file
                 let vals = std::fs::read_to_string(&filename)
                     .or_else(|_| {
-                        report!(Diagnostic::Error, id == 0, "Unable to open \"{}\": no such file or directory.", filename);
-                        Err(InputError::location("beam:spectrum:file", "file"))
+                        report!(Diagnostic::Error, id == 0, "unable to open \"{}\": no such file or directory.", filename);
+                        Err(InputError::import("beam:spectrum:file", "file"))
                     })?
                     .lines()
                     .map(|s| s.parse::<f64>())
                     .collect::<Result<Vec<f64>,_>>()
                     .or_else(|_| {
-                        report!(Diagnostic::Error, id == 0, "Unable to import \"{}\" as a 1D array of spectral values.", filename);
-                        Err(InputError::conversion("beam:spectrum:file", "file"))
+                        report!(Diagnostic::Error, id == 0, "unable to import \"{}\" as a 1D array of spectral values.", filename);
+                        Err(InputError::import("beam:spectrum:file", "file"))
                     })?;
 
                 let n = vals.len() - 1; // number of steps, not entries
@@ -668,10 +784,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                     })
                     ?;
 
-                GammaDistribution::custom(vals, min, max, step)
-                    .ok_or_else(|| {
-                        report!(Diagnostic::Error, id == 0, "beam:spectrum:file contains non-numerical values.");
-                        InputError::conversion("beam:spectrum:file", "file")
+                GammaDistribution::custom(vals, min, max, step, order)
+                    .map_err(|e| {
+                        report!(Diagnostic::Error, id == 0, "imported spectrum invalid because {}.", e);
+                        InputError::import("beam:spectrum:file", "file")
                     })?
             }
         } else if use_brem_spec {
@@ -692,50 +808,57 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         // Spatial structure
 
-        let length: f64 = input.read("beam:length").unwrap_or(0.0);
+        fn read_spatial_dstr(input: &Config, name: &str, dim: i32, id: i32) -> Result<SpatialDistribution, InputError> {
+            let vs: Vec<String> = input.read(name)
+                .unwrap_or_else(|_| vec![]);
+
+            // whether a single f64 or a tuple of [f64, dstr],
+            // the first value must be the radius/length
+            let length = vs.first()
+                .map_or(Some(0_f64), |s| input.evaluate(s))
+                .ok_or_else(|| InputError::conversion("beam", name));
+
+            // a second entry, if present, is a distribution spec
+            let normally_distributed = vs.get(1)
+                .map_or(
+                    Ok(true),
+                    |s| match s.as_str() {
+                        "normally_distributed" => Ok(true),
+                        "uniformly_distributed" => Ok(false),
+                        _ => Err(InputError::conversion("beam", name)),
+                    });
+
+            // a third entry, if present, would be the optional cutoff for a
+            // normal distribution
+            let max_length: Option<f64> = vs.get(2)
+                .and_then(|s| input.evaluate(s));
+
+            if let (Ok(len), Ok(ndstr)) = (length, normally_distributed) {
+                if ndstr {
+                    Ok(SpatialDistribution::normal(len, max_length, dim))
+                } else {
+                    Ok(SpatialDistribution::uniform(len, dim))
+                }
+            } else {
+                let key = name.split(":").last().unwrap();
+                report!(
+                    Diagnostic::Error, id == 0, concat!(
+                    "beam {0} must be specified with a single numerical value, e.g.,\n",
+                    "         {0}: 2.0e-6\n",
+                    "       or as a numerical value and a distribution, e.g.,\n",
+                    "         {0}: [2.0e-6, uniformly_distributed]\n",
+                    "         {0}: [2.0e-6, normally_distributed]."
+                    ),
+                    key
+                );
+                Err(InputError::conversion(name, key))
+            }
+        }
+
+        let z_dstr = read_spatial_dstr(&input, "beam:length", 1, id)?;
+        let x_dstr = read_spatial_dstr(&input, "beam:radius", 2, id)?;
 
         let rms_div: f64 = input.read("beam:rms_divergence").unwrap_or(0.0);
-
-        let (radius, normally_distributed, max_radius) = input.read::<Vec<String>,_>("beam:radius")
-            .and_then(|vs| {
-                // whether a single f64 or a tuple of [f64, dstr],
-                // the first value must be the radius
-                let radius = vs.first().map(|s| input.evaluate(s)).flatten();
-
-                // a second entry, if present, is a distribution spec
-                let normally_distributed = match vs.get(1) {
-                    None => Some(true), // if not specified at all, assume normally distributed
-                    Some(s) if s == "normally_distributed" => Some(true),
-                    Some(s) if s == "uniformly_distributed" => Some(false),
-                    _ => None // anything else is an error
-                };
-
-                // a third entry, if present, would be the optional cutoff for a
-                // normal distribution
-                let max_radius = vs.get(2).and_then(|s| input.evaluate(s));
-
-                if let (Some(r), Some(b)) = (radius, normally_distributed) {
-                    Ok((r, b, max_radius))
-                } else {
-                    report!(
-                        Diagnostic::Error, id == 0, concat!(
-                        "beam radius must be specified with a single numerical value, e.g.,\n",
-                        "         radius: 2.0e-6\n",
-                        "       or as a numerical value and a distribution, e.g.,\n",
-                        "         radius: [2.0e-6, uniformly_distributed]\n",
-                        "         radius: [2.0e-6, normally_distributed]."
-                    ));
-                    Err(InputError::conversion("beam:radius", "radius"))
-                }
-            })
-            .or_else(|e| {
-                // if radius is just missing (as opposed to malformed), return 0.0
-                if e.kind() == InputErrorKind::Conversion {
-                    Err(e)
-                } else {
-                    Ok((0.0, true, None))
-                }
-            })?;
 
         let energy_chirp = input.read::<f64, _>("beam:energy_chirp")
             .or_else(|e| match e.kind() {
@@ -796,17 +919,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .with_offset(offset)
             .with_energy_chirp(energy_chirp)
             .with_polarization(sv)
-            .with_length(length);
-
-        let builder = if normally_distributed {
-            if let Some(r_max) = max_radius {
-                builder.with_trunc_normally_distributed_xy(radius, radius, r_max, r_max)
-            } else {
-                builder.with_normally_distributed_xy(radius, radius)
-            }
-        } else {
-            builder.with_uniformly_distributed_xy(radius)
-        };
+            .with_longitudinal_dstr(z_dstr)
+            .with_transverse_dstr(x_dstr);
 
         BeamParameters::FromRng { builder }
     };
@@ -995,8 +1109,21 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
     }
 
     // Simulation building and running starts here
-    for (run, a0_v) in a0_values.iter().enumerate() {
-        let a0: f64 = *a0_v; 
+    for (run, field) in fields.iter().enumerate() {
+    // for (run, a0_v) in a0_values.iter().enumerate() {
+        // let a0: f64 = *a0_v;
+        let LaserParameters {
+                a0,
+                wavelength,
+                pol,
+                pol_angle,
+                focusing,
+                waist,
+                envelope,
+                n_cycles,
+                chirp_b,
+            } = field.params();
+
         // Rare event sampling for pair creation
         let pair_rate_increase = input.read::<f64,_>("control:increase_pair_rate_by")
             // if increase is not specified at all, default to unity
@@ -1039,7 +1166,13 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             rng.jump();
         }
 
-        let laser: Laser = if focusing && !using_lcfa {
+        let laser: Laser = if let Some(data) = field.is_numerical() {
+            if using_lcfa {
+                NumericalFastPW::from(data).into()
+            } else {
+                NumericalPW::from(data).into()
+            }
+        } else if focusing && !using_lcfa {
             FocusedLaser::new(a0, wavelength, waist, n_cycles, pol, pol_angle)
                 .with_envelope(envelope)
                 .with_finite_bandwidth(finite_bandwidth)
@@ -1061,13 +1194,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let primaries = match beam {
             BeamParameters::FromRng { ref builder } => {
-                let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z;
-                builder.clone().with_initial_z(initial_z).build(&mut rng)
+                builder.clone().with_initial_z(laser.ideal_initial_z()).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
             BeamParameters::FromHdf5 { ref loader } => {
-                let initial_z = laser.ideal_initial_z();
-                loader.clone().with_initial_z(initial_z).build(&world)?
+                loader.clone().with_initial_z(laser.ideal_initial_z()).build(&world)?
             }
         };
 
@@ -1077,8 +1208,8 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         if id == 0 {
             println!("{} {} task{} with {} primary particles per task...", "Running".bold().cyan(), ntasks, if ntasks > 1 {"s"} else {""}, num);
-            if a0_values.len() > 1 {
-                println!("\t* sim {} of {} at a0 = {}", run + 1, a0_values.len(), a0);
+            if fields.len() > 1 {
+                println!("\t* sim {} of {} at a0 = {}", run + 1, fields.len(), a0);
             }
             #[cfg(feature = "with-mpi")] {
                 println!("\t* with MPI support enabled");
@@ -1215,7 +1346,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         }
 
         // Updating 'ident' in case of a0 looping
-        let current_ident: String = if a0_values.len() > 1 {
+        let current_ident: String = if fields.len() > 1 {
             format!("{}{}a0_{:.3}", ident, if ident.is_empty() {""} else {"_"}, a0)
         }
         else {
@@ -1435,7 +1566,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                                 .with_unit(units.length.name())?
                                 .with_desc("density distribution is cut off at this perpendicular distance from the beam axis")?
                                 .write(&r_max.convert(&units.length))?
-                            .new_dataset("length")?.with_unit(units.length.name())?.write(&builder.sigma_z.convert(&units.length))?
+                            .new_dataset("length")?.with_unit(units.length.name())?.write(&builder.sigma_z().convert(&units.length))?
                             .new_dataset("rms_divergence")?.with_unit("rad")?.write(&builder.rms_div)?
                             .new_dataset("polarization")?
                                 .with_unit("1")?
@@ -1694,9 +1825,10 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                             .write(&p[..])?;
                 }
 
-                fs.new_group("laser")?
-                    .only_task(0)
-                    .new_dataset("energy")?
+                let lsrg = fs.new_group("laser")?
+                    .only_task(0);
+
+                lsrg.new_dataset("energy")?
                         .with_unit(&energy_unit)?
                         .with_desc("total energy of the laser pulse")?
                         .with_condition(|| focusing)
@@ -1710,6 +1842,40 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
                         .with_unit("J")?
                         .with_desc("energy absorbed from the laser")?
                         .write(&total_absorption)?;
+
+                if let Some(data) = field.is_numerical() {
+                    let delta = match data.params().pol {
+                        Polarization::Linear => 0.5,
+                        Polarization::Circular => 1.0,
+                    };
+                    let a_rms: Vec<f64> = data.a_sqd().iter().map(|a2| (delta * a2).sqrt()).collect();
+                    let local_lambda: Vec<f64> = data.inst_norm_freq().iter().map(|s| wavelength / s).collect();
+                    let ex: Vec<f64> = data.electric_field().iter().map(|e| e.re).collect();
+
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&true)?
+                        .new_dataset("electric_field")?
+                            .with_alias("ex")?
+                            .with_unit("V/m")?
+                            .with_desc("transverse electric field")?
+                            .write(&ex[..])?
+                        .new_dataset("a_rms")?
+                            .with_unit("1")?
+                            .with_desc("envelope of the RMS normalised potential")?
+                            .write(&a_rms[..])?
+                        .new_dataset("local_wavelength")?
+                            .with_unit("m")?
+                            .with_desc("wavelength equivalent to the instantaneous angular frequency")?
+                            .write(&local_lambda[..])?
+                        .new_dataset("phase_step")?
+                            .with_alias("dphi")?
+                            .with_unit("1")?
+                            .with_desc("phase difference between adjacent values of ex, a_rms etc")?
+                            .write(&data.phase_step())?;
+                } else {
+                    lsrg.new_dataset("imported_from_file")?
+                            .write(&false)?;
+                }
             },
             OutputMode::None => {},
         }
