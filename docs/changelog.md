@@ -1,8 +1,8 @@
 # Changelog <!-- {docsify-ignore-all} -->
 
-## v1.6.0
+## v1.6.1
 
-In progress.
+2026-08-07
 
 Added:
 
