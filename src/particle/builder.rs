@@ -175,24 +175,20 @@ impl BeamBuilder {
                     Species::Photon => FourVector::lightlike(u[0], u[1], u[2]),
                 };
 
-                let (t, z) = if self.offset[2] >= 0.0 {
-                    // beam is further away
-                    (-self.initial_z, self.initial_z + self.offset[2] + dz)
-                } else {
-                    // beam is closer to focal plane, push backwards
-                    (-self.initial_z - self.offset[2].abs(), self.initial_z + dz)
-                };
-
                 let r = self.r_dstr.sample(rng.gen());
                 let theta = 2.0 * consts::PI * rng.gen::<f64>();
-                let x = r * theta.cos();
-                let y = r * theta.sin();
 
-                let (x, y) = (x + self.offset[0], y + self.offset[1]);
-                let r = ThreeVector::new(x, y, z);
+                let r = ThreeVector::new(r * theta.cos(), r * theta.sin(), dz) + self.offset;
                 let r = r.rotate_around_y(self.angle);
                 let r = r.rotate_around_z(self.collision_plane_angle);
-                let r = FourVector::new(t, r[0], r[1], r[2]);
+                let r = r.with_time(0.0);
+
+                // Displace particles to starting point:
+                // Initialise particle at r^- = t - z = -2 z0, using r(t) = r(0) + beta * t
+                let r = {
+                    let beta = u / u[0];
+                    r - (2.0 * self.initial_z + r[0] - r[3]) * beta / (beta[0] - beta[3])
+                };
 
                 Particle::create(self.species, r)
                     .with_normalized_momentum(u)

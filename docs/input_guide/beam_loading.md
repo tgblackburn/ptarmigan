@@ -15,15 +15,16 @@ All other quantities will be imported from the external file.
 At present, Ptarmigan will accept only HDF5-formatted input.
 The HDF5 file in question must either be the output of a Ptarmigan simulation, or have compatible structure.
 
-?> [PICA](https://github.com/hixps/pica) (Polarized ICS CAlculator) produces output that is compatible with Ptarmigan.
+> [!TIP]
+> [PICA](https://github.com/hixps/pica) (Polarized ICS CAlculator) produces output that is compatible with Ptarmigan.
 
 In a sub-section of `beam` named `from_hdf5`, provide:
 
 * `from_hdf5`:
   * `file`: path to the HDF5 file that stores the particle data, relative to the location of the input file.
-  * `distance_between_ips`: the distance between the origin of the coordinate system, used by the imported particle beam, and the laser collision point, in metres.
+  * `distance_bt_ips`: the distance between the origin of the coordinate system, used by the imported particle beam, and the laser collision point, in metres.
   This is used to propagate the particles between the interaction points, assuming ballistic drift.
-  A `distance_between_ips` of `0.0` is perfectly fine: it means that the particle positions are defined with respect to the laser collision point.
+  A `distance_bt_ips` of `0.0` is perfectly fine: it means that the particle positions are defined with respect to the laser collision point.
   * `auto_timing` (optional, default = `true`): disable this to prevent Ptarmigan propagating the particles between the interaction points.
   Positions specified in the external file will be respected: for example, if a particle has a position `[0.0, 0.0, 0.0, 0.0]`, it will be initialised inside the laser pulse at time zero.
   * `min_energy` (optional, default = `0.0`): if specified, skip any particles that have less energy than this threshold, during import.

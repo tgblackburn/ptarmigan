@@ -105,6 +105,11 @@ Ptarmigan will look up named parameters (`mu`, `alpha` and `sigma`) in the [cons
 
 * `energy_chirp` (optional, default = `0.0`): if specified, introduces a correlation of the requested magnitude between the particle's energy and its longitudinal offset from the beam centroid. A positive chirp means that the head of the beam (which hits the laser first) has higher energy than the tail. The specified value must be between -1 and +1.
 
+> [!NOTE]
+> `radius`, `length` etc describe the beam's extrapolated spatial distribution at time zero (when the laser pulses passes through focus).
+> Ptarmigan initialises the particles' positions by propagating them backwards to a suitable reference point.
+> This means that if the beam has some divergence, its transverse profile will shrink and then expand as it passes through the collision point.
+
 ### Spin and polarization
 
 * `stokes_pars` (optional, default = `[0.0, 0.0, 0.0]`): specifies the primary particles' polarization in terms of the three Stokes parameters `S_1`, `S_2` and `S_3` (equiv. `Q`, `U` and `V`).

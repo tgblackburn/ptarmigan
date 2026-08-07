@@ -15,6 +15,7 @@ Fixed:
 * Sign of instantaneous acceleration for positrons (needed for polarization-resolved emission in CP lasers).
 * Treatment of bounds (as inclusive) when importing custom energy spectra.
 * Failing test for numerically defined, chirped pulses.
+* Ordering in initialisation of beam divergence and radius; radius now defined w.r.t. time zero.
 
 ## v1.5.0
 

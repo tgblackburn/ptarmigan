@@ -1194,13 +1194,11 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
         let primaries = match beam {
             BeamParameters::FromRng { ref builder } => {
-                let initial_z = laser.ideal_initial_z() + 3.0 * builder.sigma_z();
-                builder.clone().with_initial_z(initial_z).build(&mut rng)
+                builder.clone().with_initial_z(laser.ideal_initial_z()).build(&mut rng)
             },
             #[cfg(feature = "hdf5-output")]
             BeamParameters::FromHdf5 { ref loader } => {
-                let initial_z = laser.ideal_initial_z();
-                loader.clone().with_initial_z(initial_z).build(&world)?
+                loader.clone().with_initial_z(laser.ideal_initial_z()).build(&world)?
             }
         };
 
