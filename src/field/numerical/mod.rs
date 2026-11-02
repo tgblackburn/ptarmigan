@@ -318,7 +318,7 @@ mod tests {
             })
             .collect();
 
-        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, 0.0, std::f64::INFINITY, Polarization::Linear).unwrap();
+        let laser = FieldData::preprocess(Coordinate::Space,dz, &field, 0.0, f64::INFINITY, Polarization::Linear).unwrap();
         let params = laser.params;
 
         let print_data = false;

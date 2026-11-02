@@ -645,7 +645,7 @@ mod table_generation {
 
         let path = "output/nbw_rate_table.rs";
         let mut file = File::create(&path).unwrap();
-        writeln!(file, "use std::f64::NEG_INFINITY;").unwrap();
+        writeln!(file, "const NEG_INFINITY: f64 = f64::NEG_INFINITY;").unwrap();
         writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
         writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
         writeln!(file, "pub const LN_MIN_A: f64 = {:.16e};", LOW_A_LIMIT.ln()).unwrap();

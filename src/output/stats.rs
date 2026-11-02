@@ -133,12 +133,12 @@ impl SummaryStatistic {
             let rs: Vec<String> = rs.iter().map(|&s| s.replace(char::is_whitespace, "")).collect();
             let (min, max) = if rs.len() == 2 {
                 let min = if rs[0] == "auto" {
-                    Some(std::f64::NEG_INFINITY)
+                    Some(f64::NEG_INFINITY)
                 } else {
                     parser(&rs[0])
                 };
                 let max = if rs[1] == "auto" {
-                    Some(std::f64::INFINITY)
+                    Some(f64::INFINITY)
                 } else {
                     parser(&rs[1])
                 };
@@ -154,7 +154,7 @@ impl SummaryStatistic {
                 return Err(OutputError::conversion(spec, "summary statistic"));
             }
         } else {
-            (std::f64::NEG_INFINITY, std::f64::INFINITY)
+            (f64::NEG_INFINITY, f64::INFINITY)
         };
 
         //println!("Bounds are {:e} to {:e}", min, max);
@@ -347,7 +347,7 @@ impl SummaryStatistic {
     }
 
     fn min(&self, pt: &[Particle]) -> f64 {
-        let mut min = std::f64::INFINITY;
+        let mut min = f64::INFINITY;
         for p in pt {
             let within_bounds = if self.filter.is_some() {
                 let f = self.filter.as_ref().unwrap().f;
@@ -365,7 +365,7 @@ impl SummaryStatistic {
     }
 
     fn max(&self, pt: &[Particle]) -> f64 {
-        let mut max = std::f64::NEG_INFINITY;
+        let mut max = f64::NEG_INFINITY;
         for p in pt {
             let within_bounds = if self.filter.is_some() {
                 let f = self.filter.as_ref().unwrap().f;
@@ -437,13 +437,13 @@ impl SummaryStatistic {
             Reduction::Variance => self.variance(pt, world),
             Reduction::Minimum => {
                 let local = self.min(pt);
-                let mut global = std::f64::INFINITY;
+                let mut global = f64::INFINITY;
                 world.all_reduce_into(&local, &mut global, SystemOperation::min());
                 global
             },
             Reduction::Maximum => {
                 let local = self.max(pt);
-                let mut global = std::f64::NEG_INFINITY;
+                let mut global = f64::NEG_INFINITY;
                 world.all_reduce_into(&local, &mut global, SystemOperation::max());
                 global
             },
@@ -598,7 +598,7 @@ mod tests {
         println!("Got stat = {}", stat);
         assert_eq!(stat.op, Reduction::Mean);
         assert_eq!(stat.min, 1.0);
-        assert_eq!(stat.max, std::f64::INFINITY);
+        assert_eq!(stat.max, f64::INFINITY);
 
         let test = "variance angle_x`energy";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
@@ -606,8 +606,8 @@ mod tests {
         assert_eq!(stat.op, Reduction::Variance);
         assert!(stat.filter.is_none());
         assert!(stat.weight.name == "energy");
-        assert_eq!(stat.min, std::f64::NEG_INFINITY);
-        assert_eq!(stat.max, std::f64::INFINITY);
+        assert_eq!(stat.min, f64::NEG_INFINITY);
+        assert_eq!(stat.max, f64::INFINITY);
 
         let test = "frac pelican in (0.0; 1.0)";
         let stat = SummaryStatistic::load(test, &parser);
@@ -621,7 +621,7 @@ mod tests {
         println!("Got stat = {}", stat);
         assert_eq!(stat.op, Reduction::Fraction);
         assert!(stat.filter.is_some());
-        assert_eq!(stat.min, std::f64::NEG_INFINITY);
+        assert_eq!(stat.min, f64::NEG_INFINITY);
         assert_eq!(stat.max, 100.0);
 
         let test = "total r_perp for p^- in (a / (1.0 + a) * MeV/c; 1000.0 * MeV/c)";
@@ -648,8 +648,8 @@ mod tests {
         assert_eq!(stat.op, Reduction::CircMean);
         assert!(stat.filter.is_none());
         assert!(stat.weight.name == "energy");
-        assert_eq!(stat.min, std::f64::NEG_INFINITY);
-        assert_eq!(stat.max, std::f64::INFINITY);
+        assert_eq!(stat.min, f64::NEG_INFINITY);
+        assert_eq!(stat.max, f64::INFINITY);
 
         let test = "circvar angle_x`energy";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
@@ -657,8 +657,8 @@ mod tests {
         assert_eq!(stat.op, Reduction::CircVar);
         assert!(stat.filter.is_none());
         assert!(stat.weight.name == "energy");
-        assert_eq!(stat.min, std::f64::NEG_INFINITY);
-        assert_eq!(stat.max, std::f64::INFINITY);
+        assert_eq!(stat.min, f64::NEG_INFINITY);
+        assert_eq!(stat.max, f64::INFINITY);
 
         let test = "cstd angle_x`energy";
         let stat = SummaryStatistic::load(test, &parser).unwrap();
@@ -666,8 +666,8 @@ mod tests {
         assert_eq!(stat.op, Reduction::CircStdDev);
         assert!(stat.filter.is_none());
         assert!(stat.weight.name == "energy");
-        assert_eq!(stat.min, std::f64::NEG_INFINITY);
-        assert_eq!(stat.max, std::f64::INFINITY);
+        assert_eq!(stat.min, f64::NEG_INFINITY);
+        assert_eq!(stat.max, f64::INFINITY);
 
         let test = "circvar energy";
         let stat = SummaryStatistic::load(test, &parser);

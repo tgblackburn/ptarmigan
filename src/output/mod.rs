@@ -96,14 +96,14 @@ impl Filter {
         // All remaining words (up to the comma) form a math expression
         let min_expr: String = word.collect();
         let min = if min_expr.as_str() == "auto" {
-            std::f64::NEG_INFINITY
+            f64::NEG_INFINITY
         } else {
             parser(&min_expr).ok_or_else(error)?
         };
 
         // Everything after the comma should be a math expression as well
         let max = if suffix.trim() == "auto" {
-            std::f64::INFINITY
+            f64::INFINITY
         } else {
             parser(suffix).ok_or_else(error)?
         };
@@ -139,8 +139,8 @@ impl Default for Filter {
         Self {
             func: None,
             name: "no".to_owned(),
-            min: std::f64::NEG_INFINITY,
-            max: std::f64::INFINITY,
+            min: f64::NEG_INFINITY,
+            max: f64::INFINITY,
         }
     }
 }

@@ -129,12 +129,13 @@ impl BeamBuilder {
     #[cfg(feature = "hdf5-output")]
     pub fn radius(&self) -> (f64, f64) {
         match self.r_dstr {
-            SpatialDistribution::Normal { sigma, max, dim: _ } => (sigma, max.unwrap_or(std::f64::INFINITY)),
+            SpatialDistribution::Normal { sigma, max, dim: _ } => (sigma, max.unwrap_or(f64::INFINITY)),
             SpatialDistribution::Disk { max, dim: _ } => (max, max),
         }
     }
 
     /// Root mean square displacement of a particle from the beam centroid, along the beam propagation axis
+    #[cfg(feature = "hdf5-output")]
     pub fn sigma_z(&self) -> f64 {
         self.z_dstr.std_dev()
     }

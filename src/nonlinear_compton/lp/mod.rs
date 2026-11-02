@@ -1205,7 +1205,6 @@ mod tests {
         }
 
         let mut file = File::create("output/rate_table.rs").unwrap();
-        //writeln!(file, "use std::f64::NEG_INFINITY;").unwrap();
         writeln!(file, "pub const N_COLS: usize = {};", N_COLS).unwrap();
         writeln!(file, "pub const N_ROWS: usize = {};", N_ROWS).unwrap();
         writeln!(file, "pub const MIN: [f64; 2] = [{:.12e}, {:.12e}];", LOW_A_LIMIT.ln(), LOW_ETA_LIMIT.ln()).unwrap();

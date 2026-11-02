@@ -1,4 +1,4 @@
-use std::f64::NEG_INFINITY;
+const NEG_INFINITY: f64 = f64::NEG_INFINITY;
 pub const N_COLS: usize = 25;
 pub const N_ROWS: usize = 61;
 pub const LN_MIN_A: f64 = -2.3025850929940459e0;

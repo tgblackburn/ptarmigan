@@ -217,12 +217,12 @@ impl Histogram {
         // Local min and max
         // Adjust for log-scaling!
         let (min, max) = if bspec == BinSpec::LogScaled {
-            min_max_by(base, accessor, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, accessor, filter, f64::ln).unwrap_or((f64::MAX, -f64::MAX))
         } else {
-            min_max_by(base, accessor, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, accessor, filter, std::convert::identity).unwrap_or((f64::MAX, -f64::MAX))
         };
-        //let min = base.iter().map(accessor).min_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(std::f64::MAX);
-        //let max = base.iter().map(accessor).max_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(-std::f64::MAX);
+        //let min = base.iter().map(accessor).min_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(f64::MAX);
+        //let max = base.iter().map(accessor).max_by(|a,b| a.partial_cmp(b).unwrap() ).unwrap_or(-f64::MAX);
         //println!("{}: Local min = {:e}, max = {:e}, num = {}", name, min, max, base.len());
 
         //Global min and max
@@ -334,15 +334,15 @@ impl Histogram {
         // Local min and max
 
         let (xmin, xmax) = if bspec[0] == BinSpec::LogScaled {
-            min_max_by(base, fx, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fx, filter, f64::ln).unwrap_or((f64::MAX, -f64::MAX))
         } else {
-            min_max_by(base, fx, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fx, filter, std::convert::identity).unwrap_or((f64::MAX, -f64::MAX))
         };
 
         let (ymin, ymax) = if bspec[1] == BinSpec::LogScaled {
-            min_max_by(base, fy, filter, f64::ln).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fy, filter, f64::ln).unwrap_or((f64::MAX, -f64::MAX))
         } else {
-            min_max_by(base, fy, filter, std::convert::identity).unwrap_or((std::f64::MAX, -std::f64::MAX))
+            min_max_by(base, fy, filter, std::convert::identity).unwrap_or((f64::MAX, -f64::MAX))
         };
 
         let min = [xmin, ymin];

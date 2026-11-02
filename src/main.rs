@@ -456,7 +456,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let waist = input.read("laser:waist")
             .or_else(|e| match e.kind() {
                 InputErrorKind::Conversion => Err(e),
-                _ => Ok(std::f64::INFINITY),
+                _ => Ok(f64::INFINITY),
             })?;
 
         let pol = input.read::<String, _>("laser:polarization")
@@ -529,7 +529,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             .map(|w| (true, w))
             .or_else(|e| match e.kind() {
                 InputErrorKind::Conversion => Err(e),
-                _ => Ok((false, std::f64::INFINITY)),
+                _ => Ok((false, f64::INFINITY)),
             })?;
 
         let envelope = input.read::<String, _>("laser:envelope")
@@ -1228,7 +1228,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
             dt_multiplier,
             rate_increase: pair_rate_increase,
             t_stop: match t_stop {
-                StopAt::SameTime | StopAt::Automatic => std::f64::INFINITY,
+                StopAt::SameTime | StopAt::Automatic => f64::INFINITY,
                 StopAt::GivenTime(t) => t
             },
             discard_bg_e,
@@ -1282,7 +1282,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
         let t_stop_global = match t_stop {
             StopAt::SameTime => {
                 // which particle got furthest?
-                let mut ct_local = std::f64::NEG_INFINITY;
+                let mut ct_local = f64::NEG_INFINITY;
                 for pt in bunch.iter() {
                     let ct = pt.position()[0];
                     if ct > ct_local { ct_local = ct; }
@@ -1314,7 +1314,7 @@ fn ptarmigan_main<C: Communicator>(world: C) -> Result<(), Box<dyn Error>> {
 
                 ct_global / SPEED_OF_LIGHT
             },
-            _ => std::f64::INFINITY,
+            _ => f64::INFINITY,
         };
 
         #[cfg(not(feature = "hdf5-output"))]

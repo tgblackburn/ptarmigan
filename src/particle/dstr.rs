@@ -82,6 +82,7 @@ impl SpatialDistribution {
         Self::Disk { max, dim }
     }
 
+    #[cfg(feature = "hdf5-output")]
     pub fn std_dev(&self) -> f64 {
         match self {
             SpatialDistribution::Normal { sigma, max, dim: _ } => {
