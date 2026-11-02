@@ -21,6 +21,7 @@ enum Reduction {
     Fraction,
     Mean,
     Variance,
+    Skewness,
     Minimum,
     Maximum,
     CircMean,
@@ -35,6 +36,7 @@ impl fmt::Display for Reduction {
             Reduction::Fraction => "fraction",
             Reduction::Mean => "mean",
             Reduction::Variance => "variance",
+            Reduction::Skewness => "skewness",
             Reduction::Minimum => "minimum",
             Reduction::Maximum => "maximum",
             Reduction::CircMean => "circmean",
@@ -167,6 +169,7 @@ impl SummaryStatistic {
                     "fraction" | "frac" => Reduction::Fraction,
                     "mean" => Reduction::Mean,
                     "variance" | "var" => Reduction::Variance,
+                    "skewness" | "skew" => Reduction::Skewness,
                     "minimum" | "min" => Reduction::Minimum,
                     "maximum" | "max" => Reduction::Maximum,
                     "circmean" | "cmean" => Reduction::CircMean,
@@ -195,6 +198,7 @@ impl SummaryStatistic {
                         } else {
                             Unit::new(1.0, &format!("({})^2", unit.name()))
                         },
+                        Reduction::Skewness => Unit::new(1.0, "1"),
                         Reduction::CircVar => Unit::new(1.0, "1"),
                         _ => unit.clone(),
                     };
@@ -346,6 +350,89 @@ impl SummaryStatistic {
         variance
     }
 
+fn skewness(&self, pt: &[Particle], comm: &impl Communicator) -> f64 {
+    // Guess the mean first, as in variance().
+    let local = {
+        let mut total = 0.0;
+        let mut count = 0.0;
+
+        for p in pt.iter().take(10) {
+            let within_bounds = if let Some(ref filter) = self.filter {
+                (filter.f)(p) > self.min && (filter.f)(p) < self.max
+            } else {
+                true
+            };
+
+            if within_bounds {
+                let val = (self.variable.f)(p);
+                let weight = (self.weight.f)(p);
+
+                total += weight * val;
+                count += weight;
+            }
+        }
+
+        [total, count]
+    };
+
+    let approx_mean = {
+        let mut global = [0.0; 2];
+        comm.all_reduce_into(&local[..], &mut global[..], SystemOperation::sum());
+        global[0] / global[1]
+    };
+
+    // Accumulate weighted moments about the approximate mean.
+    let mut sum_diffs = 0.0;
+    let mut sum_sq_diffs = 0.0;
+    let mut sum_cu_diffs = 0.0;
+    let mut count = 0.0;
+
+    for p in pt {
+        let within_bounds = if let Some(ref filter) = self.filter {
+            (filter.f)(p) > self.min && (filter.f)(p) < self.max
+        } else {
+            true
+        };
+
+        if within_bounds {
+            let val = (self.variable.f)(p);
+            let weight = (self.weight.f)(p);
+
+            let diff = val - approx_mean;
+            let diff_sq = diff * diff;
+
+            sum_diffs += weight * diff;
+            sum_sq_diffs += weight * diff_sq;
+            sum_cu_diffs += weight * diff_sq * diff;
+            count += weight;
+        }
+    }
+
+    // Combine moments across all MPI processes.
+    let local = [sum_diffs, sum_sq_diffs, sum_cu_diffs, count];
+    let mut global = [0.0f64; 4];
+
+    comm.all_reduce_into(
+        &local[..],
+        &mut global[..],
+        SystemOperation::sum(),
+    );
+
+    let m1 = global[0] / global[3];
+    let m2 = global[1] / global[3];
+    let m3 = global[2] / global[3];
+
+    let variance = m2 - m1 * m1;
+    let third_moment = m3 - 3.0 * m1 * m2 + 2.0 * m1.powi(3);
+
+    // Skewness is undefined if the population is empty or if the variance is zero
+    if global[3] <= 0.0 || variance <= 0.0 {
+        return f64::NAN;
+    }
+
+    third_moment / variance.powf(1.5)
+}
+
     fn min(&self, pt: &[Particle]) -> f64 {
         let mut min = f64::INFINITY;
         for p in pt {
@@ -418,6 +505,7 @@ impl SummaryStatistic {
                 world.all_reduce_into(&total, &mut gtotal, SystemOperation::sum());
                 gtotal
             },
+
             Reduction::Fraction => {
                 let (total, subtotal, _) = self.total(pt);
                 let mut gsubtotal = 0.0;
@@ -426,6 +514,7 @@ impl SummaryStatistic {
                 world.all_reduce_into(&subtotal, &mut gsubtotal, SystemOperation::sum());
                 gsubtotal / gtotal
             },
+
             Reduction::Mean => {
                 let (_, total, count) = self.total(pt);
                 let mut gtotal = 0.0;
@@ -434,19 +523,25 @@ impl SummaryStatistic {
                 world.all_reduce_into(&count, &mut gcount, SystemOperation::sum());
                 gtotal / gcount
             },
+
             Reduction::Variance => self.variance(pt, world),
+
+            Reduction::Skewness => self.skewness(pt, world),
+
             Reduction::Minimum => {
                 let local = self.min(pt);
                 let mut global = f64::INFINITY;
                 world.all_reduce_into(&local, &mut global, SystemOperation::min());
                 global
             },
+
             Reduction::Maximum => {
                 let local = self.max(pt);
                 let mut global = f64::NEG_INFINITY;
                 world.all_reduce_into(&local, &mut global, SystemOperation::max());
                 global
             },
+
             Reduction::CircMean => {
                 let local = self.directmean(pt);
                 let mut global = [0_f64; 3];
@@ -456,6 +551,7 @@ impl SummaryStatistic {
                 // <θ> = arctan(<Y> / <X>)
                 means[1].atan2(means[0])
             },
+
             Reduction::CircVar => {
                 let local = self.directmean(pt);
                 let mut global = [0_f64; 3];
@@ -466,6 +562,7 @@ impl SummaryStatistic {
                 // Circular variance = 1 - <R>
                 1.0 - r_length
             },
+
             Reduction::CircStdDev => {
                 let local = self.directmean(pt);
                 let mut global = [0_f64; 3];
@@ -576,6 +673,15 @@ impl fmt::Display for StatsExpression {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    #[cfg(feature = "with-mpi")]
+    use mpi::environment::Universe;
+
+    #[cfg(not(feature = "with-mpi"))]
+    extern crate no_mpi as mpi;
+
+    static UNIVERSE: OnceLock<Universe> = OnceLock::new();
 
     #[test]
     fn parsing() {
@@ -720,5 +826,40 @@ mod tests {
         assert_eq!(spec.value, 5.0);
         assert!(spec.unit == "mm");
 
+    }
+
+
+    #[test]
+    #[ignore]
+    fn mean_var_skew() {
+        let universe = UNIVERSE.get_or_init(|| mpi::initialize().unwrap());
+        let world = universe.world();
+
+        let values = [
+            0.756213, 0.703589, 0.0716135, -0.0997783, 1.64225,
+            0.0504353, -0.441475, 0.612029, 0.622368, 1.6064,
+            0.205758, 1.06312, -0.524969, 2.38967, 0.393798,
+            0.19428, -0.281378, 0.322486, 0.286598, 0.800654
+        ];
+
+        let mut pt: Vec<Particle> = Vec::new();
+        for x in &values {
+            let e = Particle::create(Species::Electron, [0.0, *x, 0.0, 0.0].into())
+                .with_weight(1.0);
+            pt.push(e);
+        }
+
+        let parser = |s: &str| s.parse::<f64>().ok();
+
+        let specs = ["mean x", "variance x", "skewness x"];
+        let targets = [0.518683, 0.509802, 0.880609];
+
+        for (spec, target) in specs.iter().zip(targets.iter()) {
+            let mut stat = SummaryStatistic::load(spec, parser).unwrap();
+            stat.evaluate(&world, &pt, "electron");
+            let error = (stat.val - target).abs() / target;
+            println!("{}, expected = {:.6e}, error = {:.3e}", stat, target, error);
+            assert!(error < 1.0e-5);
+        }
     }
 }

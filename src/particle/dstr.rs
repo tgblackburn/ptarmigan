@@ -82,7 +82,7 @@ impl SpatialDistribution {
         Self::Disk { max, dim }
     }
 
-    #[cfg(feature = "hdf5-output")]
+    #[allow(unused)]
     pub fn std_dev(&self) -> f64 {
         match self {
             SpatialDistribution::Normal { sigma, max, dim: _ } => {
@@ -382,7 +382,6 @@ impl GammaDistribution {
 
 #[cfg(test)]
 mod tests {
-    use rand::prelude::*;
     use rand_xoshiro::*;
     use super::*;
 

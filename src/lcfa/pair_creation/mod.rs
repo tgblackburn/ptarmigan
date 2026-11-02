@@ -220,7 +220,6 @@ pub fn sample<R: Rng>(ell: FourVector, sv: StokesVector, chi: f64, a_perp: Three
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
     use rand_xoshiro::*;
     use crate::quadrature::*;
     use super::*;

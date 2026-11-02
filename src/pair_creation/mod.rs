@@ -113,7 +113,6 @@ pub fn generate<R: Rng>(ell: FourVector, sv: StokesVector, k: FourVector, a: f64
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
     use rand_xoshiro::*;
     use super::*;
 

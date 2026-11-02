@@ -337,7 +337,6 @@ pub fn sample<R: Rng>(a: f64, eta: f64, rng: &mut R, fixed_n: Option<i32>) -> (i
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
     use rand_xoshiro::*;
     use rayon::prelude::*;
     use super::*;

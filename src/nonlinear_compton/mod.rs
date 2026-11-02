@@ -141,7 +141,6 @@ pub fn generate<R: Rng>(k: FourVector, q: FourVector, pol: Polarization, pol_ang
 mod tests {
     use std::fs::File;
     use std::io::Write;
-    use rand::prelude::*;
     use rayon::prelude::*;
     use super::*;
 

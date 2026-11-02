@@ -100,6 +100,7 @@ where `op` is one of:
 * `fraction`
 * `mean`
 * `variance`
+* `skewness` (the third standardised moment)
 * `minimum`, `maximum`
 * `circmean`, `circvariance`, `circstd`
 
